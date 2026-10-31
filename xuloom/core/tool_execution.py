@@ -153,12 +153,13 @@ async def execute_tool(self, tool_block, sys_print_callback=print, *, turn: int 
             handler = effective_tools[tool_name]
             confinement = self.execution_sandbox
             confinement.check_tool(tool_name)
+            normalized_input = tool_inputs
             if hasattr(handler, "input_schema"):
                 normalized_input = handler.input_schema(**tool_inputs).model_dump()
-                validate_input = getattr(handler, "validate_input", None)
-                validation_error = validate_input(**normalized_input) if callable(validate_input) else None
-                if isinstance(validation_error, str) and validation_error.strip():
-                    raise ToolProtocolError(validation_error)
+            validate_input = getattr(handler, "validate_input", None)
+            validation_error = validate_input(**normalized_input) if callable(validate_input) else None
+            if isinstance(validation_error, str) and validation_error.strip():
+                raise ToolProtocolError(validation_error)
             permission = await self.permission_manager.authorize(
                 handler,
                 tool_inputs,

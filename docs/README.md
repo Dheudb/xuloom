@@ -10,6 +10,7 @@
 | [Skills 与子代理](capabilities.md) | 目录规范、发现顺序、导入与执行 |
 | [MCP 与搜索](mcp.md) | 市场、配置、连接测试和内置搜索 |
 | [项目架构](architecture.md) | 目录职责和运行流程 |
+| [开发者基座严格检查](developer-base-audit.md) | 持续验收清单、证据与尚未完成的边界 |
 | [开发与打包](development.md) | 环境、测试、Windows 运行时与构建产物 |
 | [框架排查记录](framework-audit-2026-10-30.md) | 工具回执、写后记录、Windows Shell、故障注入及验证边界 |
 | [源码对照与加固](framework-source-comparison-2026-10-30.md) | Codex、Pi、DSH 与 Claude 公开资料对照，文件事务、进程和完整输出修复 |

@@ -8,6 +8,7 @@ from contextlib import AsyncExitStack
 from datetime import timedelta
 from urllib.parse import urlsplit
 import ipaddress
+import copy
 import httpx
 
 from xuloom.protocols.mcp_config import MCPConfigStore, validate_server
@@ -44,13 +45,37 @@ class MCPToolWrapper:
         self.description = mcp_tool.description or "MCP tool from " + server_name
         self.mcp_tool_name = mcp_tool.name
         self.session = session
-        self.raw_schema = mcp_tool.inputSchema
+        # jsonschema/referencing are dependencies of the optional MCP SDK.
+        # Never fetch a schema URL on behalf of a connected tool.
+        from jsonschema.validators import validator_for
+        from referencing import Registry
+        from referencing.exceptions import NoSuchResource
+        self.raw_schema = copy.deepcopy(mcp_tool.inputSchema)
+        if isinstance(self.raw_schema, dict) and "$schema" in self.raw_schema and validator_for(self.raw_schema, default=None) is None:
+            raise ValueError("Unsupported MCP JSON Schema dialect")
+        validator = validator_for(self.raw_schema)
+        validator.check_schema(self.raw_schema)
+        def offline(uri):
+            raise NoSuchResource(ref=uri)
+        self._validator = validator(self.raw_schema, registry=Registry(retrieve=offline))
         self.context = {}
         self.is_read_only = False
         self.risk_level = "high"
 
     def get_tool_definition(self):
-        return {"name": self.name, "description": self.description, "input_schema": self.raw_schema}
+        return {"name": self.name, "description": self.description, "input_schema": copy.deepcopy(self.raw_schema)}
+
+    def validate_input(self, **kwargs):
+        try:
+            error = next(self._validator.iter_errors(kwargs), None)
+        except Exception:
+            return "MCP input schema could not be evaluated locally. Ask the server to provide a valid, self-contained schema; no remote operation was executed."
+        if error is not None:
+            # ValidationError.message can embed the entire argument, including
+            # credentials or long file contents. Report paths/constraints only.
+            location = "/" + "/".join(str(part).replace("~", "~0").replace("/", "~1") for part in error.absolute_path)
+            return f"Invalid MCP arguments at {location[:160]}: constraint {str(error.validator)[:40]}. Use the declared input schema; no remote operation was executed."
+        return None
 
     def is_read_only_call(self, **kwargs):
         return False
@@ -65,6 +90,10 @@ class MCPToolWrapper:
         return "MCP tool '" + self.name + "' requested.\n" + "\n".join(str(k) + ": " + str(v)[:160] for k, v in list(kwargs.items())[:4])
 
     async def __call__(self, **kwargs):
+        error = self.validate_input(**kwargs)
+        if error:
+            from xuloom.protocols.dsml import ToolProtocolError
+            raise ToolProtocolError(error)
         try:
             result = await self.session.call_tool(self.mcp_tool_name, arguments=kwargs)
             blocks = []
