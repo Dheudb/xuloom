@@ -11,6 +11,10 @@ from xuloom.features.plans import is_session_plan_file
 from xuloom.branding import configuration_file
 
 
+class PermissionConfigError(ValueError):
+    """An existing policy cannot safely be interpreted as an empty policy."""
+
+
 @dataclass
 class ApprovalPolicy:
     mode: str = "ask"
@@ -167,12 +171,18 @@ class PermissionManager:
         forced_prompt_reasons = (["An interrupted operation has uncertain effects. Inspect existing state before approving a new mutation."]
             if (context or {}).get("recovery_uncertain") and not is_read_only else [])
 
-        rule_decisions = [self._evaluate_rule_layer(request)]
+        try:
+            config = self._load_config()
+        except PermissionConfigError:
+            return self._finalize_permission_decision(tool_name, PermissionDecision("deny",
+                "权限配置无法读取或格式无效，已阻止执行。请修复配置后重试：" + str(self.config_path),
+                source="config_error", metadata={"code": "invalid_permission_config"}), request)
+        rule_decisions = [self._evaluate_rule_layer(request, config)]
         # A smaller wire surface must not bypass existing capability rules.
         # Aliases come from the trusted tool class, never from model input.
         for alias, defaults in getattr(tool, "permission_aliases", {}).items():
             alias_request = replace(request, tool_name=alias, input_payload={**defaults, **request.input_payload})
-            rule_decisions.append(self._evaluate_rule_layer(alias_request))
+            rule_decisions.append(self._evaluate_rule_layer(alias_request, config))
         rule_decision = min((decision for decision in rule_decisions if decision),
             key=lambda decision: {"deny": 0, "ask": 1, "allow": 2}[decision.behavior], default=None)
         if rule_decision and rule_decision.behavior != "allow":
@@ -326,14 +336,43 @@ class PermissionManager:
         return prefix + "\n" + "\n".join(preview_lines)
 
     def _load_config(self) -> Dict[str, Any]:
-        if not os.path.exists(self.config_path):
-            return {}
+        def unique(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result: raise ValueError("Duplicate policy key")
+                result[key] = value
+            return result
         try:
             with open(self.config_path, "r", encoding="utf-8") as f:
-                payload = json.load(f)
-        except Exception:
-            return {}
-        return payload if isinstance(payload, dict) else {}
+                payload = json.load(f, object_pairs_hook=unique)
+            if not isinstance(payload, dict): raise ValueError("Policy must be an object")
+            for key in ("alwaysDeny", "alwaysAsk", "alwaysAllow", "rules"):
+                values = payload.get(key, [])
+                if not isinstance(values, list): raise ValueError("Policy rules must be arrays")
+                for rule in values:
+                    if key != "rules" and isinstance(rule, str): continue
+                    if not isinstance(rule, dict): raise ValueError("Invalid policy rule")
+                    for selector in ("tools", "modes", "risk_levels"):
+                        items = rule.get(selector, [])
+                        if not isinstance(items, list) or not all(isinstance(item, str) for item in items):
+                            raise ValueError("Invalid rule selector")
+                    if "read_only" in rule and not isinstance(rule["read_only"], bool): raise ValueError("Invalid read_only")
+                    if key == "rules" and str(rule.get("behavior", rule.get("action", "ask"))).strip().lower() not in {
+                        "allow", "approve", "accept", "ask", "prompt", "deny", "block", "reject"}:
+                        raise ValueError("Invalid rule behavior")
+                    matchers = rule.get("input_matches", [])
+                    if not isinstance(matchers, list): raise ValueError("Invalid input matchers")
+                    for matcher in matchers:
+                        if not isinstance(matcher, dict): raise ValueError("Invalid matcher")
+                        if "regex" in matcher:
+                            if not isinstance(matcher["regex"], str): raise ValueError("Invalid regex")
+                            re.compile(matcher["regex"])
+            return payload
+        except FileNotFoundError as error:
+            if not os.path.lexists(self.config_path): return {}
+            raise PermissionConfigError("Permission config is unavailable") from error
+        except Exception as error:
+            raise PermissionConfigError("Permission config is invalid or unreadable") from error
 
     def _build_classifier_input(
         self,
@@ -359,8 +398,8 @@ class PermissionManager:
             "turn": context.get("turn"),
         }
 
-    def _evaluate_rule_layer(self, request: PermissionRequest) -> Optional[PermissionDecision]:
-        config = self._load_config()
+    def _evaluate_rule_layer(self, request: PermissionRequest, config=None) -> Optional[PermissionDecision]:
+        config = self._load_config() if config is None else config
         tool_name = request.tool_name
 
         decisions = []
@@ -590,7 +629,7 @@ class PermissionManager:
             self.consecutive_denials[tool_name] = 0
             return finalized
 
-        if behavior == "deny":
+        if behavior == "deny" and decision.source != "config_error":
             self._record_denial(tool_name, finalized)
             finalized.metadata["denial_count_after"] = int(self.consecutive_denials.get(tool_name, 0) or 0)
             return finalized
