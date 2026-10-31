@@ -1287,13 +1287,12 @@ body.panel-resizing iframe { pointer-events: none; }
 .activity-empty { font-size: 13px; color: var(--text-secondary); }
 .status-dot.queued, .status-dot.waiting { background: var(--warning); }
 .status-dot.cancelled, .status-dot.interrupted { background: var(--text-muted); }
-.git-status {
-  font-size: 12px;
-  color: var(--text-muted);
-  background: var(--surface-soft);
-  padding: 12px;
-  border-radius: 6px;
-}
+.git-status { display: flex; align-items: center; gap: 6px; border: 0; border-radius: 6px; background: transparent;
+  padding: 5px 6px; color: var(--text-secondary); font-size: 12px; min-width: 0; max-width: 170px; cursor: pointer; }
+.git-status:hover { background: var(--surface-soft); }
+.git-status > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.git-status > svg, .git-status > i { flex-shrink: 0; }
+.git-status > i { font-style: normal; font-size: 7px; color: var(--text-muted); }
 .diff-view {
   font-size: 12px;
   color: var(--text-secondary);

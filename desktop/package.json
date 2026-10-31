@@ -44,6 +44,7 @@
     "test:extensions": "node tests/extensions.e2e.cjs",
     "test:moves": "node tests/moves.e2e.cjs",
     "test:files": "node tests/files.e2e.cjs",
+    "test:git-status": "node tests/git-status.e2e.cjs",
     "test:html": "node tests/html.e2e.cjs",
     "test:mcp": "node tests/mcp.e2e.cjs",
     "pack": "npm run build && node scripts/pack.cjs"

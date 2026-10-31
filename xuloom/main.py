@@ -289,6 +289,7 @@ def run_command_palette(tui: InteractiveTerminalTUI) -> str:
         options=[
             {"value": "/help", "label": "Show help"},
             {"value": "/status", "label": "View runtime status"},
+            {"value": "/git", "label": "View repository and branch"},
             {"value": "/tools", "label": "View tool activity"},
             {"value": "/todos", "label": "View structured todos"},
             {"value": "/mode", "label": "View current mode"},
@@ -606,7 +607,8 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
                     "  /tools            View tool activity\n"
                     "  /agents           View subagent registry\n"
                     "  /sandbox          View sandbox status\n"
-                    "  /status           View runtime status\n\n"
+                    "  /status           View runtime status\n"
+                    "  /git              View repository and branch\n\n"
                     "[bold white]Model & Provider[/bold white]\n"
                     "  /model            Interactive model/provider switch\n"
                     "  /model status     Show current model runtime\n"
@@ -708,6 +710,10 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
                 continue
             elif normalized_input == "/tools":
                 console.print(Panel(engine.get_tools_summary(), title="Tool Activity", border_style="cyan", expand=False))
+                continue
+            elif normalized_input in {"/git", "/git-status"}:
+                from xuloom.features.workspace_files import git_status
+                console.print_json(data=await git_status(engine.session_cwd))
                 continue
             elif normalized_input == "/status":
                 console.print(Panel(engine.get_runtime_summary(), title="Runtime Status", border_style="cyan", expand=False))
@@ -899,7 +905,7 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
 
 
 def main():
-    if len(sys.argv) > 1 and sys.argv[1] in {"exec", "goal", "schedule"}:
+    if len(sys.argv) > 1 and sys.argv[1] in {"exec", "goal", "schedule", "git-status"}:
         from xuloom.cli import main as noninteractive
         raise SystemExit(noninteractive(sys.argv[1:]))
     import argparse

@@ -16,7 +16,7 @@ from xuloom.security.permissions import ApprovalPolicy
 from xuloom.desktop.activity import restore_activity
 from xuloom.desktop.turns import TurnRecorder, conversation_history
 from xuloom.features.file_changes import legacy_changes, preview_file, preview_image_file
-from xuloom.features.workspace_files import list_directory, git_changes, git_file_diff
+from xuloom.features.workspace_files import list_directory, git_changes, git_file_diff, git_status
 from xuloom.core.storage import session_directory, artifact_directory
 from xuloom.skills.registry import SkillRegistry
 from xuloom.agents.registry import AgentRegistry
@@ -587,6 +587,8 @@ class DesktopBridge:
             return await engine.undo_file(params.get("revisionId"))
         if method == "files.list":
             return list_directory(self.cwd, params.get("path", ""))
+        if method == "git.status":
+            return await git_status(self.cwd)
         if method == "files.gitDiff":
             return await git_file_diff(self.cwd, params.get("path"))
         if method == "capabilities.list":

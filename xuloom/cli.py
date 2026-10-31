@@ -23,6 +23,9 @@ EXIT_CODES = {"completed": 0, "cancelled": 130, "session_busy": 4, "session_conf
 def parser():
     p = argparse.ArgumentParser(prog="xuloom", description="Non-interactive tasks, persisted goals and timed messages")
     sub = p.add_subparsers(dest="command", required=True)
+    status = sub.add_parser("git-status", help="Read repository/branch without a model request")
+    status.add_argument("--cwd", default=os.getcwd())
+    status.add_argument("--json", action="store_true")
     for name in ("exec", "goal", "schedule"):
         item = sub.add_parser(name)
         item.add_argument("--cwd", default=os.getcwd())
@@ -110,6 +113,9 @@ async def open_engine(args, emit):
 
 
 async def dispatch(args, emit):
+    if args.command == "git-status":
+        from xuloom.features.workspace_files import git_status
+        return {"ok": True, "reason": "completed", "git": await git_status(args.cwd)}
     if args.command == "schedule" and args.action in {"list", "pause", "resume", "cancel"}:
         return {"ok": True, "reason": "completed", "data": schedules.list_items() if args.action == "list" else schedules.change(args.id, args.action)}
     if args.command == "goal" and args.action == "status":

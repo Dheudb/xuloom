@@ -40,6 +40,7 @@ import ExecutionDialog from "./ExecutionDialog";
 import SchedulePanel from "./SchedulePanel";
 import GoalEditor from "./GoalEditor";
 import GoalStrip from "./GoalStrip";
+import GitStatus from "./GitStatus";
 import McpDialog from "./McpDialog";
 import SessionSidebar from "./SessionSidebar";
 import { CatalogPreferences } from "./catalog-preferences";
@@ -78,6 +79,7 @@ export default function App() {
   const [opening, setOpening] = useState(true);
   const [notice, setNotice] = useState("");
   const [buildId, setBuildId] = useState("");
+  const [appVersion, setAppVersion] = useState("");
   const [importing, setImporting] = useState(false);
   const [fileDrag, setFileDrag] = useState(false);
   const [attachmentPreview, setAttachmentPreview] = useState<{ name: string; source: string }>();
@@ -121,6 +123,7 @@ export default function App() {
       .then((value) => {
         setGlobalModel(value.config);
         setBuildId(value.buildId || "");
+        setAppVersion(value.version || "");
         setDefaultDirectory(value.workspaceSettings.defaultDirectory);
         if (Number.isFinite(value.layout?.inspectorWidth)) setPanelWidth(value.layout.inspectorWidth);
         if (Number.isFinite(value.layout?.reviewTreeWidth)) setReviewTreeWidth(value.layout.reviewTreeWidth);
@@ -498,7 +501,7 @@ export default function App() {
           </button>
           <div className="local-status">
             <span />
-            本地工作区<span className="version" title={buildId ? "构建 " + buildId : "开发版本"}>v0.1.0{buildId ? " · " + buildId.slice(-4) : ""}</span>
+            本地工作区<span className="version" title={buildId ? "构建 " + buildId : "开发版本"}>{appVersion ? "v" + appVersion : "开发版"}{buildId ? " · " + buildId.slice(-4) : ""}</span>
           </div>
           <button className="sidebar-action" onClick={openSettings}>
             <Settings2 size={16} />
@@ -520,6 +523,7 @@ export default function App() {
             <span>{active ? title.slice(0, 35) : "开始"}</span>
           </div>
           <div className="topbar-actions">
+            {active && <GitStatus key={active.id + active.project} sessionId={active.id} project={active.project} busy={active.busy} />}
             <span className="local-tag">
               <span />
               {active?.busy ? "执行中" : "本地"}

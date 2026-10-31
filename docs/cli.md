@@ -2,6 +2,8 @@
 
 正式非交互任务使用 `xuloom exec "任务" --json`；目标续跑与定时唤醒见 [目标与调度](goals-and-schedules.md)。
 
+读取当前仓库与分支：`xuloom git-status --cwd <目录> --json`；交互模式输入 `/git`。不调用模型，详情见 [Git 状态](git-status.md)。
+
 ## 安装与启动
 
 基础 CLI 需要 Python 3.9+。建议使用 Python 3.12 的虚拟环境，便于同时使用 MCP。

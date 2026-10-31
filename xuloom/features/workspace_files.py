@@ -37,17 +37,63 @@ def list_directory(cwd, requested=""):
 
 
 async def git(cwd, *args):
+    env = {key: value for key, value in os.environ.items() if key not in {
+        "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE"}}
+    env["LC_ALL"] = "C"
     process = await asyncio.create_subprocess_exec(
-        "git", "-c", "core.quotepath=false", "-c", "diff.relative=false", *args, cwd=str(cwd),
+        "git", "--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.quotepath=false", "-c", "diff.relative=false", *args, cwd=str(cwd),
         stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        creationflags=0x08000000 if os.name == "nt" else 0)
+        creationflags=0x08000000 if os.name == "nt" else 0, env=env)
     try:
         output, error = await asyncio.wait_for(process.communicate(), timeout=10)
-    except asyncio.TimeoutError:
-        process.kill()
+    except BaseException as exc:
+        if process.returncode is None:
+            try: process.kill()
+            except ProcessLookupError: pass
         await process.communicate()
-        raise ValueError("读取 Git 变更超时")
+        if isinstance(exc, asyncio.TimeoutError): raise ValueError("读取 Git 状态超时") from exc
+        raise
     return process.returncode, output.decode("utf-8", errors="replace"), error.decode("utf-8", errors="replace")
+
+
+async def git_status(cwd):
+    """Read-only repository snapshot, without model, session, diff or network requests."""
+    if not Path(cwd).is_dir():
+        return {"available": False, "code": "workspace_missing", "reason": "工作目录不存在"}
+    try:
+        code, root, error = await git(cwd, "rev-parse", "--show-toplevel")
+        if code:
+            return {"available": False, "code": "not_repository" if "not a git repository" in error.lower() else "git_error",
+                "reason": "当前目录不是 Git 工作区，或 Git 拒绝读取；请检查目录与仓库所有权"}
+        code, output, _ = await git(root.rstrip("\r\n"), "status", "--porcelain=v2", "--branch", "-z", "--no-renames", "--untracked-files=normal")
+        if code: return {"available": False, "code": "git_error", "reason": "无法读取 Git 状态"}
+    except FileNotFoundError:
+        return {"available": False, "code": "git_missing", "reason": "未安装 Git"}
+    except ValueError:
+        return {"available": False, "code": "git_timeout", "reason": "读取 Git 状态超时"}
+    headers, staged, unstaged, untracked, changed, conflicted = {}, 0, 0, 0, 0, 0
+    for row in output.split("\0"):
+        if row.startswith("# "):
+            key, _, value = row[2:].partition(" "); headers[key] = value
+        elif row.startswith(("1 ", "2 ", "u ")):
+            changed += 1
+            if row.startswith("u "):
+                conflicted += 1
+                continue
+            xy = row.split(" ", 2)[1]
+            staged += int(xy[0] != "."); unstaged += int(xy[1] != ".")
+        elif row.startswith("? "):
+            changed += 1; untracked += 1
+    branch, commit = headers.get("branch.head"), headers.get("branch.oid")
+    detached, unborn = branch == "(detached)", commit == "(initial)"
+    ahead = behind = None
+    if "branch.ab" in headers:
+        parts = headers["branch.ab"].split()
+        if len(parts) == 2: ahead, behind = abs(int(parts[0])), abs(int(parts[1]))
+    return {"available": True, "root": root.rstrip("\r\n"), "branch": None if detached else branch,
+        "commit": None if unborn else commit, "detached": detached, "unborn": unborn, "dirty": changed > 0,
+        "changed": changed, "staged": staged, "unstaged": unstaged, "untracked": untracked, "conflicted": conflicted,
+        "upstream": headers.get("branch.upstream"), "ahead": ahead, "behind": behind}
 
 
 async def git_changes(cwd):
@@ -75,7 +121,7 @@ async def git_changes(cwd):
         if len(row) < 4:
             continue
         state, relative = row[:2], row[3:]
-        path = Path(root.strip()) / relative
+        path = Path(root.rstrip("\r\n")) / relative
         if not path.resolve().is_relative_to(Path(cwd).resolve()):
             continue
         added, removed = stats.get(relative, (0, 0))
@@ -88,7 +134,7 @@ async def git_changes(cwd):
         record = describe_change(path, None, None, "delete" if "D" in state else "create" if "A" in state or state == "??" else "edit")
         record.update(added=added, removed=removed, statsAvailable=added is not None, source="git", status=state.strip())
         files.append(record)
-    return {"available": True, "root": root.strip(), "files": files[:500], "truncated": len(files) > 500}
+    return {"available": True, "root": root.rstrip("\r\n"), "files": files[:500], "truncated": len(files) > 500}
 
 
 async def git_file_diff(cwd, requested):

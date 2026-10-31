@@ -43,6 +43,7 @@ const engineMethods = new Set([
   "media.read",
   "files.undo",
   "files.list",
+  "git.status",
   "files.gitDiff",
   "capabilities.list",
   "capabilities.toggle",
