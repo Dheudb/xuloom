@@ -26,6 +26,12 @@ def parser():
     status = sub.add_parser("git-status", help="Read repository/branch without a model request")
     status.add_argument("--cwd", default=os.getcwd())
     status.add_argument("--json", action="store_true")
+    link = sub.add_parser("chat-link", help="Create or resolve a local chat address without calling a model")
+    link.add_argument("--cwd", default=os.getcwd())
+    mode = link.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--session")
+    mode.add_argument("--resolve", metavar="URL")
+    link.add_argument("--json", action="store_true")
     for name in ("exec", "goal", "schedule"):
         item = sub.add_parser(name)
         item.add_argument("--cwd", default=os.getcwd())
@@ -113,6 +119,12 @@ async def open_engine(args, emit):
 
 
 async def dispatch(args, emit):
+    if args.command == "chat-link":
+        from xuloom.features.chat_links import chat_link, resolve_link
+        url = args.resolve if args.resolve else chat_link(args.cwd, args.session)
+        row = resolve_link(url)
+        return {"ok": True, "reason": "completed", "url": url, "chat": row,
+                **({"text": url} if not args.resolve else {})}
     if args.command == "git-status":
         from xuloom.features.workspace_files import git_status
         return {"ok": True, "reason": "completed", "git": await git_status(args.cwd)}
@@ -192,6 +204,11 @@ async def dispatch(args, emit):
 
 
 def main(argv):
+    # JSONL is a UTF-8 wire protocol, independent of Windows' active code page
+    # and PYTHONIOENCODING. The bundled -I interpreter ignores that env option.
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     args = parser().parse_args(argv)
     wire = sys.stdout
     async def emit(event):
@@ -202,7 +219,8 @@ def main(argv):
     except KeyboardInterrupt: result = {"ok": False, "reason": "cancelled"}
     except Exception as error:
         from xuloom.core.run_result import PersistenceError
-        reason = "session_busy" if isinstance(error, SessionBusyError) else "session_conflict" if isinstance(error, SessionConflictError) else "persistence_error" if isinstance(error, PersistenceError) else "error"
+        from xuloom.features.chat_links import ChatLinkError
+        reason = error.code if isinstance(error, ChatLinkError) else "session_busy" if isinstance(error, SessionBusyError) else "session_conflict" if isinstance(error, SessionConflictError) else "persistence_error" if isinstance(error, PersistenceError) else "error"
         result = {"ok": False, "reason": reason, "error": type(error).__name__}
         print(str(error) if isinstance(error, (ValueError, SessionBusyError, SessionConflictError, PersistenceError)) else type(error).__name__, file=sys.stderr)
     if args.json: wire.write(json.dumps({"type": "final", "result": result}, ensure_ascii=False, default=str) + "\n")

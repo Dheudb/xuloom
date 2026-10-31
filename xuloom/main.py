@@ -290,6 +290,7 @@ def run_command_palette(tui: InteractiveTerminalTUI) -> str:
             {"value": "/help", "label": "Show help"},
             {"value": "/status", "label": "View runtime status"},
             {"value": "/git", "label": "View repository and branch"},
+            {"value": "/link", "label": "Show this chat's local deep link"},
             {"value": "/tools", "label": "View tool activity"},
             {"value": "/todos", "label": "View structured todos"},
             {"value": "/mode", "label": "View current mode"},
@@ -418,7 +419,7 @@ async def _interactive_model_switch(engine, tui):
     console.print(f"[dim]Configuration saved to {CONFIG_FILE}[/dim]")
 
 
-async def interactive_loop(resume_session_id: str = None, initial_prompt: str = None, auto_approve: bool = False, collaboration_mode=None, execution_mode=None):
+async def interactive_loop(resume_session_id: str = None, initial_prompt: str = None, auto_approve: bool = False, collaboration_mode=None, execution_mode=None, working_directory=None, strict_resume=False):
     load_config_into_env()
     print_welcome_screen()
 
@@ -493,7 +494,7 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
         tui.pending_auto_commit = False
 
     from xuloom.security.permissions import ApprovalPolicy
-    engine = QueryEngine(permission_handler=permission_prompt, approval_policy=ApprovalPolicy("full" if auto_approve else "ask"), execution_mode=execution_mode)
+    engine = QueryEngine(permission_handler=permission_prompt, approval_policy=ApprovalPolicy("full" if auto_approve else "ask"), execution_mode=execution_mode, cwd=working_directory)
 
     def require_idle_session():
         if (any(not task.done() for task in engine.tool_context["subagent_tasks"].tasks.values())
@@ -543,6 +544,9 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
                     )
                 )
             else:
+                if strict_resume:
+                    await engine.aclose()
+                    raise ValueError("链接指向的会话无法恢复；未创建替代会话")
                 console.print(f"[red]Failed to resume session '{resume_session_id}'. Starting fresh.[/red]")
 
     if collaboration_mode is not None:
@@ -609,6 +613,7 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
                     "  /sandbox          View sandbox status\n"
                     "  /status           View runtime status\n"
                     "  /git              View repository and branch\n\n"
+                    "  /link             Show this chat's local deep link\n\n"
                     "[bold white]Model & Provider[/bold white]\n"
                     "  /model            Interactive model/provider switch\n"
                     "  /model status     Show current model runtime\n"
@@ -710,6 +715,12 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
                 continue
             elif normalized_input == "/tools":
                 console.print(Panel(engine.get_tools_summary(), title="Tool Activity", border_style="cyan", expand=False))
+                continue
+            elif normalized_input == "/link":
+                from xuloom.features.chat_links import chat_link, resolve_link
+                url = chat_link(engine.session_cwd, engine.session_id)
+                resolve_link(url)
+                console.print(url, markup=False)
                 continue
             elif normalized_input in {"/git", "/git-status"}:
                 from xuloom.features.workspace_files import git_status
@@ -905,7 +916,7 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
 
 
 def main():
-    if len(sys.argv) > 1 and sys.argv[1] in {"exec", "goal", "schedule", "git-status"}:
+    if len(sys.argv) > 1 and sys.argv[1] in {"exec", "goal", "schedule", "git-status", "chat-link"}:
         from xuloom.cli import main as noninteractive
         raise SystemExit(noninteractive(sys.argv[1:]))
     import argparse
@@ -914,6 +925,7 @@ def main():
                         help="Resume the most recent session")
     parser.add_argument("-r", "--resume", dest="resume_id", type=str, default=None,
                         help="Resume a specific session by ID")
+    parser.add_argument("--chat", metavar="URL", help="Open a local Xuloom chat link in this terminal")
     parser.add_argument("-p", "--prompt", dest="prompt_text", type=str, default=None,
                         help="Send an initial prompt directly (non-interactive start)")
     parser.add_argument("-y", "--dangerously-skip-permissions", dest="auto_approve",
@@ -925,11 +937,23 @@ def main():
     parser.add_argument("--sandbox", choices=("host", "workspace"), default=None, help="OS execution isolation; workspace fails closed if unavailable")
     args = parser.parse_args()
 
+    linked = None
+    if args.chat:
+        if args.resume_id or args.continue_session or args.prompt_text or args.prompt:
+            parser.error("--chat cannot be combined with a resume selector or initial prompt")
+        from xuloom.features.chat_links import resolve_link, ChatLinkError
+        try:
+            linked = resolve_link(args.chat, require_openable=True)
+        except ChatLinkError as error:
+            parser.error(str(error))
+
     resume_id = None
     if args.continue_session:
         resume_id = "__latest__"
     elif args.resume_id:
         resume_id = args.resume_id
+    if linked:
+        resume_id = linked["session_id"]
 
     initial_prompt = args.prompt_text or (" ".join(args.prompt) if args.prompt else None)
 
@@ -953,6 +977,8 @@ def main():
             auto_approve=args.auto_approve,
             collaboration_mode=args.collaboration,
             execution_mode=args.sandbox,
+            working_directory=linked["project"] if linked else None,
+            strict_resume=bool(linked),
         ))
     except KeyboardInterrupt:
         pass

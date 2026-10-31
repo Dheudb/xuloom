@@ -437,6 +437,9 @@ class DesktopBridge:
         if method == "storage.mutate":
             from xuloom.core.session_mutation import mutate
             return mutate(params)
+        if method == "chat.resolve":
+            from xuloom.features.chat_links import resolve_link
+            return resolve_link(params.get("url"), require_openable=True)
         if method == "config.get":
             return self.config()
         if method == "collaboration.get":

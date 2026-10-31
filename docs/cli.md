@@ -4,6 +4,8 @@
 
 读取当前仓库与分支：`xuloom git-status --cwd <目录> --json`；交互模式输入 `/git`。不调用模型，详情见 [Git 状态](git-status.md)。
 
+聊天链接：`xuloom chat-link --cwd <目录> --session <ID>` 生成，`xuloom --chat "xuloom://chat/v1/…/…"` 在终端打开；交互模式输入 `/link`。详情见 [聊天深链接](chat-links.md)。
+
 ## 安装与启动
 
 基础 CLI 需要 Python 3.9+。建议使用 Python 3.12 的虚拟环境，便于同时使用 MCP。

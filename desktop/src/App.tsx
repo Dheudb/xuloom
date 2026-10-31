@@ -93,6 +93,8 @@ export default function App() {
   const effectiveSidebarWidth = clampSidebarWidth(sidebarWidth ?? defaultSidebarWidth(viewport), viewport, panelOpen);
   const draftSessions = useRef(sessions);
   draftSessions.current = sessions;
+  const navigateChat = useRef<(url: string) => void>(() => {});
+  navigateChat.current = (url) => { void workspaceAction("chat.open", { url }).catch(onError); };
   const lastUser = active?.messages.slice().reverse().find((message) => message.role === "user");
   const paused = !active?.busy && ["cancelled", "interrupted"].includes(active?.messages.at(-1)?.trace?.status || "");
   const resumeAvailable = paused && !active?.draft.trim() && !active?.attachments.length && !active?.editingId && !active?.goalMode &&
@@ -132,10 +134,19 @@ export default function App() {
         setSessions((value.restored || []).map(createSession));
         setActiveId(value.activeId || "");
         if (value.restoreErrors?.length) setNotice(value.restoreErrors.join("\n"));
+        return window.xuloom.invoke("app.ready");
       })
       .catch((error) => setNotice(String(error)))
       .finally(() => setOpening(false));
     return window.xuloom.onEvent((event) => {
+      if (event.type === "chat_link") {
+        navigateChat.current(event.url);
+        return;
+      }
+      if (event.type === "session_loaded") {
+        setSessions(previous => previous.some(session => session.id === event.initial.id) ? previous : [...previous, createSession(event.initial)]);
+        return;
+      }
       if (event.type === "settings_error") {
         setNotice(event.message);
         return;
@@ -214,22 +225,28 @@ export default function App() {
   async function workspaceAction(method: string, params: Record<string, unknown>) {
     const preferenceWrite = method === "catalog.view" ? preferences.current.begin(params as Partial<SessionCatalog["view"]>) : undefined;
     if (preferenceWrite) setCatalog(preferenceWrite.catalog);
-    const changesSelection = !method.startsWith("catalog.") && !method.startsWith("archive.") &&
+    const changesSelection = !["chat.copy", "chat.register", "chat.protocol"].includes(method) && !method.startsWith("catalog.") && !method.startsWith("archive.") &&
       (method !== "session.update" || !!(params.patch as { archived?: boolean } | undefined)?.archived) &&
       (method !== "project.update" || !!(params.patch as { archived?: boolean } | undefined)?.archived);
     const intent = changesSelection ? ++navigation.current : navigation.current;
     if (changesSelection) setOpening(true);
     setNotice("");
     try {
-      if (active && ["project.open", "session.new", "session.open", "session.select", "session.move", "session.fork"].includes(method))
+      if (active && ["chat.open", "project.open", "session.new", "session.open", "session.select", "session.move", "session.fork"].includes(method))
         await window.xuloom.invoke("session.update", { id: active.id, patch: { draft: active.draft, draftEditId: active.editingId || "", draftAttachments: active.attachments.map((item) => item.id) } });
       const result = await window.xuloom.invoke(method, params);
       if (!result) return;
+      if (method === "chat.copy") setNotice("聊天链接已复制");
       if (preferenceWrite) setCatalog(preferences.current.finish(preferenceWrite.id, result));
       else if (result.catalog) receiveCatalog(result.catalog);
       else if (method.startsWith("catalog.")) receiveCatalog(result);
       if (result.id) {
-        setSessions((previous) => [...previous.filter((session) => session.id !== result.id && session.id !== result.movedFrom), createSession(result)]);
+        // A session_loaded event can precede this reply and already receive
+        // live output. Never replace that state with its older initial view.
+        setSessions((previous) => {
+          const kept = previous.filter(session => session.id !== result.movedFrom);
+          return kept.some(session => session.id === result.id) ? kept : [...kept, createSession(result)];
+        });
       }
       if (changesSelection && intent === navigation.current) {
         if ("activeId" in result) setActiveId(result.activeId);

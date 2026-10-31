@@ -13,6 +13,7 @@
 | [开发者基座严格检查](developer-base-audit.md) | 持续验收清单、证据与尚未完成的边界 |
 | [持续目标与功能验收](product-roadmap.md) | SSH、异构代理、聊天导航、多媒体生成与双端 UI 的追加范围 |
 | [仓库与分支状态](git-status.md) | 桌面分支标识、CLI 查询及只读边界 |
+| [聊天深链接](chat-links.md) | 右键复制、桌面/CLI 打开、移动与归档边界 |
 | [开发与打包](development.md) | 环境、测试、Windows 运行时与构建产物 |
 | [框架排查记录](framework-audit-2026-10-30.md) | 工具回执、写后记录、Windows Shell、故障注入及验证边界 |
 | [源码对照与加固](framework-source-comparison-2026-10-30.md) | Codex、Pi、DSH 与 Claude 公开资料对照，文件事务、进程和完整输出修复 |

@@ -6,6 +6,7 @@ const { EngineTransport } = require("./transport.cjs");
 const { resolveEnginePython } = require("./runtime.cjs");
 const { defaultWorkspace, dataDirectory } = require("./workspace.cjs");
 const preferences = require("./settings.cjs");
+const { parseLink, chatLink, startupLinks } = require("./chat-links.cjs");
 const { prepareMove, moveSpec } = require("./session-move.cjs");
 const { HtmlPreviews, SCHEME: PREVIEW_SCHEME } = require("./html-preview.cjs");
 protocol.registerSchemesAsPrivileged([{ scheme: PREVIEW_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
@@ -20,6 +21,30 @@ const dataRoot = requestedDataRoot && path.isAbsolute(requestedDataRoot) ? path.
 process.env.XULOOM_DATA_DIR = dataRoot;
 const sessions = new Map();
 let window;
+let uiReady = false;
+const pendingLinks = startupLinks(process.argv);
+// Normal secondary workbenches remain allowed. Only URL launches forward to
+// the primary instance, avoiding another writer and another empty window.
+const primaryInstance = app.requestSingleInstanceLock({ chatLinks: pendingLinks });
+const forwardedLink = !primaryInstance && pendingLinks.length > 0;
+if (forwardedLink) app.quit();
+function deliverLinks() {
+  if (!uiReady || !window || window.isDestroyed()) return;
+  for (const url of pendingLinks.splice(0)) window.webContents.send("workbench:event", { type: "chat_link", url });
+  if (!process.env.XULOOM_TEST_HEADLESS) {
+    if (window.isMinimized()) window.restore();
+    window.show(); window.focus();
+  }
+}
+function receiveLinks(values) {
+  pendingLinks.push(...values.slice(0, Math.max(0, 16 - pendingLinks.length)));
+  deliverLinks();
+}
+app.on("second-instance", (_event, argv, _cwd, extra) => {
+  const links = Array.isArray(extra?.chatLinks) ? startupLinks(extra.chatLinks) : startupLinks(argv);
+  if (links.length) receiveLinks(links);
+});
+app.on("open-url", (event, url) => { event.preventDefault(); receiveLinks(startupLinks([url])); });
 let quitting = false;
 let configTransport;
 let activeSessionId;
@@ -131,7 +156,7 @@ function send(id, payload) {
 }
 let tickingSchedules = false;
 async function tickSchedules() {
-  if (tickingSchedules || quitting || !restoration || !fs.existsSync(path.join(dataRoot, "schedules.json"))) return;
+  if (tickingSchedules || quitting || !uiReady || !restoration || !fs.existsSync(path.join(dataRoot, "schedules.json"))) return;
   tickingSchedules = true;
   try {
     await restoration;
@@ -269,7 +294,11 @@ async function createSession(project, resumeId) {
       sessionId: resumeId,
       permissionMode: row.permissionMode,
     });
-    return { id, ...initial, scope: row.scope, title: row.title, savedDraft: row.draft || "", savedDraftEditId: row.draftEditId || "", savedAttachments: attachments.list(row, row.draftAttachments || []) };
+    const value = { id, ...initial, scope: row.scope, title: row.title, savedDraft: row.draft || "", savedDraftEditId: row.draftEditId || "", savedAttachments: attachments.list(row, row.draftAttachments || []) };
+    // Background schedule/navigation paths can load a transport before the
+    // renderer knows the chat. Announce it before any subsequent turn events.
+    if (uiReady && window && !window.isDestroyed()) window.webContents.send("workbench:event", { type: "session_loaded", initial: value });
+    return value;
   } catch (error) {
     sessions.delete(id);
     await transport.close();
@@ -319,12 +348,43 @@ async function fallback(project, excluded = [], scope = "project") {
   return { activeId: "", catalog: broadcastCatalog() };
 }
 async function invoke(method, params) {
+  if (method === "app.ready") { uiReady = true; deliverLinks(); return true; }
+  if (method === "chat.copy") {
+    const row = catalog.find(params.id);
+    const url = chatLink(row.id);
+    clipboard.writeText(url);
+    return { url };
+  }
+  if (method === "chat.protocol" || method === "chat.register") {
+    const supported = app.isPackaged && ["win32", "linux"].includes(process.platform);
+    if (method === "chat.register" && (!supported || !app.setAsDefaultProtocolClient("xuloom")))
+      throw new Error("此安装尚不能注册系统聊天链接，请使用设置中的粘贴打开，或 CLI --chat；Linux 需要桌面安装集成");
+    return { supported, registered: app.isDefaultProtocolClient("xuloom") };
+  }
+  if (method === "chat.open") {
+    parseLink(params.url);
+    const resolved = await globalConfig().request("chat.resolve", { url: params.url });
+    const snapshot = catalog.snapshot();
+    if (snapshot.projects.some(project => projectKey(project.path) === projectKey(resolved.project) && project.archived))
+      throw new Error("此项目已归档，请先在设置中恢复");
+    if (resolved.scope === "standalone") {
+      const before = settings();
+      if (!(before.standaloneDirectories || []).some(directory => projectKey(directory) === projectKey(resolved.project)))
+        saveSettings({ ...before, standaloneDirectories: [...(before.standaloneDirectories || []), resolved.project] }, before);
+    } else if (!snapshot.projects.some(project => projectKey(project.path) === projectKey(resolved.project))) catalog.addProject(resolved.project);
+    return selectRow(catalog.find(resolved.id));
+  }
   if (method === "clipboard.writeText") {
     if (typeof params.text !== "string") throw new Error("复制内容无效");
     clipboard.writeText(params.text);
     return true;
   }
   if (method === "external.open") {
+    if (typeof params.url === "string" && params.url.startsWith("xuloom:")) {
+      parseLink(params.url);
+      receiveLinks([params.url]);
+      return true;
+    }
     const url = new URL(params.url);
     if (!["https:", "http:"].includes(url.protocol) || url.username || url.password)
       throw new Error("只支持 HTTP/HTTPS 网页链接");
@@ -617,6 +677,7 @@ async function invoke(method, params) {
   return source.transport.request(method, payload);
 }
 app.whenReady().then(() => {
+  if (forwardedLink) return;
   const scheduleTimer = setInterval(tickSchedules, 5000);
   scheduleTimer.unref();
   protocol.handle(PREVIEW_SCHEME, (request) => htmlPreviews.respond(request));
@@ -661,7 +722,7 @@ app.whenReady().then(() => {
     if (typeof method !== "string" || !params || typeof params !== "object")
       throw new Error("Invalid request");
     if (quitting) throw new Error("正在保存并退出，请稍候");
-    if (/^(app\.initialize|layout\.save|attachments\.import|execution\.set|collaboration\.set|permissions\.set|config\.(save|select|delete|reasoning)|workspace\.save|archive\.restore|project\.(open|update|close|remove|delete)|session\.(open|new|select|update|fork|move|delete|close|activate)|catalog\.)/.test(method)) {
+    if (/^(app\.initialize|chat\.(open|copy)|layout\.save|attachments\.import|execution\.set|collaboration\.set|permissions\.set|config\.(save|select|delete|reasoning)|workspace\.save|archive\.restore|project\.(open|update|close|remove|delete)|session\.(open|new|select|update|fork|move|delete|close|activate)|catalog\.)/.test(method)) {
       const operation = workspaceQueue.then(() => invoke(method, params));
       workspaceQueue = operation.catch(() => {});
       return operation;

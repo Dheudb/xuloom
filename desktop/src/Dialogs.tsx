@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { X, KeyRound, Check, FolderOpen, Archive, Puzzle, Bot, Plug } from "lucide-react";
+import { X, KeyRound, Check, FolderOpen, Archive, Puzzle, Bot, Plug, Link2 } from "lucide-react";
 import type { EngineEvent, ModelConfig, SessionCatalog } from "./types";
 import Markdown from "./Markdown";
 import ArchivePanel from "./ArchivePanel";
@@ -37,6 +37,9 @@ export function SettingsDialog({
   const [directory, setDirectory] = useState(defaultDirectory);
   const [directoryBusy, setDirectoryBusy] = useState(false);
   const [directorySaved, setDirectorySaved] = useState(false);
+  const [chatUrl, setChatUrl] = useState("");
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkStatus, setLinkStatus] = useState("");
   const [form, setForm] = useState({
     connectionId: config?.connectionId || "legacy-openai",
     connectionName: config?.connectionName || "我的 API",
@@ -269,6 +272,24 @@ export function SettingsDialog({
           </fieldset>
         </div>
         <div className="form-section" role="tabpanel" id="settings-panel-workspace" aria-labelledby="settings-tab-workspace" hidden={tab !== "workspace"}>
+          <h3><Link2 size={16} /> 聊天链接</h3>
+          <p className="fine-print">右键会话可复制本机聊天链接。链接只定位已有历史，不包含聊天内容；另一台电脑需要自己的历史记录。</p>
+          <label>打开聊天链接<input aria-label="聊天链接" placeholder="xuloom://chat/v1/…" value={chatUrl} onChange={event => setChatUrl(event.target.value)} /></label>
+          <div className="actions">
+            <button disabled={linkBusy || !chatUrl.trim()} onClick={async () => {
+              setLinkBusy(true); setError("");
+              try { await workspaceAction("chat.open", { url: chatUrl.trim() }); close(); }
+              catch (error) { setError(String(error)); } finally { setLinkBusy(false); }
+            }}>打开会话</button>
+            <button disabled={linkBusy} onClick={async () => {
+              setLinkBusy(true); setError(""); setLinkStatus("");
+              try {
+                const result = await window.xuloom.invoke("chat.register");
+                setLinkStatus(result.registered ? "系统聊天链接已注册" : "系统未确认默认处理程序，请检查桌面环境的默认应用设置");
+              } catch (error) { setError(String(error)); } finally { setLinkBusy(false); }
+            }}>注册系统链接</button>
+          </div>
+          {linkStatus && <p role="status" className="fine-print">{linkStatus}</p>}
           <h3><FolderOpen size={16} /> 独立会话工作区根目录</h3>
           <p className="fine-print">每个新建的独立会话会在此目录下分配专属文件夹，互不共用工作文件。聊天记录集中存储；修改此路径不移动已有文件或历史。</p>
           <label>目录路径

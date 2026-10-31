@@ -56,6 +56,10 @@ function webpageURL(href?: string) {
   } catch { return null; }
 }
 
+function chatURL(value?: string) {
+  return value && !/[\r\n]/.test(value) && /^xuloom:\/\/chat\/v1\/[0-9a-f]{16}\/[A-Za-z0-9_-]{1,128}$/.test(value) ? value : null;
+}
+
 function fileReference(value: string) {
   return value.length <= 1000 && !/[\n\r<>]/.test(value) && /\.[a-z0-9]{1,12}$/i.test(value) &&
     (!/^[a-z][\w+.-]*:/i.test(value) || /^[a-z]:[\\/]/i.test(value));
@@ -77,7 +81,7 @@ export default function Markdown({ text, onOpenFile, sessionId, basePath }: { te
     <MarkdownImageContext.Provider value={{ sessionId, basePath }}>
     <ReactMarkdown
       remarkPlugins={[remarkGfm, remarkMath, remarkDisplayMath]}
-      urlTransform={(url, key) => key === "src" ? url : webpageURL(url) || (onOpenFile && fileReference(url) ? url : "")}
+      urlTransform={(url, key) => key === "src" ? url : webpageURL(url) || chatURL(url) || (onOpenFile && fileReference(url) ? url : "")}
       components={{
         pre: ({ children, node }) => {
           const code = node?.children[0];
@@ -99,7 +103,7 @@ export default function Markdown({ text, onOpenFile, sessionId, basePath }: { te
             : <code className={className}>{children}</code>;
         },
         a: ({ children, href }) => {
-          const url = webpageURL(href);
+          const url = webpageURL(href) || chatURL(href);
           const path = localLink(href);
           return url ? <a href={url} title={url} className="markdown-link" target="_blank" rel="noopener noreferrer"
             onClick={(event) => openLink(event, url)}
