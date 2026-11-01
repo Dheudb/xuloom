@@ -24,6 +24,19 @@ def create_definition(registry, params):
         metadata["model"] = model
         from xuloom.agents.executors import executor, profile
         location = executor(params.get("executor"))
+        backend = params.get("backend", "native")
+        if backend not in {"native", "claude"}:
+            raise ValueError("请选择原生引擎或已安装的 Claude Code")
+        program = params.get("backend_program")
+        if backend != "native":
+            metadata["backend"] = backend
+            if program:
+                if not isinstance(program, str) or len(program) > 4096:
+                    raise ValueError("外部程序路径无效")
+                metadata["backend_program"] = program
+            if location == "local":
+                from xuloom.agents.external.program import resolve
+                resolve(program)
         if location != "local":
             profile(location)
             metadata["executor"] = location
@@ -33,7 +46,9 @@ def create_definition(registry, params):
                 raise ValueError("模型连接 ID 无效")
             if location == "local":
                 from xuloom.agents.connections import resolve_connection
-                resolve_connection(connection, None if model == "inherit" else model)
+                binding, _ = resolve_connection(connection, None if model == "inherit" else model)
+                if backend == "claude" and binding["provider"] != "anthropic":
+                    raise ValueError("Claude Code 后端需要 Anthropic Messages 协议的连接")
             metadata["connection"] = connection
         if params.get("tools", "").strip():
             tools = tool_list(params["tools"])

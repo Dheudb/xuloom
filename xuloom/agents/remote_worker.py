@@ -5,7 +5,7 @@ import time
 import uuid
 
 from xuloom.agents.executors import profile
-from xuloom.core.output_limits import active_budgets, reserve, settle
+from xuloom.core.output_limits import active_budgets, reserve, settle, ModelBudgetError
 from xuloom.core.run_result import PersistenceError
 from xuloom.remote import worker_protocol as wire
 from xuloom.remote.config import target
@@ -97,9 +97,9 @@ class RemoteWorker:
                 # can spend the grant; recovery already charges unknown leases.
                 await self.tool._write_subagent_registry_record({"agent_id": self.identity})
                 answer = {"ok": True, "id": identity, "maximum": amount}
-        except Exception:
+        except Exception as error:
             if event["type"] == "worker_budget":
-                answer = {"ok": False}
+                answer = {"ok": False, "reason": "budget_exhausted" if isinstance(error, ModelBudgetError) else "grant_unavailable"}
         try:
             await self.client.request("respond", {"requestId": event["requestId"], "answer": answer})
         except (ConnectionError, OSError, ValueError):

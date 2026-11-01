@@ -317,14 +317,24 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
         team_tool = None
         if team and team.is_active:
             team_tool = self.context.get("engine_available_tools", {}).get("send_message_tool") or latent.get("send_message_tool")
-        configure_role(sub_engine, definition, allowed_tools=allowed_tools,
-            parent_tools=self.context.get("engine_available_tools"), latent_tools=latent,
-            skills=sub_engine.tool_context["skill_registry"], team_tool=team_tool,
-            context_messages=self._filter_incomplete_tool_messages(self.context.get("messages", [])) if inherit_context else None,
-            frozen_prompt=(resume_state or {}).get("metadata", {}).get("delegation", {}).get("system_prompt") or None)
+        try:
+            configure_role(sub_engine, definition, allowed_tools=allowed_tools,
+                parent_tools=self.context.get("engine_available_tools"), latent_tools=latent,
+                skills=sub_engine.tool_context["skill_registry"], team_tool=team_tool,
+                context_messages=self._filter_incomplete_tool_messages(self.context.get("messages", [])) if inherit_context else None,
+                frozen_prompt=(resume_state or {}).get("metadata", {}).get("delegation", {}).get("system_prompt") or None)
+        except BaseException:
+            await sub_engine.aclose()
+            raise
         if resume_state:
             sub_engine.messages = copy.deepcopy(resume_state["messages"])
             metadata = resume_state.get("metadata", {})
+            from xuloom.agents.external.claude import restore as restore_external
+            try:
+                restore_external(sub_engine, metadata)
+            except BaseException:
+                await sub_engine.aclose()
+                raise
             sub_engine.permission_manager.load_state({**metadata.get("permissions", {}), "always_allow_tools": [], "pending_request": None})
             from xuloom.core.tool_execution import restore_tool_activity
             restore_tool_activity(sub_engine, metadata)
@@ -345,6 +355,7 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
         user_input_text = task
         completed = False
         registry_record = {"agent_id": child_agent_id}
+        sub_engine.tool_context["checkpoint_model_budget"] = lambda: self._write_subagent_registry_record(registry_record)
 
         try:
             session_manager = self.context.get("session_manager")
@@ -406,7 +417,7 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
                 if not saved:
                     receipt.update(status="crashed", ok=False, persisted=False, reason="persistence_error")
             payload = {"task": task, "agent_id": child_agent_id, "agent_role": effective_role,
-                       "status": receipt["status"], "result": res.text, "receipt": receipt}
+                       "status": receipt["status"], "phase": receipt["status"], "result": res.text, "receipt": receipt}
             await self._write_subagent_registry_record({**registry_record, **payload, "finished_at": int(time.time() * 1000)})
             completed = receipt["ok"]
             return payload
@@ -560,6 +571,9 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
         if remote:
             execution_profile(location, self.context)
             builtin_def["model"] = model or builtin_def.get("model")
+        elif builtin_def.get("backend", "native") != "native":
+            from xuloom.agents.external.program import resolve
+            builtin_def["_external_binding"] = resolve(builtin_def.get("backend_program"))
         binding = None
         if not remote and builtin_def.get("connection"):
             from xuloom.agents.connections import resolve_connection
@@ -609,6 +623,7 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
             "description": f"{description or '子代理'} {index + 1}/{count}" if count > 1 else description,
             "model": target_model,
             "executor": location,
+            "backend": builtin_def.get("backend", "native"),
             "connection_binding": copy.deepcopy(binding),
             "background": run_in_background,
             "role_definition": copy.deepcopy(builtin_def),

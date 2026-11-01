@@ -214,6 +214,9 @@ class WorkerBridge(DesktopBridge):
     async def _reserve_model(self, maximum):
         answer = await self.ask("worker_budget", {"maximum": maximum})
         if not isinstance(answer, dict) or not answer.get("ok"):
+            if isinstance(answer, dict) and answer.get("reason") == "budget_exhausted":
+                from xuloom.core.output_limits import ModelBudgetError
+                raise ModelBudgetError("Delegating model output budget is exhausted; no model was started")
             raise RuntimeError("Delegating model budget is unavailable or exhausted; no model was started")
         return {"id": answer.get("id"), "maximum": answer.get("maximum")}
 

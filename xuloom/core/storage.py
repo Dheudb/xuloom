@@ -8,6 +8,23 @@ import time
 from pathlib import Path
 
 
+class IOPath(type(Path())):
+    """Keep logical paths ordinary while Windows filesystem calls use long paths."""
+    def __fspath__(self):
+        value = str(self)
+        if os.name == "nt" and self.is_absolute() and not value.startswith("\\\\?\\"):
+            return "\\\\?\\UNC\\" + value[2:] if value.startswith("\\\\") else "\\\\?\\" + value
+        return value
+
+
+def logical_path(path):
+    value = str(path)
+    if os.name == "nt":
+        if value.startswith("\\\\?\\UNC\\"): value = "\\\\" + value[8:]
+        elif value.startswith("\\\\?\\"): value = value[4:]
+    return Path(value)
+
+
 def data_directory():
     override = os.environ.get("XULOOM_DATA_DIR")
     if override and Path(override).is_absolute():
@@ -43,7 +60,7 @@ def atomic_bytes(path, content):
 
 def file_hash(path):
     digest = hashlib.sha256()
-    with Path(path).open("rb") as stream:
+    with IOPath(path).open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
@@ -53,7 +70,7 @@ def atomic_copy(path, source, expected_hash, *, preserve_mode=False):
     """Publish a streamed copy only after verifying the complete source bytes."""
     def write(stream):
         digest = hashlib.sha256()
-        with Path(source).open("rb") as original:
+        with IOPath(source).open("rb") as original:
             for chunk in iter(lambda: original.read(1024 * 1024), b""):
                 stream.write(chunk)
                 digest.update(chunk)
@@ -64,7 +81,7 @@ def atomic_copy(path, source, expected_hash, *, preserve_mode=False):
 
 
 def _atomic_write(path, write, *, preserve_mode=False, create_only=False):
-    path = Path(path); path.parent.mkdir(parents=True, exist_ok=True)
+    path = IOPath(path); path.parent.mkdir(parents=True, exist_ok=True)
     mode = path.stat().st_mode & 0o7777 if preserve_mode and path.exists() else None
     fd, temporary = tempfile.mkstemp(prefix=".migration-", suffix=".tmp", dir=path.parent)
     try:

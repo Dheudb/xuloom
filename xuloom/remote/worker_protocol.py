@@ -8,7 +8,7 @@ import uuid
 VERSION = 2
 IDENTITY = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 ROLE_FIELDS = {"agent_type", "agent_role", "system_prompt", "critical_reminder", "allowed_tools", "disallowed_tools",
-    "skills", "model", "connection", "reasoning_effort", "web_search", "mcp_servers", "read_only", "omit_claude_md"}
+    "skills", "model", "connection", "reasoning_effort", "web_search", "mcp_servers", "read_only", "omit_claude_md", "backend", "backend_program"}
 
 
 def digest(value):
@@ -36,9 +36,11 @@ def freeze_role(value):
     if not isinstance(value, dict) or value.keys() - ROLE_FIELDS:
         raise ValueError("Unsupported remote role fields; credentials and local execution settings are not transferred")
     result = copy.deepcopy(value)
-    for key in ("agent_type", "agent_role", "system_prompt", "critical_reminder", "model", "connection"):
+    for key in ("agent_type", "agent_role", "system_prompt", "critical_reminder", "model", "connection", "backend_program"):
         if result.get(key) is not None and not isinstance(result[key], str):
             raise ValueError("Invalid remote role " + key)
+    if result.get("backend", "native") not in {"native", "claude"}:
+        raise ValueError("Unsupported remote execution backend")
     for key in ("allowed_tools", "disallowed_tools", "skills", "mcp_servers"):
         if key not in result or result[key] is None:
             continue

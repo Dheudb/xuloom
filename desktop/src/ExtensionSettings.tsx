@@ -10,7 +10,7 @@ export default function ExtensionSettings({ kind, busy, invoke, changed }: {
   const [creating, setCreating] = useState(false), [preview, setPreview] = useState("");
   const [connections, setConnections] = useState<ModelConnection[]>([]);
   const [hosts, setHosts] = useState<{ id: string; name: string; host: string }[]>([]), [loadingModels, setLoadingModels] = useState(false);
-  const [form, setForm] = useState({ name: "", description: "", prompt: "", scope: "global", executor: "local", connection: "", model: "inherit", tools: "", skills: "" });
+  const [form, setForm] = useState({ name: "", description: "", prompt: "", scope: "global", executor: "local", backend: "native", backend_program: "", connection: "", model: "inherit", tools: "", skills: "" });
   const label = kind === "skills" ? "Skill" : "Subagent";
   async function action(method: string, params = {}) {
     setPending(true); setError(""); setNotice("");
@@ -45,6 +45,8 @@ export default function ExtensionSettings({ kind, busy, invoke, changed }: {
         <label>名称<input aria-label="扩展名称" required maxLength={64} pattern="[a-z0-9]+(-[a-z0-9]+)*" placeholder="my-research" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></label>
         <label>描述与使用时机<input aria-label="扩展描述" required maxLength={1024} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></label>
         {kind === "agents" && <><label>执行位置<select aria-label="代理执行位置" value={form.executor} onChange={e => setForm({ ...form, executor: e.target.value, connection: "", model: "inherit" })}><option value="local">本机 · 当前工作目录</option>{hosts.map(host => <option key={host.id} value={`ssh:${host.id}`}>SSH · {host.name} · {host.host}</option>)}</select></label>
+          <label>Agent 后端<select aria-label="代理后端" value={form.backend} onChange={e => setForm({ ...form, backend: e.target.value, backend_program: "" })}><option value="native">Xuloom · 原生引擎</option><option value="claude">Claude Code · 已安装 CLI</option></select></label>
+          {form.backend === "claude" && <><label>外部程序路径<input aria-label="代理程序路径" placeholder="留空查找执行主机 PATH 中的 Claude Code" value={form.backend_program} onChange={e => setForm({ ...form, backend_program: e.target.value })} /></label><p className="fine-print">需要执行主机已安装支持受控 MCP 的 Claude Code，以及 Anthropic Messages 协议连接。内置执行工具关闭；文件和命令仍由 Xuloom 授权。不会下载程序或使用该 CLI 的个人登录。</p></>}
           <label>供应商连接<select aria-label="代理连接" disabled={loadingModels} value={form.connection} onChange={e => setForm({ ...form, connection: e.target.value, model: "inherit" })}><option value="">{form.executor === "local" ? "继承主代理连接" : "执行主机的默认连接"}</option>{connections.map(item => <option key={item.connectionId} value={item.connectionId}>{item.connectionName} · {item.provider}</option>)}</select></label>
           {loadingModels && <p role="status" className="fine-print">正在读取执行主机的模型连接…</p>}
           <label>模型{selectedConnection ? <select aria-label="代理模型" value={form.model} onChange={e => setForm({ ...form, model: e.target.value })}><option value="inherit">连接的默认模型 · {selectedConnection.model}</option>{selectedConnection.models.map(model => <option key={model} value={model}>{model}</option>)}</select> : <input aria-label="代理模型" value={form.model} onChange={e => setForm({ ...form, model: e.target.value })} />}</label>

@@ -1753,6 +1753,8 @@ class QueryEngine:
     def register_subagent_record(self, record: dict):
         if not isinstance(record, dict):
             return
+        if record.get("status") in {"completed", "cancelled", "crashed"} and "phase" not in record:
+            record = {**record, "phase": record["status"]}
 
         agent_id = record.get("agent_id")
         if not agent_id:
@@ -1823,6 +1825,9 @@ class QueryEngine:
         4. Summarize only the middle history while preserving the first message
            and a recent raw window.
         """
+        if self.tool_context.get("external_backend"):
+            # The external CLI owns its context; do not make hidden native-model calls.
+            return False
         self.require_writer()
         archive = None
         def preserve_history():
@@ -2616,6 +2621,8 @@ class QueryEngine:
             self.messages = msgs
             self._sync_message_context()
             metadata = state.get("metadata", {})
+            from xuloom.agents.external.claude import restore as restore_external
+            restore_external(self, metadata)
             if self.agent_depth == 0:
                 previous_delegation = self.tool_context.pop("delegation", {})
                 if previous_delegation.get("authority_required"):
@@ -2742,6 +2749,7 @@ class QueryEngine:
 
     def _build_session_metadata(self) -> dict:
         return {
+            "external_agent": copy.deepcopy(self.tool_context.get("external_agent")),
             "execution_mode": self.execution_sandbox.mode,
             "collaboration_mode": self.collaboration_mode,
             "collaboration_run": copy.deepcopy(self.tool_context.get("collaboration_run")),
@@ -3362,30 +3370,15 @@ class QueryEngine:
     async def _stream_model_response(
         self, **kwargs,
     ):
-        from xuloom.core.output_limits import active_budgets, reserve, settle
-        acquire = self.tool_context.get("acquire_model_budget")
-        lease = None
-        if acquire is not None:
-            lease = await acquire(kwargs["max_tokens"])
-            if not isinstance(lease, dict) or type(lease.get("maximum")) is not int or not 0 < lease["maximum"] <= kwargs["max_tokens"] or not isinstance(lease.get("id"), str):
-                raise ValueError("Delegating model budget did not return a valid reservation")
-            kwargs["max_tokens"] = lease["maximum"]
-        budgets = active_budgets(self.tool_context.get("goal_budget"))
-        reserved = None
-        response = None
-        try:
-            if budgets:
-                reserved = reserve(kwargs["max_tokens"], budgets)
-                kwargs["max_tokens"] = reserved
+        if self.tool_context.get("external_backend"):
+            from xuloom.agents.external.claude import sample
+            return await sample(self, **kwargs)
+        from xuloom.core.output_limits import model_reservation
+        async with model_reservation(self, kwargs["max_tokens"]) as grant:
+            kwargs["max_tokens"] = grant["maximum"]
             response, entries, fallback = await self._receive_model_response(**kwargs)
+            grant["reported"] = int(self._serialize_response_usage(response).get("output_tokens", 0) or 0)
             return response, entries, fallback
-        finally:
-            usage = self._serialize_response_usage(response) if response is not None else {}
-            reported = int(usage.get("output_tokens", 0) or 0)
-            if reserved is not None:
-                settle(budgets, reserved, reported)
-            if lease is not None:
-                self.tool_context["settle_model_budget"](lease, reported)
 
     async def _receive_model_response(
         self,
@@ -4449,6 +4442,10 @@ class QueryEngine:
             except Exception as e:
                 if streaming_tool_entries:
                     await self._cancel_streaming_tool_tasks(streaming_tool_entries)
+                from xuloom.agents.external.claude import ExternalExecutionError
+                from xuloom.core.output_limits import ModelBudgetError
+                if isinstance(e, (ExternalExecutionError, ModelBudgetError)):
+                    return finish_run(self, str(e), e.reason if isinstance(e, ExternalExecutionError) else "budget_exhausted")
                 if isinstance(e, ToolProtocolError):
                     # DSML is decoded atomically before dispatch. Earlier successful
                     # turns and their side effects must never be rolled back/replayed.

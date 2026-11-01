@@ -78,7 +78,8 @@ class ReasoningWireTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_switching_and_subagent_model_override_do_not_leak_reasoning_settings(self):
         cfg = save_connection({}, {"provider": "openai", "connectionId": "fixture", "models": ["fixture", "other"],
-            "model": "fixture", "apiKey": "fixture", "modelReasoning": {"fixture": profile("qwen", thinking="disabled")}})
+            "model": "fixture", "apiKey": "fixture", "baseUrl": self.engine.api_base_url,
+            "modelReasoning": {"fixture": profile("qwen", thinking="disabled")}})
         old_client, old_compactor = self.engine.client, self.engine.compactor
         with patch("xuloom.core.config.load_config", return_value=cfg):
             self.engine.switch_model_runtime(model="fixture", persist=False)

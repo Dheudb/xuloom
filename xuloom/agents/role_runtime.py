@@ -53,3 +53,5 @@ def configure_role(engine, definition, *, allowed_tools, parent_tools=None, late
         raise ValueError("Frozen delegated instructions must be text")
     engine.tool_context["agent_system_prompt"] = frozen_prompt if frozen_prompt is not None else role_prompt(
         definition, skills or engine.tool_context["skill_registry"], context_messages)
+    from xuloom.agents.external.claude import configure
+    configure(engine, definition)

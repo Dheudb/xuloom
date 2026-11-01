@@ -15,7 +15,7 @@ import time
 import uuid
 
 from xuloom.core.session_lock import SessionLock, SessionConflictError, SessionBusyError
-from xuloom.core.storage import data_directory, history_root, atomic_json, atomic_bytes, atomic_copy, file_hash, rebase
+from xuloom.core.storage import data_directory, history_root, atomic_json, atomic_bytes, atomic_copy, file_hash, rebase, IOPath, logical_path
 
 
 def _hash(content):
@@ -23,13 +23,16 @@ def _hash(content):
 
 
 def _safe(path):
-    path = Path(os.path.abspath(path))
+    path = Path(os.path.abspath(logical_path(path)))
     configured = Path(os.path.abspath(data_directory() / "history"))
-    if configured.exists():
-        info = configured.lstat()
+    try:
+        info = IOPath(configured).lstat()
+    except FileNotFoundError:
+        pass
+    else:
         if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
             raise ValueError("The history directory cannot be a link or junction")
-    base = configured.resolve()
+    base = logical_path(IOPath(configured).resolve())
     parts = None
     for candidate in (configured, base):
         try:
@@ -45,12 +48,12 @@ def _safe(path):
     for part in parts:
         probe /= part
         try:
-            info = probe.lstat()
+            info = IOPath(probe).lstat()
         except FileNotFoundError:
             continue
         if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
             raise ValueError("Session resources cannot be links or junctions")
-    return probe
+    return IOPath(probe)
 
 
 def _files(directory):
@@ -396,7 +399,7 @@ def _plan(spec, identities):
                     remove(child)
         index(root, sid, None)
     for file in _files(artifacts):
-        if spec["action"] == "fork" and file.relative_to(artifacts).parts[0] == "media-jobs":
+        if spec["action"] == "fork" and file.relative_to(artifacts).parts[0] in {"media-jobs", "external"}:
             continue  # A branch receives display history, never ownership of provider requests.
         copy(file, target_artifacts / file.relative_to(artifacts))
         if spec["action"] == "move": remove(file)

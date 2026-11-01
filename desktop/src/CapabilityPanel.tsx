@@ -249,7 +249,7 @@ export default function CapabilityPanel({
                         </div>
                         <p>{worker.task}</p>
                         <div className="card-meta">
-                          <span>{worker.agent_type || "子代理"} · {worker.model || (worker.executor?.startsWith("ssh:") ? "执行主机默认模型" : "继承主模型")}</span>
+                          <span>{worker.agent_type || "子代理"}{worker.backend === "claude" ? " · Claude Code" : ""} · {worker.model || (worker.executor?.startsWith("ssh:") ? "执行主机默认模型" : "继承主模型")}</span>
                           <span>
                             {worker.outcome_unknown ? "结果待确认" : worker.status === "queued" ? worker.phase === "awaiting_resume" ? "等待恢复队列" : "排队中" : worker.status === "running"
                               ? worker.phase === "starting" ? "启动中" : "执行中"

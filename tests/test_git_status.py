@@ -80,7 +80,9 @@ class GitStatusTests(unittest.IsolatedAsyncioTestCase):
                 self.command(root, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", text.strip())
             commit("base\n"); self.command(root, "checkout", "-b", "side"); commit("side\n")
             self.command(root, "checkout", "main"); commit("main\n")
-            with self.assertRaises(subprocess.CalledProcessError): self.command(root, "merge", "side")
+            with self.assertRaises(subprocess.CalledProcessError) as conflict:
+                self.command(root, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "merge", "side")
+            self.assertIn(b"CONFLICT", conflict.exception.output)
             status = await git_status(root)
             self.assertEqual((status["conflicted"], status["staged"], status["changed"]), (1, 0, 1))
             self.assertTrue(status["dirty"])

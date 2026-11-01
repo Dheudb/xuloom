@@ -13,7 +13,7 @@
 
 Windows 下载包自带 Python 和 MCP SDK，无需安装 Python、选择解释器或安装 Node.js。第三方 MCP 程序可能另需 Node.js、uv 等环境，按服务说明准备。
 
-当前源码版本为 **v0.1.7**，可下载成品及校验和以 Releases 为准。成品面向 Windows x64；Linux/macOS 可使用源码 CLI，尚无对应的桌面发行包。
+当前源码版本为 **v0.1.8**，可下载成品及校验和以 Releases 为准。成品面向 Windows x64；Linux/macOS 可使用源码 CLI，尚无对应的桌面发行包。
 
 执行过程按操作显示图标和简短说明：图片、编辑、终端、搜索等各有标识，点击过程行可展开参数与结果，完成后整轮过程自动折叠。读取图片会显示可点击放大的缩略图；会话保存图片快照，原文件被修改或删除后仍能回看。预览本身不会调用模型；模型理解图片还需所连接的接口支持图片输入。
 
@@ -92,7 +92,7 @@ skills: [literature-review]
 报告来源与理由，不擅自修改文件。
 ```
 
-先添加示例依赖的 `literature-review` Skill。`tools` 可使用 Read、Write、Edit、Exec、Grep、Glob、Skill 等别名或实际工具名；省略 `tools` 继承工具，手动填写 `tools: []` 表示禁用全部工具。省略 `connection` 时，`model` 使用主代理连接；添加 `connection: <已配置连接的 ID>` 可跨供应商运行原生子代理。桌面与 CLI 共用定义和凭据，详见 [角色连接](docs/capabilities.md#角色连接与异构原生子代理)。这不等于 SSH 或接入其他 Agent CLI。
+先添加示例依赖的 `literature-review` Skill。`tools` 可使用 Read、Write、Edit、Exec、Grep、Glob、Skill 等别名或实际工具名；省略 `tools` 继承工具，手动填写 `tools: []` 表示禁用全部工具。省略 `connection` 时，`model` 使用主代理连接；添加 `connection: <已配置连接的 ID>` 可跨供应商运行原生子代理。桌面与 CLI 共用定义和凭据，详见 [角色连接](docs/capabilities.md#角色连接与异构原生子代理)。[原生 SSH worker](docs/distributed-workers-plan.md) 使用执行主机的连接和配置；可选的 [Claude Code 后端](docs/external-agents.md) 使用已安装 CLI 和受控 MCP 工具。Codex、Pi、DSH 外部后端仍待接入。
 
 在右侧“代理”中点角色的 **分配任务**，或在 prompt 中明确指定角色。创建定义不会自动启动代理。输入框中的 **Solo** 关闭委派，**Auto** 按需委派，**Ultra** 更积极地寻找并行机会。两档默认不设子代理数量限制；只有显式设置宿主并发限制时，超额已接受任务才排队。详见 [协作与配置](docs/capabilities.md)。
 

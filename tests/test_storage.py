@@ -9,6 +9,29 @@ from xuloom.core.storage import session_directory, history_root, atomic_text
 
 
 class StorageTests(unittest.TestCase):
+    def test_long_history_paths_are_read_copied_and_deleted_without_hidden_files(self):
+        from xuloom.core.storage import IOPath, atomic_copy, atomic_text, file_hash
+        from xuloom.core import session_mutation as actor
+        import shutil
+        with tempfile.TemporaryDirectory(prefix="xuloom-long-path-") as temp, patch.dict(os.environ, {"XULOOM_DATA_DIR": str(Path(temp) / "data")}):
+            root = Path(temp); workspace = root / "workspace"; workspace.mkdir()
+            manager = SessionManager(cwd=workspace)
+            try:
+                manager.save_session_state("long-history", [{"role": "user", "content": "owned"}])
+                folder = history_root(workspace) / "tool-results/long-history" / ("a" * 120) / ("b" * 120)
+                source, target = IOPath(folder / "source.txt"), IOPath(folder / "copy.txt")
+                atomic_text(source, "complete evidence"); atomic_copy(target, source, file_hash(source))
+                self.assertEqual(target.read_text(encoding="utf8"), "complete evidence")
+                self.assertNotIn("\\\\?\\", str(target))
+                self.assertEqual({p.name for p in actor._files(folder.parent)}, {"source.txt", "copy.txt"})
+                manager.delete_session("long-history")
+                self.assertFalse(IOPath(folder.parent).exists())
+            finally:
+                manager.release_writer()
+                # Only this explicit temporary root; fail loudly if cleanup was incomplete.
+                assert root.parent.resolve() == Path(tempfile.gettempdir()).resolve() and root.name.startswith("xuloom-long-path-")
+                shutil.rmtree(IOPath(root))
+
     def test_changed_streamed_copy_never_publishes_unverified_bytes(self):
         from xuloom.core.storage import atomic_copy, file_hash
         from xuloom.core.session_lock import SessionConflictError
