@@ -6,6 +6,8 @@ CLI 与桌面端使用同一套执行引擎。下列能力通过模型工具调�
 
 `run(text, selected_skills=[...])` 返回 `RunResult`；`submit_message` 的最终事件包含同一回执。使用 `async with QueryEngine(...) as engine`，或在 `finally` 中 `await engine.aclose()`，释放连接、所属任务和会话写者锁。
 
+`QueryEngine` 可显式指定 `api_key` 和 `network_mode`，连接参数绑定实例及压缩器，不通过热切换改写进程环境。并发、恢复及鉴权边界见 [实例连接绑定](runtime-connections.md)。
+
 `await engine.agents(action, **parameters)` 沿用 `agent_tool` 的动作与字段，返回 Python 字典。上层无需从自然语言提取 ID，且所有调用仍经过原权限入口和持久化执行日志。返回字段如下：
 
 | 字段 | 语义 |

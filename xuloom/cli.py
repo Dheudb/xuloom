@@ -98,7 +98,8 @@ async def open_engine(args, emit):
             clients = [engine.client, engine.compactor.client]
             if not engine.load_session(args.session): raise ValueError("Session does not exist in this directory")
             for client in clients:
-                if client: await client.close()
+                if client and client is not engine.client and client is not engine.compactor.client:
+                    await client.close()
             engine.permission_manager.approval_policy.set_mode(args.permission)
         engine.require_writer()
         if getattr(args, "sandbox", None) is not None:

@@ -73,6 +73,17 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result["session_id"], sid)
         self.assertIn("Analyze this sentence", json.dumps(self.requests[-1], ensure_ascii=False))
 
+    def test_empty_desktop_draft_can_start_in_cli_without_closing_its_current_client(self):
+        from unittest.mock import patch
+        from xuloom.core.session import SessionManager
+        with patch.dict(os.environ, self.env), SessionManager(cwd=self.root) as manager:
+            self.assertTrue(manager.save_session_state("empty-desktop-draft", [], metadata={}))
+        process, _, result = self.cli("exec", "Start this empty draft", "--session", "empty-desktop-draft")
+        self.assertEqual(process.returncode, 0, process.stderr)
+        self.assertEqual(result["text"], "CLI_RESULT_你好")
+        self.assertEqual(result["session_id"], "empty-desktop-draft")
+        self.assertEqual(len(self.requests), 1)
+
     def test_collaboration_flag_and_resume_preserve_mode_without_changing_permissions(self):
         first, _, result = self.cli("exec", "Hello", "--collaboration", "ultra")
         self.assertEqual(first.returncode, 0, first.stderr)

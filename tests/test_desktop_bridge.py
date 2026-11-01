@@ -133,7 +133,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         engine = Mock(client=Mock(close=AsyncMock()), compactor=Mock(client=Mock(close=AsyncMock())))
         with patch("xuloom.desktop.bridge.load_config", return_value=cfg), patch.dict(os.environ):
             await self.bridge.sync_model(engine, force=True)
-            engine.switch_model_runtime.assert_called_once_with(provider="openai", model="current-model", api_base_url="https://current.invalid/v1", api_key="private-fixture", persist=False)
+            engine.switch_model_runtime.assert_called_once_with(provider="openai", model="current-model", api_base_url="https://current.invalid/v1", api_key="private-fixture", network_mode="direct", persist=False)
             engine.client.close.assert_awaited_once()
             await self.bridge.sync_model(engine)
             self.assertEqual(engine.switch_model_runtime.call_count, 1)

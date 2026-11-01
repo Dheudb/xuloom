@@ -14,16 +14,11 @@ from typing import Optional
 
 _logger = logging.getLogger(__name__)
 from anthropic import (
-    AsyncAnthropic,
     APIConnectionError,
     APIStatusError,
     InternalServerError,
     RateLimitError,
 )
-try:
-    from openai import AsyncOpenAI
-except Exception:
-    AsyncOpenAI = None
 try:
     import git
 except ImportError:
@@ -143,6 +138,8 @@ class QueryEngine:
         reasoning_effort=None,
         collaboration_mode=None,
         execution_mode=None,
+        api_key=None,
+        network_mode=None,
     ):
         from xuloom.security.execution import ExecutionSandbox
         self.execution_sandbox = ExecutionSandbox(cwd or os.getcwd(), execution_mode or os.environ.get("XULOOM_EXECUTION_MODE", "host"))
@@ -152,7 +149,11 @@ class QueryEngine:
             raise ValueError("Unsupported reasoning_effort")
         self.reasoning_effort = reasoning_effort
         self.model_provider = self._resolve_model_provider(model_provider, model)
-        self.api_base_url = api_base_url or os.environ.get("OPENAI_BASE_URL", "")
+        self.api_base_url = api_base_url if api_base_url is not None else os.environ.get(self.model_provider.upper() + "_BASE_URL", "")
+        self._api_key = api_key if api_key is not None else os.environ.get(self.model_provider.upper() + "_API_KEY", "")
+        from xuloom.core.network import model_network_mode
+        self.network_mode = model_network_mode(network_mode)
+        self._retired_model_clients = []
         self.local_tokenizer_path = (
             local_tokenizer_path
             or os.environ.get("XULOOM_LOCAL_TOKENIZER_PATH", "")
@@ -194,6 +195,8 @@ class QueryEngine:
             provider=self.model_provider,
             api_base_url=self.api_base_url,
             local_tokenizer_path=self.local_tokenizer_path,
+            api_key=self._api_key,
+            network_mode=self.network_mode,
         )
         self.plan_manager = PlanManager(session_id=self.session_id)
         self.structured_output_manager = StructuredOutputManager()
@@ -402,47 +405,43 @@ class QueryEngine:
         model: str = None,
         api_base_url: str = None,
         api_key: str = None,
+        network_mode: str = None,
         persist: bool = True,
     ) -> dict:
         """
         Hot-swap the model provider, model name, API base URL, and/or API key at runtime.
         Returns a dict with the new effective configuration.
         """
+        self._assert_open()
+        workers = self.tool_context.get("subagent_tasks")
+        if workers and any(not task.done() for task in workers.tasks.values()):
+            raise ValueError("Finish or cancel owned workers before changing the model connection")
+        from xuloom.core.network import model_network_mode, create_model_client
+        next_network = model_network_mode(network_mode if network_mode is not None else self.network_mode)
         next_provider = self._resolve_model_provider(provider or self.model_provider, model or self.primary_model)
-        next_profile = configured_profile(next_provider, model if model is not None else self.primary_model,
-            api_base_url if api_base_url is not None else self.api_base_url)
-        if next_provider != self.model_provider or model is not None and model != self.primary_model or next_profile != self.reasoning_profile:
+        next_model = model if model is not None else self.primary_model
+        next_base = api_base_url if api_base_url is not None else (self.api_base_url if next_provider == self.model_provider else os.environ.get(next_provider.upper() + "_BASE_URL", ""))
+        next_key = api_key if api_key is not None else (self._api_key if next_provider == self.model_provider else os.environ.get(next_provider.upper() + "_API_KEY", ""))
+        next_fallback = self._resolve_fallback_model(None, provider=next_provider, primary_model=next_model)
+        next_profile = configured_profile(next_provider, next_model, next_base)
+        next_client = create_model_client(provider=next_provider, model=next_model, api_base_url=next_base, api_key=next_key, network_mode=next_network)
+        try:
+            next_compactor = MemoryCompactor(model=next_fallback or next_model, provider=next_provider,
+                api_base_url=next_base, local_tokenizer_path=self.local_tokenizer_path, api_key=next_key, network_mode=next_network)
+        except BaseException:
+            self._retired_model_clients.append(next_client)
+            raise
+        if next_provider != self.model_provider or next_model != self.primary_model or next_profile != self.reasoning_profile:
             self._strip_thinking_signatures_from_history()
+        self._retired_model_clients = [client for client in self._retired_model_clients if not client.is_closed]
+        self._retired_model_clients.extend(client for client in (self.client, self.compactor.client) if client and not client.is_closed)
+        self.model_provider, self.primary_model, self.model = next_provider, next_model, next_model
+        self.api_base_url, self._api_key, self.network_mode = next_base, next_key, next_network
+        self.fallback_model = next_fallback
         self.reasoning_profile = next_profile
         self.reasoning_effort = None  # Per-model controls must not leak from the previous model.
         self._thinking_config_explicit = False
-        if provider:
-            self.model_provider = self._resolve_model_provider(provider, model or self.primary_model)
-        if model is not None:
-            self.primary_model = model
-            self.model = model
-        self.fallback_model = self._resolve_fallback_model(None)
-        if api_base_url is not None:
-            self.api_base_url = api_base_url
-            base_variable = self.model_provider.upper() + "_BASE_URL"
-            if api_base_url:
-                os.environ[base_variable] = api_base_url
-            else:
-                os.environ.pop(base_variable, None)
-        if api_key is not None:
-            key_variable = self.model_provider.upper() + "_API_KEY"
-            if api_key:
-                os.environ[key_variable] = api_key
-            else:
-                os.environ.pop(key_variable, None)
-
-        self.client = self._build_model_client()
-        self.compactor = MemoryCompactor(
-            model=self.fallback_model or self.primary_model,
-            provider=self.model_provider,
-            api_base_url=self.api_base_url,
-            local_tokenizer_path=self.local_tokenizer_path,
-        )
+        self.client, self.compactor = next_client, next_compactor
         self._sync_model_runtime_context()
         if persist:
             self.persist_session_state()
@@ -451,10 +450,7 @@ class QueryEngine:
             "provider": self.model_provider,
             "model": self.primary_model,
             "api_base_url": self.api_base_url or "(default)",
-            "has_api_key": bool(
-                os.environ.get("OPENAI_API_KEY") if self.model_provider == "openai"
-                else os.environ.get("ANTHROPIC_API_KEY")
-            ),
+            "has_api_key": bool(self._api_key),
         }
 
     def _sync_model_runtime_context(self):
@@ -471,6 +467,9 @@ class QueryEngine:
         self.tool_context["reasoning_effort"] = self.reasoning_effort
         self.tool_context["reasoning_profile"] = copy.deepcopy(self.reasoning_profile)
         self.tool_context["thinking_config_explicit"] = self._thinking_config_explicit
+        # Internal callable only: never place credentials into serializable
+        # tool descriptions, worker records or checkpoint metadata.
+        self.tool_context["model_client_options"] = lambda: {"api_key": self._api_key, "network_mode": self.network_mode}
 
     def _resolve_model_provider(self, provider: str = None, model: str = None) -> str:
         resolved = str(
@@ -492,39 +491,29 @@ class QueryEngine:
     def _resolve_primary_model(self, model: Optional[str]) -> str:
         candidate = str(model or "").strip()
         if self.model_provider == "openai":
-            if not candidate or candidate.startswith("claude-"):
+            if not candidate:
                 return os.environ.get("OPENAI_MODEL", "") or os.environ.get("XULOOM_OPENAI_MODEL", "") or ""
             return candidate
         if not candidate:
             return os.environ.get("ANTHROPIC_MODEL", "") or os.environ.get("XULOOM_ANTHROPIC_MODEL", "") or ""
         return candidate
 
-    def _resolve_fallback_model(self, fallback_model: Optional[str]) -> str:
+    def _resolve_fallback_model(self, fallback_model: Optional[str], *, provider=None, primary_model=None) -> str:
         candidate = str(fallback_model or "").strip()
-        if self.model_provider == "openai":
-            if not candidate or candidate.startswith("claude-"):
-                return os.environ.get("OPENAI_FALLBACK_MODEL", "") or os.environ.get("XULOOM_OPENAI_FALLBACK_MODEL", "") or self.primary_model
+        provider = provider if provider is not None else self.model_provider
+        primary_model = primary_model if primary_model is not None else self.primary_model
+        if provider == "openai":
+            if not candidate:
+                return os.environ.get("OPENAI_FALLBACK_MODEL", "") or os.environ.get("XULOOM_OPENAI_FALLBACK_MODEL", "") or primary_model
             return candidate
         if not candidate:
-            return os.environ.get("ANTHROPIC_FALLBACK_MODEL", "") or self.primary_model
+            return os.environ.get("ANTHROPIC_FALLBACK_MODEL", "") or primary_model
         return candidate
 
     def _build_model_client(self):
-        from xuloom.core.network import model_http_client
-        if self.model_provider == "openai":
-            if AsyncOpenAI is None:
-                raise RuntimeError(
-                    "OpenAI provider requested but openai SDK is not installed."
-                )
-            kwargs = {}
-            if not self.primary_model:
-                kwargs["api_key"] = "not-configured"
-            if self.api_base_url:
-                kwargs["base_url"] = self.api_base_url
-            from openai import DefaultAsyncHttpxClient
-            return AsyncOpenAI(http_client=model_http_client(DefaultAsyncHttpxClient), **kwargs)
-        from anthropic import DefaultAsyncHttpxClient
-        return AsyncAnthropic(http_client=model_http_client(DefaultAsyncHttpxClient))
+        from xuloom.core.network import create_model_client
+        return create_model_client(provider=self.model_provider, model=self.primary_model,
+            api_base_url=self.api_base_url, api_key=self._api_key, network_mode=self.network_mode)
 
     @property
     def is_configured(self) -> bool:
@@ -2619,28 +2608,25 @@ class QueryEngine:
             self.tool_context["workspace_moves"] = metadata.get("workspace_moves", [])
             self.turn_traces = metadata.get("turn_traces", [])
             model_runtime = metadata.get("model_runtime", {}) or {}
+            # Checkpoints describe past execution; they cannot redirect this
+            # instance's current credentials to another endpoint/provider.
             if model_runtime:
-                self.model_provider = self._resolve_model_provider(
-                    model_runtime.get("provider"),
-                    model_runtime.get("primary_model"),
-                )
-                self.api_base_url = str(model_runtime.get("api_base_url", self.api_base_url) or "")
-                self.local_tokenizer_path = str(
-                    model_runtime.get("local_tokenizer_path", self.local_tokenizer_path) or ""
-                )
-                self.primary_model = str(
-                    model_runtime.get("primary_model", self.primary_model) or self.primary_model
-                )
-                self.fallback_model = str(
-                    model_runtime.get("fallback_model", self.fallback_model) or self.fallback_model
-                )
+                previous_model = self.primary_model
+                if model_runtime.get("provider") == self.model_provider and str(model_runtime.get("api_base_url") or "") == self.api_base_url:
+                    self.primary_model = str(model_runtime.get("primary_model", self.primary_model) or self.primary_model)
+                    self.fallback_model = str(model_runtime.get("fallback_model", self.fallback_model) or self.fallback_model)
                 self.model = self.primary_model
+                if self.primary_model != previous_model:
+                    self.reasoning_profile = configured_profile(self.model_provider, self.primary_model, self.api_base_url)
+                self._retired_model_clients.extend(client for client in (self.client, self.compactor.client) if client and not client.is_closed)
                 self.client = self._build_model_client()
                 self.compactor = MemoryCompactor(
                     model=self.fallback_model or self.primary_model,
                     provider=self.model_provider,
                     api_base_url=self.api_base_url,
                     local_tokenizer_path=self.local_tokenizer_path,
+                    api_key=self._api_key,
+                    network_mode=self.network_mode,
                 )
                 self._sync_model_runtime_context()
             self.todo_manager.load(metadata.get("todos", []))
@@ -2861,6 +2847,7 @@ class QueryEngine:
         cleanup = [self.client.close()]
         if getattr(self.compactor, "client", None):
             cleanup.append(self.compactor.client.close())
+        cleanup.extend(client.close() for client in self._retired_model_clients if not client.is_closed)
         if self.agent_depth == 0:
             cleanup.append(self.browser_manager.close())
             cleanup.extend(server.stop() for server in getattr(getattr(self, "lsp_manager", None), "servers", {}).values())

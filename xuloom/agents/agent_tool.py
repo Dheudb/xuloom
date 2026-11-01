@@ -294,6 +294,7 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
             reasoning_effort=(builtin_agent_def or {}).get("reasoning_effort") or (self.context.get("reasoning_effort") if same_model else None),
             collaboration_mode="solo",
             execution_mode=getattr(self.context.get("execution_sandbox"), "mode", "host"),
+            **(self.context["model_client_options"]() if callable(self.context.get("model_client_options")) else {}),
         )
         if same_model and self.context.get("reasoning_profile") is not None:
             from xuloom.core.reasoning import request_options

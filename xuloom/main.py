@@ -842,7 +842,7 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
                         apply_connection_env(selected)
                         previous_client, previous_compactor = engine.client, engine.compactor
                         engine.switch_model_runtime(provider=selected["provider"], model=model,
-                            api_base_url=selected.get("base_url", ""), api_key=selected.get("api_key", ""))
+                            api_base_url=selected.get("base_url", ""), api_key=selected.get("api_key", ""), network_mode=selected.get("network_mode", "direct"))
                         await previous_client.close()
                         if previous_compactor.client:
                             await previous_compactor.client.close()

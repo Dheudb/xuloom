@@ -3,11 +3,6 @@ import asyncio
 import hashlib
 import json
 import os
-from anthropic import AsyncAnthropic
-try:
-    from openai import AsyncOpenAI
-except Exception:
-    AsyncOpenAI = None
 
 try:
     import tiktoken
@@ -22,16 +17,21 @@ class MemoryCompactor:
     """
     def __init__(
         self,
-        model="claude-3-5-haiku-latest",
+        model=None,
         *,
         provider: str = None,
         api_base_url: str = None,
         local_tokenizer_path: str = None,
+        api_key: str = None,
+        network_mode: str = None,
     ):
         self.provider = self._resolve_provider(provider, model)
         self.has_requested_model = bool(str(model or "").strip())
         self.model = self._resolve_model_name(model)
-        self.api_base_url = api_base_url or os.environ.get("OPENAI_BASE_URL", "")
+        self.api_base_url = api_base_url if api_base_url is not None else os.environ.get(self.provider.upper() + "_BASE_URL", "")
+        self._api_key = api_key if api_key is not None else os.environ.get(self.provider.upper() + "_API_KEY", "")
+        from xuloom.core.network import model_network_mode
+        self.network_mode = model_network_mode(network_mode)
         self.local_tokenizer_path = (
             local_tokenizer_path
             or os.environ.get("XULOOM_LOCAL_TOKENIZER_PATH", "")
@@ -60,27 +60,17 @@ class MemoryCompactor:
     def _resolve_model_name(self, model: str) -> str:
         candidate = str(model or "").strip()
         if self.provider == "openai":
-            if not candidate or candidate.startswith("claude-"):
-                return os.environ.get("XULOOM_OPENAI_COMPACTOR_MODEL", "") or os.environ.get("OPENAI_MODEL", "") or "gpt-4o-mini"
+            if not candidate:
+                return os.environ.get("XULOOM_OPENAI_COMPACTOR_MODEL", "") or os.environ.get("OPENAI_MODEL", "") or ""
             return candidate
         if not candidate:
-            return "claude-3-5-haiku-latest"
+            return os.environ.get("ANTHROPIC_MODEL", "") or ""
         return candidate
 
     def _build_client(self):
-        from xuloom.core.network import model_http_client
-        if self.provider == "openai":
-            if AsyncOpenAI is None:
-                return None
-            kwargs = {}
-            if not self.has_requested_model:
-                kwargs["api_key"] = "not-configured"
-            if self.api_base_url:
-                kwargs["base_url"] = self.api_base_url
-            from openai import DefaultAsyncHttpxClient
-            return AsyncOpenAI(http_client=model_http_client(DefaultAsyncHttpxClient), **kwargs)
-        from anthropic import DefaultAsyncHttpxClient
-        return AsyncAnthropic(http_client=model_http_client(DefaultAsyncHttpxClient))
+        from xuloom.core.network import create_model_client
+        return create_model_client(provider=self.provider, model=self.model if self.has_requested_model else "",
+            api_base_url=self.api_base_url, api_key=self._api_key, network_mode=self.network_mode)
 
     def _resolve_local_tokenizer(self):
         if not self.local_tokenizer_path:

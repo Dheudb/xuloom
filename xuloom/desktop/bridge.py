@@ -155,7 +155,7 @@ class DesktopBridge:
         else:
             apply_connection_env(active_connection(cfg))
         previous_client, previous_compactor = engine.client, engine.compactor
-        engine.switch_model_runtime(provider=provider, model=config["model"], api_base_url=config["baseUrl"], api_key=key, persist=False)
+        engine.switch_model_runtime(provider=provider, model=config["model"], api_base_url=config["baseUrl"], api_key=key, network_mode=config["networkMode"], persist=False)
         await previous_client.close()
         if previous_compactor.client:
             await previous_compactor.client.close()
