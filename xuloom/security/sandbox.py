@@ -7,7 +7,8 @@ class SandboxManager:
     Workspace change isolation using Git worktrees or directory copies.
     This does not restrict host processes, network access or arbitrary filesystem access.
     """
-    def __init__(self, sandbox_root=".xuloom_sandbox"):
+    def __init__(self, sandbox_root=".xuloom_sandbox", *, cwd=None):
+        self.cwd = os.path.abspath(cwd or os.getcwd())
         self.sandbox_root = sandbox_root
         self.active_sandbox = None
 
@@ -15,7 +16,6 @@ class SandboxManager:
         return {
             ".git",
             self.sandbox_root,
-            ".xuloom",
             ".xuloom",
             "__pycache__",
             "node_modules",
@@ -27,10 +27,10 @@ class SandboxManager:
 
     def _get_workspace_root(self):
         try:
-            repo = git.Repo(os.getcwd(), search_parent_directories=True)
+            repo = git.Repo(self.cwd, search_parent_directories=True)
             return repo.working_dir, True
         except git.InvalidGitRepositoryError:
-            return os.path.abspath(os.getcwd()), False
+            return self.cwd, False
 
     def _make_filesystem_sandbox_root(self, root_dir: str):
         parent = os.path.dirname(root_dir)
@@ -180,21 +180,26 @@ class SandboxManager:
             return f"Critical transplant failure! Sandbox remains active. Fix merge collision manually: {e}"
             
     def resolve_path(self, path_value: str) -> str:
-        """The magic mirror: Maps paths intended for real root into the sandbox quietly."""
+        """Map workspace paths without confusing similarly named sibling directories."""
         if not path_value:
             return path_value
         if not self.active_sandbox:
-            return os.path.abspath(path_value) if not os.path.isabs(path_value) else path_value
+            return os.path.abspath(os.path.join(self.cwd, path_value))
             
         root = self.active_sandbox["root"]
         sb_path = self.active_sandbox["path"]
 
-        abs_p = os.path.abspath(path_value) if not os.path.isabs(path_value) else os.path.abspath(path_value)
+        abs_p = os.path.abspath(path_value)
         if not os.path.isabs(path_value):
-            return os.path.join(sb_path, path_value)
+            return os.path.abspath(os.path.join(sb_path, path_value))
 
         # If absolute path points inside root workspace...
-        if abs_p.startswith(root) and not abs_p.startswith(sb_path):
+        def contains(base):
+            try:
+                return os.path.normcase(os.path.commonpath([abs_p, base])) == os.path.normcase(os.path.abspath(base))
+            except ValueError:  # Different Windows drives.
+                return False
+        if contains(root) and not contains(sb_path):
             rel = os.path.relpath(abs_p, root)
             return os.path.join(sb_path, rel)
 
@@ -202,7 +207,7 @@ class SandboxManager:
 
     def resolve_working_directory(self, cwd: str = None) -> str:
         if not self.active_sandbox:
-            return os.path.abspath(cwd or os.getcwd())
+            return os.path.abspath(os.path.join(self.cwd, cwd or "."))
         if not cwd:
             return self.active_sandbox["path"]
         return self.resolve_path(cwd)

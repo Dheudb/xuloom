@@ -143,9 +143,9 @@ class QueryEngine:
         model_contract=None,
     ):
         from xuloom.security.execution import ExecutionSandbox
-        self.execution_sandbox = ExecutionSandbox(cwd or os.getcwd(), execution_mode or os.environ.get("XULOOM_EXECUTION_MODE", "host"))
+        self.session_cwd = os.path.abspath(cwd or os.getcwd())
+        self.execution_sandbox = ExecutionSandbox(self.session_cwd, execution_mode or os.environ.get("XULOOM_EXECUTION_MODE", "host"))
         self.collaboration_mode = collaboration_mode or os.environ.get("XULOOM_COLLABORATION_MODE", "auto")
-        self.session_cwd = cwd or os.getcwd()
         if reasoning_effort is not None and reasoning_effort not in EFFORTS:
             raise ValueError("Unsupported reasoning_effort")
         self.reasoning_effort = reasoning_effort
@@ -191,8 +191,8 @@ class QueryEngine:
         self.parent_agent_id = parent_agent_id
         self.agent_depth = agent_depth
         self.agent_role = agent_role
-        self.context_builder = ContextBuilder()
-        self.hook_manager = HookManager()
+        self.context_builder = ContextBuilder(self.session_cwd)
+        self.hook_manager = HookManager(cwd=self.session_cwd)
         self.hook_manager.execution_sandbox = self.execution_sandbox
         self.session_id = str(uuid.uuid4())
         self.compactor = MemoryCompactor(
@@ -208,6 +208,7 @@ class QueryEngine:
         self.security_classifier = AutoSecurityClassifier()
         self.permission_manager = PermissionManager(
             permission_handler,
+            config_path=configuration_file(self.session_cwd, "permissions.json"),
             mode_getter=self.plan_manager.get_mode,
             state_change_callback=self.persist_session_state,
             classifier_manager=self.security_classifier,
@@ -244,11 +245,11 @@ class QueryEngine:
         self.active_run_task = None
         self.active_streaming_tool_entries = []
         self.active_stream = None
-        self.sandbox_manager = SandboxManager()
+        self.sandbox_manager = SandboxManager(cwd=self.session_cwd)
         runtime_root = history_root(self.session_cwd)
         self.browser_manager = BrowserSessionManager(artifact_dir=str(runtime_root / "browser"))
         self.shell_task_manager = ShellTaskManager(log_dir=str(runtime_root / "shell-tasks"))
-        self.memory_file_manager = MemoryFileManager()
+        self.memory_file_manager = MemoryFileManager(cwd=self.session_cwd)
         self.session_memory_manager = SessionMemoryManager(
             session_id=self.session_id,
             compactor=self.compactor,
@@ -670,7 +671,7 @@ class QueryEngine:
         if git is None:
             return None
         try:
-            return git.Repo(start_path or os.getcwd(), search_parent_directories=True)
+            return git.Repo(start_path or self.session_cwd, search_parent_directories=True)
         except Exception:
             return None
 
@@ -1358,7 +1359,7 @@ class QueryEngine:
         return normalized or {"type": "disabled"}
 
     def refresh_memory_files(self):
-        self.memory_file_manager.set_cwd(os.getcwd())
+        self.memory_file_manager.set_cwd(self.session_cwd)
         loaded = self.memory_file_manager.refresh()
         self.tool_context["memory_files"] = self.memory_file_manager.export_state()
         return loaded
@@ -1392,7 +1393,7 @@ class QueryEngine:
         event_callback=None,
     ):
         result = self.hook_manager.evaluate_post_sampling_hooks({
-            "cwd": os.getcwd(),
+            "cwd": self.session_cwd,
             "mode": self.get_mode(),
             "agent_id": self.agent_id,
             "agent_role": self.agent_role,
@@ -3962,7 +3963,7 @@ class QueryEngine:
             self.session_started = False
         if not self.session_started:
             session_start_outputs = self._run_hooks("SessionStart", {
-                "cwd": os.getcwd(),
+                "cwd": self.session_cwd,
                 "mode": self.get_mode(),
                 "agent_id": self.agent_id,
                 "agent_role": self.agent_role,
@@ -4342,7 +4343,7 @@ class QueryEngine:
                         )
                         continue
                     stop_hook_decision = await self.hook_manager.evaluate_stop_hooks_async({
-                        "cwd": os.getcwd(),
+                        "cwd": self.session_cwd,
                         "mode": self.get_mode(),
                         "agent_id": self.agent_id,
                         "agent_role": self.agent_role,
@@ -4374,7 +4375,7 @@ class QueryEngine:
                         )
                         continue
                     turn_end_outputs = self._run_hooks("TurnEnd", {
-                        "cwd": os.getcwd(),
+                        "cwd": self.session_cwd,
                         "mode": self.get_mode(),
                         "agent_id": self.agent_id,
                         "agent_role": self.agent_role,

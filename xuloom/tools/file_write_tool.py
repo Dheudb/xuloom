@@ -12,6 +12,7 @@ class FileWriteToolInput(BaseModel):
 
 
 class FileWriteTool(BaseAgenticTool):
+    workspace_paths = {"file_path": False}
     name = "file_write_tool"
     description = "Writes a file to the local filesystem. Overwrites the existing file if one exists at the path."
     input_schema = FileWriteToolInput

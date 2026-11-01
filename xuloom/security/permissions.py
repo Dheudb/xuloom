@@ -94,6 +94,8 @@ class PermissionManager:
         self.consecutive_denials = {}
         self.denial_escalation_threshold = 3
         self.pending_request = None
+        # Live restrictive ancestry, never an inherited approval memory.
+        self.restriction_parent = None
 
     def set_prompt_handler(self, prompt_handler: Optional[Callable[[PermissionRequest], Any]]):
         self.prompt_handler = prompt_handler
@@ -177,12 +179,8 @@ class PermissionManager:
             return self._finalize_permission_decision(tool_name, PermissionDecision("deny",
                 "权限配置无法读取或格式无效，已阻止执行。请修复配置后重试：" + str(self.config_path),
                 source="config_error", metadata={"code": "invalid_permission_config"}), request)
-        rule_decisions = [self._evaluate_rule_layer(request, config)]
-        # A smaller wire surface must not bypass existing capability rules.
-        # Aliases come from the trusted tool class, never from model input.
-        for alias, defaults in getattr(tool, "permission_aliases", {}).items():
-            alias_request = replace(request, tool_name=alias, input_payload={**defaults, **request.input_payload})
-            rule_decisions.append(self._evaluate_rule_layer(alias_request, config))
+        rule_decisions = [self._evaluate_rule_layer(candidate, config) for candidate in self._rule_requests(tool, request)]
+        rule_decisions.extend(self._inherited_restrictions(tool, request))
         rule_decision = min((decision for decision in rule_decisions if decision),
             key=lambda decision: {"deny": 0, "ask": 1, "allow": 2}[decision.behavior], default=None)
         if rule_decision and rule_decision.behavior != "allow":
@@ -282,14 +280,48 @@ class PermissionManager:
             source="prompt",
         ), request)
 
-    def _plan_decision(self, request):
+    @staticmethod
+    def _rule_requests(tool, request):
+        # Only trusted tool classes define aliases; model arguments cannot invent them.
+        yield request
+        for alias, defaults in getattr(tool, "permission_aliases", {}).items():
+            yield replace(request, tool_name=alias, input_payload={**defaults, **request.input_payload})
+
+    def _inherited_restrictions(self, tool, request):
+        decisions, seen, parent = [], {id(self)}, self.restriction_parent
+        while parent is not None:
+            if not isinstance(parent, PermissionManager) or id(parent) in seen:
+                return [PermissionDecision("deny", "Invalid delegated permission ancestry.", source="delegation_policy_error")]
+            seen.add(id(parent))
+            mode = parent.mode_getter() if callable(parent.mode_getter) else "normal"
+            inherited = replace(request, mode=mode)
+            # A delegated planner may write its own plan, never other project files.
+            sid = self.session_id_getter() if callable(self.session_id_getter) else ""
+            plan = parent._plan_decision(inherited, session_id=sid)
+            if plan and plan.behavior == "deny":
+                decisions.append(plan)
+            try:
+                config = parent._load_config()
+            except PermissionConfigError:
+                return [PermissionDecision("deny", "Delegating session permission configuration is unreadable or invalid.", source="delegation_policy_error")]
+            for candidate in self._rule_requests(tool, inherited):
+                decision = parent._evaluate_rule_layer(candidate, config)
+                if decision and decision.behavior in {"deny", "ask"}:
+                    decisions.append(replace(decision, reason="Delegating session: " + decision.reason, source="delegated_" + decision.source))
+                if parent._should_escalate_denial(candidate.tool_name):
+                    decisions.append(PermissionDecision("deny", "Delegating session's repeated-denial safeguard applies.", source="delegated_denial_tracking"))
+            parent = parent.restriction_parent
+        return decisions
+
+    def _plan_decision(self, request, *, session_id=None):
         if request.mode != "plan":
             return None
         if request.tool_name not in self.plan_mode_allowlist and not request.is_read_only:
             return PermissionDecision("deny", "Plan mode is active. Exit plan mode before making changes.", source="plan_mode")
         if request.tool_name in {"file_write_tool", "file_edit_tool"}:
             file_path = request.input_payload.get("file_path", "")
-            session_id = self.session_id_getter() if callable(self.session_id_getter) else ""
+            if session_id is None:
+                session_id = self.session_id_getter() if callable(self.session_id_getter) else ""
             if file_path and session_id and is_session_plan_file(os.path.abspath(file_path), session_id):
                 return PermissionDecision("allow", "Plan file write auto-approved in plan mode.", source="plan_file_auto_allow")
             return PermissionDecision("deny", "Plan mode only allows editing the plan file. Exit plan mode before editing other files.", source="plan_mode_non_plan_file")
@@ -629,7 +661,7 @@ class PermissionManager:
             self.consecutive_denials[tool_name] = 0
             return finalized
 
-        if behavior == "deny" and decision.source != "config_error":
+        if behavior == "deny" and decision.source not in {"config_error", "delegation_policy_error"}:
             self._record_denial(tool_name, finalized)
             finalized.metadata["denial_count_after"] = int(self.consecutive_denials.get(tool_name, 0) or 0)
             return finalized

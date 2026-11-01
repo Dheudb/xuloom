@@ -13,6 +13,7 @@ class FileEditToolInput(BaseModel):
     replace_all: bool = Field(False, description="Replace all occurrences of old_string (default false)")
 
 class FileEditTool(BaseAgenticTool):
+    workspace_paths = {"file_path": False}
     name = "file_edit_tool"
     description = "Performs exact string replacements in files. The edit will FAIL if old_string is not unique in the file. You must use file_read_tool at least once before editing."
     input_schema = FileEditToolInput

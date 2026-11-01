@@ -190,13 +190,13 @@ class ContextBuilder:
         legacy = SkillRegistry(self.cwd).settings().get("legacy_instructions", False) is True
         global_candidates = [("global", home / name / "instructions.md") for name in (".xuloom",)]
         if legacy:
-            global_candidates[:0] = [("legacy global", home / ".claude" / "CLAUDE.md"), ("legacy global", home / "CLAUDE.md")]
+            global_candidates[:0] = [("legacy global", home / ".claude" / "CLAUDE.md"), ("legacy global", home / "CLAUDE.md"), ("legacy global", home / ".xuloom" / "CLAUDE.md")]
 
         dirs_bottom_up = list(reversed([cwd] + list(cwd.parents)))
         project_candidates = []
         for d in dirs_bottom_up:
             if legacy:
-                project_candidates += [("legacy project", d / ".claude" / "CLAUDE.md"), ("legacy project", d / "CLAUDE.md")]
+                project_candidates += [("legacy project", d / ".claude" / "CLAUDE.md"), ("legacy project", d / "CLAUDE.md"), ("legacy project", d / ".xuloom" / "CLAUDE.md")]
             project_candidates += [("project", d / "AGENTS.md"), ("project", d / ".xuloom" / "instructions.md")]
 
         for scope, path in global_candidates + project_candidates:

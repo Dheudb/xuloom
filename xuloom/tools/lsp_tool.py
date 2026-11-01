@@ -10,6 +10,7 @@ class LspToolInput(BaseModel):
     character: int = Field(..., description="0-indexed character offset from line start.")
 
 class LspTool(BaseAgenticTool):
+    workspace_paths = {"absolute_path": False}
     name = "lsp_tool"
     description = "Semantic bridge to Language Servers for jumping to definitions, finding references, or getting type hover info. Uses 0-indexed positions."
     input_schema = LspToolInput

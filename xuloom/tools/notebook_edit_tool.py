@@ -35,6 +35,7 @@ class NotebookEditToolInput(BaseModel):
 
 
 class NotebookEditTool(BaseAgenticTool):
+    workspace_paths = {"notebook_path": False}
     name = "notebook_edit_tool"
     description = "Replace, insert, or delete cells in a Jupyter notebook (.ipynb file)."
     input_schema = NotebookEditToolInput

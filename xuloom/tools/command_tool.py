@@ -26,6 +26,7 @@ class CommandInput(BaseModel):
 
 
 class CommandTool(BaseAgenticTool):
+    workspace_paths = {"cwd": True}
     name = "command_tool"
     description = "Run owned commands with exact UTF-8 stdin, bounded polling and paged lossless stdout/stderr. Reuse command_id to write/read; pipe sessions, not PTYs."
     input_schema = CommandInput

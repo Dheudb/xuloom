@@ -35,6 +35,7 @@ class _BaseTaskTool(BaseAgenticTool):
 
 
 class TaskCreateTool(_BaseTaskTool):
+    workspace_paths = {"cwd": True}
     name = "task_create_tool"
     description = "Starts a long-running shell command in the background and returns a task id for later monitoring."
     input_schema = TaskCreateToolInput

@@ -155,7 +155,14 @@ async def execute_tool(self, tool_block, sys_print_callback=print, *, turn: int 
             confinement.check_tool(tool_name)
             normalized_input = tool_inputs
             if hasattr(handler, "input_schema"):
-                normalized_input = handler.input_schema(**tool_inputs).model_dump()
+                validated_input = handler.input_schema(**tool_inputs)
+                normalized_input = validated_input.model_dump()
+                tool_inputs = validated_input.model_dump(exclude_unset=True)
+            prepare_input = getattr(handler, "prepare_input", None)
+            if callable(prepare_input):
+                # Permissions inspect exactly the paths that will execute.
+                normalized_input = prepare_input(normalized_input)
+                tool_inputs = prepare_input(tool_inputs)
             validate_input = getattr(handler, "validate_input", None)
             validation_error = validate_input(**normalized_input) if callable(validate_input) else None
             if isinstance(validation_error, str) and validation_error.strip():

@@ -26,6 +26,7 @@ class BrowserToolInput(BaseModel):
 
 
 class BrowserTool(BaseAgenticTool):
+    workspace_paths = {"path": False, "file_path": False}
     name = "browser_tool"
     description = "Render local HTML or a website in a hidden browser and return a screenshot to inspect UI changes. Also supports browser navigation, DOM inspection, clicking, typing and screenshots. Desktop render needs no browser installation; CLI requires the browser extra and Chromium."
     input_schema = BrowserToolInput

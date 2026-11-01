@@ -59,8 +59,9 @@ class HookManager:
     agent retries with the error feedback injected into context.
     """
 
-    def __init__(self, config_path=None):
-        self.config_path = str(config_path or configuration_file(os.getcwd(), "hooks.json"))
+    def __init__(self, config_path=None, *, cwd=None):
+        self.cwd = os.path.abspath(cwd or os.getcwd())
+        self.config_path = os.path.abspath(os.path.join(self.cwd, os.fspath(config_path))) if config_path else str(configuration_file(self.cwd, "hooks.json"))
 
     def execute(self, event: str, payload: Dict[str, object]) -> List[str]:
         try:
@@ -321,7 +322,7 @@ class HookManager:
         json_input = json.dumps(payload, ensure_ascii=False, default=str)
 
         env = os.environ.copy()
-        env["XULOOM_PROJECT_DIR"] = os.getcwd()
+        env["XULOOM_PROJECT_DIR"] = self.cwd
 
         is_windows = sys.platform == "win32"
         shell_cmd = command
@@ -335,7 +336,7 @@ class HookManager:
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     env=env,
-                    cwd=os.getcwd(),
+                    cwd=self.cwd,
                     **process_options(),
                 )
             else:
@@ -345,7 +346,7 @@ class HookManager:
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     env=env,
-                    cwd=os.getcwd(),
+                    cwd=self.cwd,
                     **process_options(),
                 )
 

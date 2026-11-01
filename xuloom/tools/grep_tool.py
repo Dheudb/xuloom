@@ -30,6 +30,7 @@ class GrepToolInput(BaseModel):
 
 
 class GrepTool(BaseAgenticTool):
+    workspace_paths = {"path": True}
     name = "grep_tool"
     description = (
         "A powerful search tool built on ripgrep. "

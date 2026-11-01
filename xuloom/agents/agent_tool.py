@@ -234,6 +234,7 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
         # Child agents keep the same approval UX, but start with a clean
         # permission memory so parent session-wide allow rules do not leak.
         sub_engine.permission_manager.always_allow_tools = set()
+        sub_engine.permission_manager.restriction_parent = parent_permission_manager
         sub_engine.permission_manager.approval_policy = parent_permission_manager.approval_policy
         sub_engine.tool_context["permission_manager"] = sub_engine.permission_manager
         sub_engine.tool_context["permission_handler"] = self.context.get("permission_handler")
@@ -404,6 +405,7 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
         if resume_state:
             sub_engine.messages = copy.deepcopy(resume_state["messages"])
             metadata = resume_state.get("metadata", {})
+            sub_engine.permission_manager.load_state({**metadata.get("permissions", {}), "always_allow_tools": [], "pending_request": None})
             from xuloom.core.tool_execution import restore_tool_activity
             restore_tool_activity(sub_engine, metadata)
             sub_engine.tool_context["file_changes"] = metadata.get("file_changes", [])

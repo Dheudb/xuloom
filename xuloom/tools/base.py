@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Type, Any, Dict
+import os
 from pydantic import BaseModel
 
 class BaseAgenticTool(ABC):
@@ -15,6 +16,24 @@ class BaseAgenticTool(ABC):
     context: Dict[str, Any] = {}
     is_read_only: bool = False
     risk_level: str = "high"
+    # Trusted declarations, never guessed from model or MCP argument names.
+    # True means an omitted directory defaults to the engine workspace.
+    workspace_paths: Dict[str, bool] = {}
+
+    def prepare_input(self, values):
+        values = dict(values)
+        sandbox = self.context.get("sandbox_manager")
+        cwd = self.context.get("session_cwd") or os.getcwd()
+        for name, default_directory in self.workspace_paths.items():
+            value = values.get(name)
+            if not value and not default_directory:
+                continue
+            if sandbox and sandbox.active_sandbox:
+                values[name] = (sandbox.resolve_working_directory(value) if default_directory
+                    else sandbox.resolve_path(value))
+            else:
+                values[name] = os.path.abspath(os.path.join(cwd, value or "."))
+        return values
     
     @classmethod
     def get_tool_definition(cls) -> Dict[str, Any]:
@@ -83,30 +102,11 @@ class BaseAgenticTool(ABC):
         """
         sandbox = self.context.get("sandbox_manager")
         res_str = ""
+        kwargs = self.prepare_input(self.input_schema(**kwargs).model_dump())
+        if sandbox and sandbox.active_sandbox and self.workspace_paths:
+            res_str = f"[Workspace routing: {sandbox.active_sandbox['branch']}; this is not an OS security sandbox.]"
         
-        # Transparent Path Redirector Strategy: Protect LLM Context Limitations
-        if sandbox and sandbox.active_sandbox:
-            mapped_any = False
-            for k in ["file_path", "absolute_path", "TargetFile", "path", "cwd", "DirectoryPath"]:
-                if k in kwargs and kwargs[k]:
-                    if k == "cwd":
-                        kwargs[k] = sandbox.resolve_working_directory(kwargs[k])
-                    else:
-                        kwargs[k] = sandbox.resolve_path(kwargs[k])
-                    mapped_any = True
-            
-            # Default workspace routing is a convenience, not host or process confinement.
-            if self.name in ["bash_tool", "grep_tool", "glob_tool"]:
-                for k in ["path", "cwd"]:
-                    if k not in kwargs or not kwargs[k]:
-                        kwargs[k] = sandbox.resolve_working_directory(None)
-                        mapped_any = True
-                        
-            if mapped_any:
-                res_str = f"[Workspace routing: {sandbox.active_sandbox['branch']}; this is not an OS security sandbox.]\\n"
-        
-        validated_input = self.input_schema(**kwargs)
-        normalized_kwargs = validated_input.model_dump()
+        normalized_kwargs = kwargs
         validation_error = self.validate_input(**normalized_kwargs)
         if isinstance(validation_error, str) and validation_error.strip():
             raise ValueError(validation_error)

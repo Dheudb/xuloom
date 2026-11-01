@@ -24,6 +24,7 @@ class FileReadToolInput(BaseModel):
     char_limit: int = Field(3000, ge=1, le=4000, description="Maximum characters for a char_offset page.")
 
 class FileReadTool(BaseAgenticTool):
+    workspace_paths = {"file_path": False}
     name = "file_read_tool"
     description = "Read an authorized local file. Access remains subject to tool permissions and the current system execution isolation policy."
     input_schema = FileReadToolInput

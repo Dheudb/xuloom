@@ -59,6 +59,16 @@ Auto / Ultra 默认不设并发上限；只有显式配置有限的宿主并发�
 
 ## 工具发现
 
+### 实例工作目录与路径
+
+`QueryEngine(cwd=...)` 在构造时保存绝对工作目录。项目指令、权限配置、Hooks、记忆、Git 状态与工作区副本使用这个实例目录，不要求调用方改变进程全局 `cwd`。一个进程中的多个实例可分别使用各自的目录。
+
+文件读写、Notebook、目录搜索、LSP、本地浏览器路径及命令目录先按会话解析，再送到统一权限入口；权限请求里的绝对路径就是实际执行目标。工作区副本使用路径边界判断，不会把 `project-other` 误认为 `project` 的子目录。副本依然只是文件改动隔离，不是操作系统沙箱。
+
+自定义 `BaseAgenticTool` 只有明确声明的 `workspace_paths` 才参与路径解析。例如 `workspace_paths = {"file_path": False, "cwd": True}`：`False` 解析已提供的路径，`True` 还将省略的目录设为会话目录。MCP 或其他远端工具参数中的 `path` 不会仅因名称相同而被改写成本机路径。上层应通过引擎的授权入口调用工具；直接调用工具的 `execute` 不提供权限与执行日志保证。
+
+项目指令由 `ContextBuilder` 单一加载。默认读取 Xuloom 指令与 `AGENTS.md`；旧 `CLAUDE.md` 只在 `legacy_instructions=true` 时读取，不再通过记忆加载器隐式重复注入。自动记忆继续按项目目录隔离，作为历史上下文与证据，不授予额外权限。
+
 目标模式、正式非交互 CLI 和定时消息使用同一引擎与会话，见 [目标与调度](goals-and-schedules.md)。
 
 文件、命令、搜索、网页读取、Skill 和原生委派默认可用。浏览器、Notebook、REPL、LSP、工作区隔离、旧后台任务及团队工具通过 `tool_search_tool` 搜索并激活。激活只改变可见性，不改变权限、Plan 限制或中断恢复确认。

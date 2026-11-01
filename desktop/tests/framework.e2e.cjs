@@ -49,13 +49,13 @@ const server = http.createServer((req, res) => {
       const result = tools.length ? JSON.parse(tools.at(-1).content) : null;
       if (user.content === "测试通用框架") {
         switch (tools.length) {
-          case 0: return reply(res, null, "agent_tool", { prompt: "FIRST_MEMORY", model: "worker-fixture", reasoning_effort: "high", response_format: "json" });
+          case 0: return reply(res, null, "agent_tool", { prompt: "FIRST_MEMORY", model: "worker-fixture", reasoning_effort: "high", response_format: "json", run_in_background: false });
           case 1:
             assert.equal(result.agents[0].status, "completed"); workerId = result.agents[0].agent_id;
             return reply(res, null, "agent_tool", { action: "send", agent_id: workerId, prompt: "QUEUED_NOTE" });
           case 2:
             assert.equal(result.requires_followup, true);
-            return reply(res, null, "agent_tool", { action: "followup", agent_id: workerId, prompt: "SECOND", response_format: "json" });
+            return reply(res, null, "agent_tool", { action: "followup", agent_id: workerId, prompt: "SECOND", response_format: "json", run_in_background: false });
           case 3:
             assert.equal(result.agent_id, workerId); assert.equal(result.turn, 2); assert.equal(result.pending_message_count, 0);
             return reply(res, null, "agent_tool", { action: "capacity" });
@@ -70,7 +70,7 @@ const server = http.createServer((req, res) => {
         }
       }
       if (user.content === "重启后继续") {
-        if (tools.length === 0) return reply(res, null, "agent_tool", { action: "followup", agent_id: workerId, prompt: "THIRD", response_format: "json" });
+        if (tools.length === 0) return reply(res, null, "agent_tool", { action: "followup", agent_id: workerId, prompt: "THIRD", response_format: "json", run_in_background: false });
         if (tools.length === 1) {
           assert.equal(result.agent_id, workerId); assert.equal(result.turn, 3);
           return reply(res, null, "command_tool", { action: "read", command_id: commandId });
