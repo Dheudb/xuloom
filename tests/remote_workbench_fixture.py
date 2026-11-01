@@ -10,6 +10,7 @@ import subprocess
 import wave
 
 from ssh_fixture import SSHFixture, paramiko
+from remote_capture_api import CaptureModel
 
 
 def main():
@@ -24,10 +25,18 @@ def main():
     hold = threading.Event()
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args): pass
+        def do_GET(self):
+            with lock:
+                with records.open('a',encoding='utf-8') as output:
+                    output.write(json.dumps({'path':self.path,'web_headers':dict(self.headers)})+'\n')
+            self.send_response(200 if self.path=='/page' else 404)
+            self.send_header('Content-Type','text/html');self.end_headers()
+            self.wfile.write(b'<html><title>REMOTE_HTTP</title><body style="margin:0;background:#aabbcc">Remote web page</body></html>')
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             with lock:
                 with records.open("a", encoding="utf-8") as output: output.write(json.dumps({"path": self.path, "key": self.headers.get("Authorization"), "body": body})+"\n")
+            if capture_model(self,body):return
             if not body.get("stream"):
                 self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
                 self.wfile.write(json.dumps({"choices": [{"message": {"role": "assistant", "content": "memory"}}]}).encode()); return
@@ -75,6 +84,7 @@ def main():
                 self.wfile.write(frame({}, finish)+b"data: [DONE]\n\n")
             except OSError: pass
     http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    capture_model=CaptureModel(f'http://127.0.0.1:{http.server_port}')
     thread = threading.Thread(target=http.serve_forever, daemon=True); thread.start()
     model = lambda identity, key, models: {"id": identity, "name": identity, "provider": "openai", "model": models[0], "models": models, "api_key": key, "base_url": f"http://127.0.0.1:{http.server_port}/{identity}/v1"}
     (configuration/"config.json").write_text(json.dumps({"active_model_connection": "remote-models", "model_connections": [model("remote-models", "remote-key", ["remote-a", "remote-b"])]}), encoding="utf-8")

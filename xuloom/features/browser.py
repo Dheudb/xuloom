@@ -2,6 +2,7 @@ import os
 import time
 import uuid
 import base64
+import asyncio
 from pathlib import Path
 
 try:
@@ -25,8 +26,10 @@ class BrowserSessionManager:
         self._context = None
         self._last_url = None
         self.capture_callback = None
+        self._startup_lock = asyncio.Lock()
+        self._render_contexts = set()
 
-    async def render(self, *, url=None, file_path=None, width=1440, height=960, wait_ms=500, full_page=True, artifact_dir=None):
+    async def render(self, *, url=None, file_path=None, width=1440, height=960, wait_ms=500, full_page=True, artifact_dir=None, cwd=None):
         """One-shot render; desktop reuses its Chromium, CLI uses optional Playwright."""
         if self.capture_callback:
             result = await self.capture_callback(dict(url=url, file_path=file_path, width=width,
@@ -37,18 +40,9 @@ class BrowserSessionManager:
                 raise RuntimeError(result["error"])
             data = base64.b64decode(result.pop("png_base64"), validate=True)
         else:
-            page = await self.ensure_page()
-            await page.set_viewport_size({"width": width, "height": height})
-            response = await page.goto(Path(file_path).as_uri() if file_path else url,
-                wait_until="load", timeout=25000)
-            if response and response.status >= 400:
-                raise RuntimeError(f"Page returned HTTP {response.status}")
-            await page.wait_for_timeout(wait_ms)
-            # Bound image area before full-page capture (shared desktop/CLI limit).
-            size = await page.evaluate("({width:document.documentElement.scrollWidth,height:document.documentElement.scrollHeight})")
-            truncated = full_page and (size["height"] > 8192 or size["width"] > 4096 or size["width"] * size["height"] > 16000000)
-            data = await page.screenshot(full_page=full_page and not truncated, timeout=10000)
-            result = {"url": page.url, "title": await page.title(), "truncated": bool(truncated)}
+            from xuloom.features.browser_render import capture
+            data, result = await asyncio.wait_for(capture(self, cwd=cwd or os.getcwd(), url=url, file_path=file_path,
+                width=width, height=height, wait_ms=wait_ms, full_page=full_page), 40)
         from xuloom.context.tool_media import MAX_BYTES, preview_image_bytes
         if len(data) > MAX_BYTES:
             raise ValueError("Screenshot exceeds the image size limit")
@@ -61,28 +55,36 @@ class BrowserSessionManager:
         self._last_url = result.get("url")
         return {**result, "path": str(target.resolve()), "width": image["width"], "height": image["height"]}
 
-    async def ensure_page(self):
+    async def ensure_browser(self):
         if not PLAYWRIGHT_AVAILABLE:
             raise RuntimeError(
-                "Playwright is not installed. Install with `pip install playwright` "
-                "and then run `playwright install`."
+                "Playwright is not installed on this execution host. Install `pip install \"xuloom[browser]\"` "
+                "and then run `python -m playwright install chromium` on that host."
             )
 
-        if self._page is not None:
-            return self._page
+        async with self._startup_lock:
+            if self._browser is None:
+                try:
+                    self._playwright = await async_playwright().start()
+                    self._browser = await self._playwright.chromium.launch(headless=True)
+                except BaseException:
+                    try: await self._close_handles()
+                    except Exception: pass  # Preserve the startup/cancellation error.
+                    raise
+            return self._browser
 
-        try:
-            self._playwright = await async_playwright().start()
-            self._browser = await self._playwright.chromium.launch(headless=True)
-            self._context = await self._browser.new_context(viewport={"width": 1440, "height": 960})
-            self._page = await self._context.new_page()
-        except BaseException:
-            try:
-                await self.close()
-            except Exception:
-                pass  # Preserve the original startup/cancellation error.
-            raise
-        return self._page
+    async def ensure_page(self):
+        await self.ensure_browser()
+        async with self._startup_lock:
+            if self._page is None:
+                try:
+                    self._context = await self._browser.new_context(viewport={"width": 1440, "height": 960})
+                    self._page = await self._context.new_page()
+                except BaseException:
+                    try: await self._close_handles()
+                    except Exception: pass
+                    raise
+            return self._page
 
     async def navigate(self, url: str, wait_until: str = "domcontentloaded"):
         page = await self.ensure_page()
@@ -162,7 +164,12 @@ class BrowserSessionManager:
         return {"url": page.url, "title": await page.title(), "path": os.path.abspath(path)}
 
     async def close(self):
-        owned = [(self._page, "close"), (self._context, "close"), (self._browser, "close"), (self._playwright, "stop")]
+        async with self._startup_lock:
+            await self._close_handles()
+
+    async def _close_handles(self):
+        owned = [(item, 'close') for item in self._render_contexts] + [(self._page, "close"), (self._context, "close"), (self._browser, "close"), (self._playwright, "stop")]
+        self._render_contexts.clear()
         self._page = self._context = self._browser = self._playwright = None
         self._last_url = None
         errors = []
@@ -178,7 +185,7 @@ class BrowserSessionManager:
     def export_state(self):
         return {
             "last_url": self._last_url,
-            "available": PLAYWRIGHT_AVAILABLE,
+            "available": bool(self.capture_callback or PLAYWRIGHT_AVAILABLE),
         }
 
     def load_state(self, payload: dict):

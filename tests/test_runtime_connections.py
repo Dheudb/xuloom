@@ -36,9 +36,15 @@ class RuntimeConnectionTests(unittest.IsolatedAsyncioTestCase):
         owner = self
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *_): pass
+            def do_GET(self):
+                custom=getattr(owner,'web_handler',None)
+                if custom is not None and custom(self):return
+                self.send_error(404)
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 owner.records.append({"path": self.path, "headers": dict(self.headers), "body": body})
+                custom = getattr(owner, "response_handler", None)
+                if custom is not None and custom(self, body): return
                 if self.path.startswith("/redirect/"):
                     self.send_response(307); self.send_header("Location", owner.base + "/trap/v1/messages"); self.end_headers(); return
                 label = self.path.split("/")[1]

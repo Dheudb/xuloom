@@ -147,7 +147,7 @@ function send(id, payload) {
   // Host requests never enter the frontend or its generic respond channel.
   if (payload.type === "browser_capture") {
     if (source?.remote) {
-      void source.transport.request("browser.capture_result", { requestId: payload.requestId, result: { error: "远端尚未连接截图渲染器；未调用本机浏览器" } }).catch(() => {});
+      void source.transport.request("browser.capture_result", { requestId: payload.requestId, result: { error: "SSH 截图必须由执行端渲染；未调用本机浏览器" } }).catch(() => {});
       return;
     }
     if (source) browserCaptures.capture(id, source.project, payload.requestId, payload.input, source.transport)

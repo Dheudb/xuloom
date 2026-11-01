@@ -1,6 +1,6 @@
 {
   "name": "xuloom-desktop",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "private": true,
   "type": "module",
   "description": "Xuloom desktop workbench",
@@ -59,7 +59,8 @@
     "test:mcp": "node tests/mcp.e2e.cjs",
     "pack": "npm run build && node scripts/pack.cjs",
     "test:external-discovery": "node tests/external-discovery.e2e.cjs",
-    "test:codex-workbench": "node tests/codex-workbench.e2e.cjs"
+    "test:codex-workbench": "node tests/codex-workbench.e2e.cjs",
+    "test:remote-capture": "node tests/remote-capture.e2e.cjs"
   },
   "dependencies": {
     "katex": "^0.19.1",

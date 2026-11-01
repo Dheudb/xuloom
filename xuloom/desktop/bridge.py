@@ -211,7 +211,7 @@ class DesktopBridge:
 
     async def capture(self, input):
         if os.environ.get("XULOOM_REMOTE") == "1":
-            return {"ok": False, "error": "Remote browser capture is not connected to a renderer; no local machine was used as a fallback"}
+            return {"ok": False, "error": "SSH screenshots must render on the execution host; no local browser fallback is allowed"}
         request_id = str(uuid.uuid4())
         future = asyncio.get_running_loop().create_future()
         self.capture_pending[request_id] = future
@@ -276,7 +276,7 @@ class DesktopBridge:
         for member in engine.team_manager.get_non_lead_members():
             member.is_active = False
         engine.set_permission_handler(self.permission)
-        engine.browser_manager.capture_callback = self.capture
+        engine.browser_manager.capture_callback = None if os.environ.get("XULOOM_REMOTE") == "1" else self.capture
         engine.tool_context.update(skill_registry=self.skills, agent_registry=self.agents, capability_event=self.emit, ask_user_callback=lambda questions: self.ask("questions", {"questions": questions}), plan_approval_callback=lambda content: self.ask("plan_approval", {"content": content}))
         lsp = LspTool()
         engine.lsp_manager = LSPManager()

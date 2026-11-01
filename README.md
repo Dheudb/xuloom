@@ -13,11 +13,11 @@
 
 Windows 下载包自带 Python 和 MCP SDK，无需安装 Python、选择解释器或安装 Node.js。第三方 MCP 程序可能另需 Node.js、uv 等环境，按服务说明准备。
 
-当前源码版本为 **v0.1.14**，可下载成品及校验和以 Releases 为准。成品面向 Windows x64；Linux/macOS 可使用源码 CLI，尚无对应的桌面发行包。
+当前源码版本为 **v0.1.15**，可下载成品及校验和以 Releases 为准。成品面向 Windows x64；Linux/macOS 可使用源码 CLI，尚无对应的桌面发行包。
 
 执行过程按操作显示图标和简短说明：图片、编辑、终端、搜索等各有标识，点击过程行可展开参数与结果，完成后整轮过程自动折叠。读取图片会显示可点击放大的缩略图；会话保存图片快照，原文件被修改或删除后仍能回看。预览本身不会调用模型；模型理解图片还需所连接的接口支持图片输入。
 
-**后台截图检查：** 可以要求“渲染这个 HTML／打开本地开发服务，截图检查布局”。模型通过 `browser_tool` 的 `render` 操作，在隐藏窗口加载页面并直接收到截图；过程里也能放大回看。桌面版复用自带 Chromium，无需额外安装浏览器；CLI 需安装 `pip install "xuloom[browser]"` 并执行 `python -m playwright install chromium`。该工具沿用权限审批，系统隔离模式下仍禁用浏览器；不支持图片输入的模型只能取得截图路径，不能进行视觉检查。详见 [后台渲染与验证](docs/browser-capture.md)。
+**后台截图检查：** 可以要求“渲染这个 HTML／打开本地开发服务，截图检查布局”。模型通过 `browser_tool` 的 `render` 操作，在隐藏窗口加载页面并直接收到截图；过程里也能放大回看。本机桌面复用自带 Chromium，无需额外安装浏览器；CLI/SSH 在执行主机安装 `pip install "xuloom[browser]"` 并执行 `python -m playwright install chromium`。SSH 的文件与 localhost 都在远端渲染，不回退到本机。该工具沿用权限审批，系统隔离模式下仍禁用浏览器；不支持图片输入的模型只能取得截图路径，不能进行视觉检查。详见 [后台渲染与验证](docs/browser-capture.md)。
 
 ## 模型怎么配
 

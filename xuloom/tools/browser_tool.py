@@ -28,7 +28,7 @@ class BrowserToolInput(BaseModel):
 class BrowserTool(BaseAgenticTool):
     workspace_paths = {"path": False, "file_path": False}
     name = "browser_tool"
-    description = "Render local HTML or a website in a hidden browser and return a screenshot to inspect UI changes. Also supports browser navigation, DOM inspection, clicking, typing and screenshots. Desktop render needs no browser installation; CLI requires the browser extra and Chromium."
+    description = "Render workspace HTML or a website in a hidden browser and return a screenshot to inspect UI changes. Also supports browser navigation, DOM inspection, clicking, typing and screenshots. Local desktop render reuses Chromium; CLI and SSH render require the browser extra and Chromium on the execution host."
     input_schema = BrowserToolInput
     risk_level = "high"
 
@@ -125,7 +125,7 @@ class BrowserTool(BaseAgenticTool):
                 if file_path:
                     file_path = str((Path(self.context.get("session_cwd", os.getcwd())) / file_path).resolve(strict=True))
                 result = await browser.render(url=url, file_path=file_path, width=width, height=height,
-                    wait_ms=wait_ms, full_page=full_page, artifact_dir=directory)
+                    wait_ms=wait_ms, full_page=full_page, artifact_dir=directory, cwd=self.context.get("session_cwd"))
                 return await self._image_result(result, action)
             if action == "navigate":
                 if not url:

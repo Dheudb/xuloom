@@ -18,6 +18,7 @@
 | [输出与来源](session-summary.md) | 本轮/会话的真实输出文件、来源链接、工具入口及 App/CLI/SSH 查询 |
 | [实例连接绑定](runtime-connections.md) | 多供应商客户端、压缩器与子代理的连接归属、切换及恢复 |
 | [媒体接口核对与计划](media-adapters-plan.md) | 官方协议现状、后续生成工具的边界与验收；尚非已实现功能 |
+| [SSH 截图验证](remote-capture-validation-2026-11-02.md) | 执行端 Chromium、资源与 Cookie 边界、图像回传和 App/CLI 验收 |
 | [Codex 异构后端验证](codex-backend-validation-2026-11-02.md) | 实际 App Server / Responses、线程恢复、权限和保存故障、App/CLI 与成品检查 |
 | [外部 Agent 后端计划](external-agents-plan.md) | Claude/Pi/Codex 协议、权限和生命周期接入约束；DSH 及外部 SSH 完整联动仍在推进 |
 | [工具发现与恢复验证](tool-discovery-validation-2026-11-02.md) | 实际 Pi／Claude 工具缓存、会话恢复、桌面控制管道及原安装验证 |
