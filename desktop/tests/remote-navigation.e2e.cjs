@@ -1,0 +1,66 @@
+const {_electron: electron} = require('playwright');
+const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), assert = require('node:assert/strict'), http = require('node:http');
+const {atomicJSON, sessionKey} = require('../electron/catalog.cjs');
+const {remoteKey} = require('../electron/chat-links.cjs');
+const root = path.resolve(__dirname,'..'), fixture = fs.mkdtempSync(path.join(os.tmpdir(),'xuloom-navigation-ui-'));
+const data=path.join(fixture,'data'),config=path.join(fixture,'config'),project=path.join(fixture,'local'),remote=path.join(fixture,'remote');
+for(const dir of [data,config,project,remote])fs.mkdirSync(dir);
+const profile={id:'offline',name:'Offline machine',host:'127.0.0.1',port:1,cwd:remote,python:'python',platform:'windows',ssh_config:''};
+const id='ssh:'+remoteKey(profile)+':saved';
+const settingsPath=path.join(data,'workbench.json');
+atomicJSON(path.join(project,'.xuloom/sessions/local.json'),{messages:[{role:'user',content:'Saved local history'},{role:'assistant',content:'Local answer preserved'}],metadata:{}});
+fs.writeFileSync(path.join(remote,'must-keep.json'),'REMOTE_HISTORY_MUST_NOT_CHANGE');
+atomicJSON(settingsPath,{projects:[project],workspace:[{project,resumeId:'local',active:true}],remoteChats:{broken:{secret:'PRIVATE_KEY'},[id]:{binding:profile,sessionId:'saved',project:remote,title:'Offline saved chat',draft:'PRIVATE_REMOTE_DRAFT'}}});
+let requests=0,app,page;const errors=[];
+const server=http.createServer((_req,res)=>{requests++;res.writeHead(500).end('No model calls allowed');});
+const env={...process.env,XULOOM_CONFIG_DIR:config,XULOOM_DATA_DIR:data,XULOOM_USER_DATA:data,HOME:path.join(fixture,'home'),USERPROFILE:path.join(fixture,'home'),XULOOM_TEST_HEADLESS:'1',XULOOM_SKILLS_PATHS:''};
+for(const key of ['ELECTRON_RUN_AS_NODE','XULOOM_DEV_URL','OPENAI_API_KEY','OPENAI_BASE_URL','OPENAI_MODEL','XULOOM_MODEL_PROVIDER'])delete env[key];
+const invoke=(method,params={})=>page.evaluate(({method,params})=>window.xuloom.invoke(method,params),{method,params});
+const read=()=>JSON.parse(fs.readFileSync(settingsPath,'utf8'));
+function edit(work){const value=read();work(value);atomicJSON(settingsPath,value);}
+async function launch(){app=await electron.launch({executablePath:process.env.XULOOM_TEST_EXECUTABLE,args:process.env.XULOOM_TEST_EXECUTABLE?[]:[root],env});page=await app.firstWindow();page.setDefaultTimeout(30000);page.on('pageerror',error=>errors.push(error.message));await page.getByText('Local answer preserved',{exact:true}).waitFor();}
+(async()=>{try{
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ atomicJSON(path.join(config,'config.json'),{model_provider:'openai',openai_model:'fixture',openai_api_key:'fixture',openai_base_url:`http://127.0.0.1:${server.address().port}/v1`,ssh_connections:'INVALID_CONFIG'});
+ await launch();
+ const localId=sessionKey(project,'local');assert.equal(await page.locator('.session-item.active').getAttribute('data-session-id'),localId);
+ await page.getByRole('button',{name:'处理 SSH 导航问题',exact:true}).click();
+ const dialog=page.getByRole('dialog',{name:'恢复 SSH 导航',exact:true});
+ await dialog.locator('[data-navigation-reference]').last().waitFor();
+ assert(!(await dialog.innerText()).includes('PRIVATE_'));
+ const refs=(await invoke('remote.references')).references, broken=refs.find(row=>!row.valid);
+ const damaged=dialog.locator(`[data-navigation-reference="${broken.id}"]`);
+ await damaged.getByRole('button',{name:'移除本机引用',exact:true}).click();
+ edit(value=>{value.remoteChats.broken.newDraft='CONCURRENT_DRAFT';});
+ await damaged.getByRole('button',{name:'确认移除本机引用',exact:true}).click();
+ await dialog.getByRole('alert').filter({hasText:'导航引用已更改'}).waitFor();
+ assert.equal(read().remoteChats.broken.newDraft,'CONCURRENT_DRAFT');assert(!fs.existsSync(path.join(data,'navigation-backups')));
+ await dialog.getByRole('button',{name:'刷新本机引用',exact:true}).click();
+ await damaged.getByRole('button',{name:'移除本机引用',exact:true}).click();await damaged.getByRole('button',{name:'确认移除本机引用',exact:true}).click();
+ await damaged.waitFor({state:'detached'});assert(!('broken' in read().remoteChats));
+ assert.equal((await invoke('catalog.refresh')).navigationIssues,0);
+ if(!process.env.XULOOM_TEST_EXECUTABLE){
+  const image=await app.evaluate(async({BrowserWindow})=>(await BrowserWindow.getAllWindows()[0].webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG().toString('base64'));
+  fs.writeFileSync(path.join(root,'build/remote-navigation.png'),Buffer.from(image,'base64'));
+ }
+ await dialog.getByRole('button',{name:'关闭导航恢复',exact:true}).click();
+ await page.getByRole('button',{name:'设置与模型',exact:true}).click();await page.getByRole('tab',{name:'SSH 远程',exact:true}).click();
+ const refsRegion=page.getByRole('region',{name:'本机 SSH 导航引用',exact:true});await refsRegion.getByText('Offline saved chat',{exact:true}).waitFor();
+ await page.getByRole('alert').filter({hasText:'ssh_connections must be an array'}).waitFor();
+ await refsRegion.getByRole('button',{name:'移除本机引用',exact:true}).click();await refsRegion.getByRole('button',{name:'保留引用',exact:true}).click();
+ assert(read().remoteChats[id]);
+ await refsRegion.getByRole('button',{name:'移除本机引用',exact:true}).click();await refsRegion.getByRole('button',{name:'确认移除本机引用',exact:true}).click();
+ await refsRegion.getByText('没有本机 SSH 导航引用。',{exact:true}).waitFor();
+ assert.deepEqual(read().remoteChats,{});assert.equal(fs.readFileSync(path.join(remote,'must-keep.json'),'utf8'),'REMOTE_HISTORY_MUST_NOT_CHANGE');
+ await page.getByRole('button',{name:'关闭设置',exact:true}).click();
+ edit(value=>{value.remoteChats=false;});await invoke('catalog.refresh');
+ await page.getByRole('button',{name:'处理 SSH 导航问题',exact:true}).click();
+ await dialog.getByRole('button',{name:'移除本机引用',exact:true}).click();await dialog.getByRole('button',{name:'确认移除本机引用',exact:true}).click();
+ await dialog.getByText('没有本机 SSH 导航引用。',{exact:true}).waitFor();
+ await dialog.getByRole('button',{name:'关闭导航恢复',exact:true}).click();
+ assert.equal(await page.locator('.session-item.active').getAttribute('data-session-id'),localId);
+ assert.equal(fs.readdirSync(path.join(data,'navigation-backups')).length,3);
+ await app.close();app=null;await launch();assert.equal((await invoke('catalog.refresh')).navigationIssues,0);
+ assert.equal(requests,0);assert.deepEqual(errors,[]);
+ console.log('Remote navigation E2E passed: local history survives corrupt refs, offline recovery with broken SSH config, stale draft guard, backups, container recovery and restart; zero model calls');
+}finally{if(app)await app.close();await new Promise(resolve=>server.close(resolve));}})().catch(error=>{console.error(error);process.exitCode=1;});

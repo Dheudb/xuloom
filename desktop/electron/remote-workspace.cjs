@@ -1,22 +1,52 @@
 "use strict";
 const crypto = require("node:crypto");
+const path = require("node:path");
 const { remoteKey: keyOf, remoteId } = require("./chat-links.cjs");
+const object = value => !!value && typeof value === "object" && !Array.isArray(value);
+const flags = value => ["open", "collapsed", "pinned", "archived"].every(key => !(key in value) || typeof value[key] === "boolean");
+function validRow(id, row) {
+  try {
+    return remoteId(id) && object(row) && object(row.binding) &&
+      ["id", "name", "host", "cwd", "python", "platform", "ssh_config"].every(key => typeof row.binding[key] === "string") &&
+      Object.keys(row.binding).every(key => ["id", "name", "host", "cwd", "python", "platform", "ssh_config", "port"].includes(key)) &&
+      ["name", "host", "cwd", "python", "ssh_config"].every(key => row.binding[key].length <= 2048 && !/[\x00-\x1f\x7f]/.test(row.binding[key])) &&
+      /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(row.binding.id) && /^[a-zA-Z0-9][a-zA-Z0-9_.@:\[\]-]{0,254}$/.test(row.binding.host) &&
+      (row.binding.port === null || Number.isInteger(row.binding.port) && row.binding.port >= 1 && row.binding.port <= 65535) &&
+      (row.binding.platform === "posix" ? path.posix.isAbsolute(row.binding.cwd) : row.binding.platform === "windows" && path.win32.isAbsolute(row.binding.cwd) && !!path.win32.parse(row.binding.cwd).root.replace(/^[\\/]+$/, "")) &&
+      id === `ssh:${keyOf(row.binding)}:${row.sessionId}` && typeof row.project === "string" && !!row.project && flags(row) &&
+      ["title", "draft", "draftEditId"].every(key => !(key in row) || typeof row[key] === "string" && row[key].length <= (key === "draft" ? 1000000 : key === "title" ? 200 : 128)) &&
+      ["created", "updated"].every(key => !(key in row) || Number.isFinite(row[key]) && Math.abs(row[key]) <= 8640000000000000) &&
+      (!row.machine || object(row.machine) && ["hostname", "platform", "cwd"].every(key => typeof row.machine[key] === "string" && row.machine[key])) &&
+      (!("draftAttachments" in row) || Array.isArray(row.draftAttachments) && !row.draftAttachments.length) &&
+      (!("permissionMode" in row) || ["ask", "full"].includes(row.permissionMode));
+  } catch { return false; }
+}
+const validGroup = (key, value) => /^ssh:[0-9a-f]{64}$/.test(key) && object(value) && flags(value) &&
+  (!("name" in value) || typeof value.name === "string" && !!value.name.trim() && value.name.length <= 100);
 
 /** Navigation metadata only. Execution, ownership and history stay in the shared runtime. */
 function remoteWorkspaces(context) {
   const { settings, saveSettings, sessions, transport, send, broadcast, dispose, running, active, activate, saveWorkspace } = context;
   function rows() {
-    const value = settings().remoteChats || {};
-    if (!value || Array.isArray(value) || typeof value !== "object") throw new Error("远端会话导航配置损坏，请修复工作台设置");
-    const result = Object.entries(value).map(([id, row]) => {
-      if (!remoteId(id) || !row?.binding || id !== `ssh:${keyOf(row.binding)}:${row.sessionId}`) throw new Error("远端会话引用无效；未尝试连接或修改远端历史");
-      return { ...row, id };
-    });
-    return result;
+    const value = settings().remoteChats;
+    return object(value) ? Object.entries(value).filter(([id, row]) => validRow(id, row)).map(([id, row]) => ({ ...row, id })) : [];
+  }
+  function issues() {
+    const value = settings();
+    return ["remoteChats", "remoteProjects"].reduce((count, field) => count + (!(field in value) ? 0 : !object(value[field]) ? 1 :
+      Object.entries(value[field]).filter(([id, row]) => !(field === "remoteChats" ? validRow(id, row) : validGroup(id, row))).length), 0);
   }
   const find = id => { const row = rows().find(row => row.id === id); if (!row) throw new Error("远端会话不存在"); return row; };
+  function writable(path) {
+    const value = settings();
+    if ("remoteChats" in value && !object(value.remoteChats) || "remoteProjects" in value &&
+      (!object(value.remoteProjects) || path in value.remoteProjects && !validGroup(path, value.remoteProjects[path])))
+      throw new Error("请先修复远端导航设置；原始数据已保留，未尝试连接远端");
+  }
   function writeRow(row) {
     const before = settings();
+    if ("remoteChats" in before && !object(before.remoteChats)) throw new Error("请先修复远端会话导航；原始数据已保留");
+    if (!validRow(row.id, row)) throw new Error("远端会话引用格式无效；原始数据已保留");
     saveSettings({ ...before, remoteChats: { ...before.remoteChats, [row.id]: row } }, before);
     return row;
   }
@@ -42,19 +72,21 @@ function remoteWorkspaces(context) {
   function updateProject(path, patch) {
     group(path);
     const before = settings(), next = { ...before.remoteProjects?.[path] };
+    if ("remoteProjects" in before && (!object(before.remoteProjects) || path in before.remoteProjects && !validGroup(path, before.remoteProjects[path]))) throw new Error("请先修复远端工作区显示设置；原始数据已保留");
     for (const field of ["open", "collapsed", "archived", "pinned"]) if (field in patch) next[field] = !!patch[field];
     if ("name" in patch) { if (typeof patch.name !== "string" || !patch.name.trim() || patch.name.trim().length > 100) throw new Error("工作区名称需为 1–100 个字符"); next.name = patch.name.trim(); }
     saveSettings({ ...before, remoteProjects: { ...before.remoteProjects, [path]: next } }, before);
   }
   function projects() {
-    const groups = new Map(), preferences = settings().remoteProjects || {};
+    const groups = new Map(), preferences = settings().remoteProjects;
     for (const row of rows()) {
-      const key = keyOf(row.binding), path = `ssh:${key}`, meta = preferences[path] || {};
+      const key = keyOf(row.binding), path = `ssh:${key}`, meta = preferences === undefined || object(preferences) && !(path in preferences) ? {} :
+        object(preferences) && validGroup(path, preferences[path]) ? preferences[path] : { open: false, archived: true };
       const remote = { connectionId: row.binding.id, host: row.binding.host, name: row.binding.name, key, hostname: row.machine?.hostname };
       if (!groups.has(path)) groups.set(path, { path, name: meta.name || row.binding.name || row.binding.id, open: meta.open !== false,
         collapsed: !!meta.collapsed, pinned: !!meta.pinned, archived: !!meta.archived, remote, sessions: [] });
-      const { binding, machine, ...publicRow } = row;
-      groups.get(path).sessions.push({ ...publicRow, scope: "project", remote });
+      groups.get(path).sessions.push({ id: row.id, project: row.project, sessionId: row.sessionId, title: row.title || "新会话",
+        created: row.created || 0, updated: row.updated || 0, pinned: !!row.pinned, archived: !!row.archived, scope: "project", remote });
     }
     return [...groups.values()];
   }
@@ -67,6 +99,7 @@ function remoteWorkspaces(context) {
       draft: old?.draft || "", draftEditId: old?.draftEditId || "", draftAttachments: [], pinned: !!old?.pinned, archived: !!old?.archived });
   }
   async function openRow(row, { newChat = false } = {}) {
+    writable(`ssh:${keyOf(row.binding)}`);
     let id = newChat ? null : row.id;
     if (id && (row.archived || settings().remoteProjects?.[`ssh:${keyOf(row.binding)}`]?.archived)) throw new Error("请先恢复归档的远端会话");
     if (id && sessions.has(id)) {
@@ -95,6 +128,29 @@ function remoteWorkspaces(context) {
     try { await pipe.request("remote.connection"); return await work(pipe); } finally { await pipe.close(); }
   }
   async function handle(method, params) {
+    if (method === "remote.references") return { handled: true, value: await context.config().request(method) };
+    if (method === "remote.forget") {
+      if (params.confirm !== true) throw new Error("请确认移除本机引用；远端历史不会删除");
+      const { references } = await context.config().request("remote.references");
+      const selected = references.find(row => row.id === params.id && row.version === params.version);
+      if (!selected) throw new Error("导航引用已更改，请刷新后重试；未移除新数据");
+      const affected = [...sessions].filter(([id, source]) => source.remote && (id === selected.chatId || selected.field === "remoteChats" && selected.kind === "container"));
+      if (affected.some(([, source]) => running(source))) throw new Error("该远端会话正在运行，请先停止任务；本机引用仍保留");
+      for (const [, source] of affected) source.moving = true;
+      let value;
+      try {
+        for (const [id] of affected) await dispose(id);
+        value = await context.config().request(method, params);
+      } catch (error) {
+        for (const [, source] of affected) source.moving = false;
+        throw new Error((affected.length ? "远端连接可能已关闭，本机引用尚未移除；请刷新后重试。" : "") + error.message);
+      }
+      if (affected.some(([id]) => active() === id)) activate(undefined);
+      let catalog, notice;
+      try { catalog = broadcast(); }
+      catch (error) { notice = "本机引用已移除并备份，但历史列表刷新失败：" + error.message; }
+      return { handled: true, value: { ...value, activeId: active() || "", catalog, notice } };
+    }
     if (method === "remote.open" || method === "remote.history") {
       const { connections } = await context.config().request("remote.profiles");
       const profile = connections.find(item => item.id === params.id); if (!profile) throw new Error("SSH 连接不存在");
@@ -158,6 +214,7 @@ function remoteWorkspaces(context) {
     if (["project.remove", "project.delete"].includes(method) && isPath) throw new Error("请在该 SSH 工作区中逐个删除会话；远端目录不会在本机被删除");
     const source = sessions.get(params.session);
     if (!source?.remote) return { handled: false };
+    if (source.moving) throw new Error("会话正在移除本机引用，请稍候");
     if (source.disconnected && method !== "session.close") throw new Error("SSH 连接已断开，结果未确认。请重新选择会话查看保存状态；不会自动重发任务。");
     if (["attachments.import", "attachments.open", "attachments.preview", "preview.open", "project.reveal", "capabilities.directory", "capabilities.import"].includes(method))
       throw new Error("远端文件传输/网页预览入口尚未接入；未尝试打开本机同名路径");
@@ -188,16 +245,17 @@ function remoteWorkspaces(context) {
     // Only attached, idle sessions are eligible. The remote durable scheduler
     // owns claims and completion; this host never copies jobs or replays prompts.
     for (const [id, source] of sessions) {
-      if (!source.remote || source.disconnected || running(source)) continue;
-      const row = find(id);
+      if (!source.remote || source.disconnected || source.moving || running(source)) continue;
+      const row = rows().find(row => row.id === id);
+      if (!row) continue;
       if (row.archived || settings().remoteProjects?.[`ssh:${keyOf(row.binding)}`]?.archived) continue;
       const due = await source.transport.request("schedule.due");
       for (const job of due) {
-        if (job.session_id !== source.resumeId || job.cwd !== source.project || running(source)) continue;
+        if (job.session_id !== source.resumeId || job.cwd !== source.project || source.moving || running(source)) continue;
         await source.transport.request("schedule.deliver", { id: job.id });
       }
     }
   }
-  return { handle, projects, find, update, openRow, remoteId, tickSchedules };
+  return { handle, projects, issues, find, update, openRow, remoteId, tickSchedules };
 }
 module.exports = { remoteWorkspaces, remoteId, keyOf };

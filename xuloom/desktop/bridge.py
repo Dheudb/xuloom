@@ -377,6 +377,10 @@ class DesktopBridge:
             return {"protocol": 1, "version": __version__, "hostname": socket.gethostname(),
                 "platform": sys.platform, "cwd": str(self.cwd), "transport": "ssh" if os.environ.get("XULOOM_REMOTE") == "1" else "stdio"}
         if method.startswith("remote."):
+            if method in {"remote.references", "remote.forget"}:
+                from xuloom.remote import navigation
+                if method == "remote.references": return {"references": navigation.references()}
+                return navigation.forget(params.get("id"), params.get("version"), confirm=params.get("confirm"))
             from xuloom.remote import config as remote_config
             if method == "remote.profiles": return {"connections": remote_config.profiles()}
             if method == "remote.save": return remote_config.save(params)

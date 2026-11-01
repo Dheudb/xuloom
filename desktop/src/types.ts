@@ -103,6 +103,7 @@ export type CatalogProject = {
   sessions: CatalogSession[];
 };
 export type SessionCatalog = {
+  navigationIssues?: number;
   standalone?: CatalogSession[];
   revision?: number;
   projects: CatalogProject[];

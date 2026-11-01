@@ -41,6 +41,7 @@ import SchedulePanel from "./SchedulePanel";
 import GoalEditor from "./GoalEditor";
 import GoalStrip from "./GoalStrip";
 import GitStatus from "./GitStatus";
+import RemoteReferences from "./RemoteReferences";
 import McpDialog from "./McpDialog";
 import SessionSidebar from "./SessionSidebar";
 import { CatalogPreferences } from "./catalog-preferences";
@@ -63,6 +64,7 @@ export default function App() {
   const preferences = useRef(new CatalogPreferences(catalog));
   const [defaultDirectory, setDefaultDirectory] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [navigationRepair, setNavigationRepair] = useState(false);
   const [globalModel, setGlobalModel] = useState<ModelConfig>();
   const [modelChanging, setModelChanging] = useState(false);
   const [permissionChanging, setPermissionChanging] = useState(false);
@@ -238,6 +240,7 @@ export default function App() {
         await window.xuloom.invoke("session.update", { id: active.id, patch: { draft: active.draft, draftEditId: active.editingId || "", draftAttachments: active.attachments.map((item) => item.id) } });
       const result = await window.xuloom.invoke(method, params);
       if (!result) return;
+      if (result.notice) setNotice(result.notice);
       if (method === "chat.copy") setNotice("聊天链接已复制");
       if (preferenceWrite) setCatalog(preferences.current.finish(preferenceWrite.id, result));
       else if (result.catalog) receiveCatalog(result.catalog);
@@ -576,6 +579,7 @@ export default function App() {
             </button>
           </div>
         </header>
+        {!!catalog.navigationIssues && <div className="global-notice" role="alert"><span>{catalog.navigationIssues} 项 SSH 导航数据异常，本机历史可继续使用。</span><button onClick={() => setNavigationRepair(true)}>处理 SSH 导航问题</button></div>}
         {notice && (
           <div className="global-notice" role="alert">
             <span>{notice}</span>
@@ -874,6 +878,19 @@ export default function App() {
           </div>
         </div>
       </main>
+      {navigationRepair && <div className="overlay" onMouseDown={event => { if (event.target === event.currentTarget) setNavigationRepair(false); }}>
+        <section className="dialog" role="dialog" aria-modal="true" aria-label="恢复 SSH 导航" onKeyDown={event => {
+          if (event.key === "Escape") { event.stopPropagation(); setNavigationRepair(false); }
+          if (event.key === "Tab") {
+            const items = [...event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled)')];
+            if (event.shiftKey && document.activeElement === items[0]) { event.preventDefault(); items.at(-1)?.focus(); }
+            else if (!event.shiftKey && document.activeElement === items.at(-1)) { event.preventDefault(); items[0]?.focus(); }
+          }
+        }}>
+          <header><h2>恢复 SSH 导航</h2><button autoFocus aria-label="关闭导航恢复" onClick={() => setNavigationRepair(false)}><X size={17} /></button></header>
+          <RemoteReferences action={workspaceAction} />
+        </section>
+      </div>}
       {executionDialog && active && <ExecutionDialog key={active.id} invoke={invoke} close={() => setExecutionDialog(false)} saved={(mode) => update({ executionMode: mode })} onError={onError} />}
       {goalDialog && active && <div className="overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setGoalDialog(null); }}>
         <section className="dialog composer-goal-dialog" role="dialog" aria-modal="true" aria-label={goalDialog === "goal" ? "调整目标" : "定时唤醒"}

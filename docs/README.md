@@ -15,6 +15,7 @@
 | [仓库与分支状态](git-status.md) | 桌面分支标识、CLI 查询及只读边界 |
 | [聊天深链接](chat-links.md) | 右键复制、桌面/CLI 打开、移动与归档边界 |
 | [实例连接绑定](runtime-connections.md) | 多供应商客户端、压缩器与子代理的连接归属、切换及恢复 |
+| [媒体接口核对与计划](media-adapters-plan.md) | 官方协议现状、后续生成工具的边界与验收；尚非已实现功能 |
 | [开发与打包](development.md) | 环境、测试、Windows 运行时与构建产物 |
 | [框架排查记录](framework-audit-2026-10-30.md) | 工具回执、写后记录、Windows Shell、故障注入及验证边界 |
 | [源码对照与加固](framework-source-comparison-2026-10-30.md) | Codex、Pi、DSH 与 Claude 公开资料对照，文件事务、进程和完整输出修复 |
@@ -31,4 +32,4 @@
 
 ## 远程执行
 
-开发版本的 SSH CLI 与桌面连接设置：[SSH 远程执行](remote.md)。完整远程聊天工作台及分布式委派继续按持续目标实现。
+[SSH 远程执行](remote.md) 包含桌面聊天、交互/非交互 CLI、共享连接设置、聊天链接和离线导航恢复。远端附件、HTML 预览、分布式委派和跨平台原生验收继续按持续目标推进。

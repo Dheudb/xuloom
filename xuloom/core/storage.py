@@ -28,8 +28,8 @@ def history_root(cwd=None):
     return data_directory() / "history" / hashlib.sha256(identity.encode()).hexdigest()[:16]
 
 
-def atomic_json(path, payload):
-    atomic_text(path, json.dumps(payload, ensure_ascii=False, indent=2))
+def atomic_json(path, payload, *, ensure_ascii=False):
+    atomic_text(path, json.dumps(payload, ensure_ascii=ensure_ascii, indent=2))
 
 
 def atomic_text(path, text, *, preserve_mode=False, create_only=False):

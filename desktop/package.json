@@ -1,6 +1,6 @@
 {
   "name": "xuloom-desktop",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "description": "Xuloom desktop workbench",
@@ -47,6 +47,7 @@
     "test:git-status": "node tests/git-status.e2e.cjs",
     "test:chat-links": "node tests/chat-links.e2e.cjs",
     "test:remote-settings": "node tests/remote-settings.e2e.cjs",
+    "test:remote-navigation": "node tests/remote-navigation.e2e.cjs",
     "test:remote-workbench": "node tests/remote-workbench.e2e.cjs",
     "test:html": "node tests/html.e2e.cjs",
     "test:mcp": "node tests/mcp.e2e.cjs",

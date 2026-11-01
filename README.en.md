@@ -10,7 +10,7 @@ Download the Windows x64 ZIP from Releases, extract the whole directory, and run
 
 Open **Settings → Model connections**, enter your API endpoint, protocol, model ID and key. A connection can list multiple models; multiple providers are supported. OpenAI-compatible Chat Completions and Anthropic Messages are supported. Local model servers must expose a supported interface. Text completion alone does not establish compatibility with tools or images.
 
-Choose **New conversation** to get an independent working directory, or open an existing folder. A Git repository is not required. The current version is **v0.1.1**; macOS/Linux desktop distributions are not available.
+Choose **New conversation** to get an independent working directory, or open an existing folder. A Git repository is not required. The current version is **v0.1.2**; macOS/Linux desktop distributions are not available.
 
 Execution traces use compact rows with icons for images, edits, terminal commands and searches. Expand a row for its inputs and output; completed turns collapse automatically. Image reads show clickable thumbnails backed by session snapshots, so previews survive changes or deletion of the original file. Previewing does not call a model; model image understanding requires an endpoint supporting image input.
 
@@ -121,6 +121,8 @@ npm run dev
 ```
 
 See [models](docs/models.md), [Skills/Subagents](docs/capabilities.md), [MCP](docs/mcp.md), [CLI](docs/cli.md), [goals/scheduling](docs/goals-and-schedules.md), [execution isolation](docs/queue-and-isolation.md), and [development](docs/development.md). GitHub Actions runs are manual.
+
+SSH connections are shared by the desktop and `xuloom remote chat CONNECTION` / `xuloom remote exec CONNECTION "task" --json`. The remote installation owns model credentials, history and execution. Local and SSH chats support deep links; offline navigation references can be removed without deleting remote history. See [remote execution](docs/remote.md) and [chat links](docs/chat-links.md). Distributed subagents, external CLI adapters and media generation remain on the [roadmap](docs/product-roadmap.md).
 
 ## License
 

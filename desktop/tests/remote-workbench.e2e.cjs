@@ -63,6 +63,19 @@ let app, page, clipboardBefore;
  await app.close();app=null;await launch(link);
  await page.locator(`.session-item.active[data-session-id="${first}"]`).waitFor();
  assert.equal(await page.getByRole('textbox',{name:'任务输入'}).inputValue(),'remote draft persisted');
+ // Forgetting is a local navigation operation even for an attached SSH chat.
+ const callsBeforeForget=fs.readFileSync(path.join(fixture,'wire.jsonl'),'utf8').trim().split('\n').length;
+ await page.getByRole('button',{name:'设置与模型',exact:true}).click();await page.getByRole('tab',{name:'SSH 远程',exact:true}).click();
+ const references=page.getByRole('region',{name:'本机 SSH 导航引用',exact:true});
+ const reference=await page.evaluate(async id=>(await window.xuloom.invoke('remote.references')).references.find(row=>row.chatId===id),first);
+ const referenceRow=references.locator(`[data-navigation-reference="${reference.id}"]`);
+ await referenceRow.getByRole('button',{name:'移除本机引用',exact:true}).click();await referenceRow.getByRole('button',{name:'确认移除本机引用',exact:true}).click();
+ await page.locator(`.session-item[data-session-id="${first}"]`).waitFor({state:'detached'});
+ assert(!JSON.parse(fs.readFileSync(path.join(fixture,'local-data/workbench.json'),'utf8')).remoteChats[first]);
+ await page.getByRole('tab',{name:'SSH 远程',exact:true}).click();await page.getByRole('button',{name:'查看远端会话',exact:true}).click();
+ await page.locator('.remote-history button').first().click();await page.locator(`.session-item.active[data-session-id="${first}"]`).waitFor();
+ await page.getByText('REMOTE_REPLY_remote-b',{exact:true}).last().waitFor();
+ assert.equal(fs.readFileSync(path.join(fixture,'wire.jsonl'),'utf8').trim().split('\n').length,callsBeforeForget,'Forgetting/reopening must preserve history without requesting another model turn');
  await page.locator('.new-task').click();await page.locator('.session-item.active:not([data-session-id^="ssh:"])').waitFor();
  assert.equal(await page.getByRole('combobox',{name:'选择模型'}).inputValue(),JSON.stringify(['local-models','local-a']));
  const wire=fs.readFileSync(path.join(fixture,'wire.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
@@ -95,6 +108,11 @@ let app, page, clipboardBefore;
   assert(message.includes('SSH 连接目标已更改'),'Old links must not reuse a live connection after its configured target changes');
  }finally{fs.writeFileSync(configurationPath,beforeTarget);}
  await send('hold remote once');await page.locator('.send-button.stop').waitFor();
+ const runningForget=await page.evaluate(async id=>{
+  const ref=(await window.xuloom.invoke('remote.references')).references.find(row=>row.chatId===id);
+  try{await window.xuloom.invoke('remote.forget',{id:ref.id,version:ref.version,confirm:true});return '';}catch(error){return String(error);}
+ },first);
+ assert(runningForget.includes('请先停止任务'));assert(JSON.parse(fs.readFileSync(path.join(fixture,'local-data/workbench.json'),'utf8')).remoteChats[first]);
  let seen=false;
  for(let attempt=0;attempt<150;attempt++){
   seen=fs.readFileSync(path.join(fixture,'wire.jsonl'),'utf8').trim().split('\n').map(JSON.parse).some(row=>row.body.stream&&JSON.stringify(row.body.messages.at(-1)?.content).includes('hold remote once'));
@@ -110,5 +128,5 @@ let app, page, clipboardBefore;
  const finalWire=fs.readFileSync(path.join(fixture,'wire.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
  assert.equal(finalWire.filter(row=>row.body.stream&&JSON.stringify(row.body.messages.at(-1)?.content).includes('hold remote once')).length,1,'Disconnect must not replay the prompt');
  assert(finalWire.some(row=>row.body.messages.some(message=>message.role==='tool'&&JSON.stringify(message.content).includes('Choice B'))));
- console.log('Remote workbench E2E passed: encrypted SSH chat, model/key routing, files, Git branch, real user choice, copied/pasted/startup SSH deep links with no model calls, archive/invalid URI guards, restart/draft, local separation, fork/archive/restore/delete, active disconnect/reconnect without replay');
+ console.log('Remote workbench E2E passed: encrypted SSH chat, model/key routing, files, Git branch, real user choice, links, offline ref removal/reopen without losing remote history, active removal guard, restart/draft, local separation, fork/archive/restore/delete, active disconnect/reconnect without replay');
 }catch(error){if(page)console.error((await page.locator('body').innerText()).slice(-5000));console.error(diagnostics);throw error;}finally{if(app){if(clipboardBefore!==undefined)await app.evaluate(({clipboard},text)=>clipboard.writeText(text),clipboardBefore).catch(()=>{});await app.close();}service.stdin.end(JSON.stringify({action:'stop'})+'\n');}})().catch(error=>{console.error(error);process.exitCode=1;});

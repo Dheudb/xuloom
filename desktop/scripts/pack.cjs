@@ -14,7 +14,7 @@ const candidates = [
 const python = candidates.find((value) => fs.existsSync(value)) || "python";
 const release = path.join(root, "release");
 const packageName =
-  process.env.XULOOM_PACKAGE_NAME || process.env.XULOOM_PACKAGE_NAME || "Xuloom-win32-" + process.arch;
+  process.env.XULOOM_PACKAGE_NAME || "Xuloom-win32-" + process.arch;
 if (!/^[A-Za-z0-9_-]+$/.test(packageName))
   throw new Error("Invalid package name");
 const output = path.join(release, packageName);

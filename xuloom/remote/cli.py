@@ -9,10 +9,12 @@ from xuloom.remote.ssh import SSHClient, RemoteDisconnected, RemoteRequestError
 def add_parser(sub):
     parent = sub.add_parser("remote", help="Manage keyless SSH profiles and execute on another Xuloom installation")
     actions = parent.add_subparsers(dest="action", required=True)
-    for action in ("list", "add", "remove", "check", "sessions", "inspect", "exec", "chat", "files", "read", "git-status"):
+    for action in ("list", "add", "remove", "check", "sessions", "inspect", "exec", "chat", "files", "read", "git-status", "references", "forget"):
         item = actions.add_parser(action)
         item.add_argument("--json", action="store_true", help="UTF-8 JSON events and final receipt")
-        if action != "list": item.add_argument("id", help="Saved SSH connection ID")
+        if action not in {"list", "references"}: item.add_argument("id", help="Local reference token" if action == "forget" else "Saved SSH connection ID")
+        if action == "forget":
+            item.add_argument("--version", required=True); item.add_argument("--confirm", action="store_true")
         if action == "add":
             item.add_argument("--name"); item.add_argument("--host", required=True)
             item.add_argument("--cwd", required=True, help="Absolute directory on the remote machine")
@@ -32,6 +34,9 @@ def add_parser(sub):
 
 
 async def dispatch(args, emit):
+    if args.action in {"references", "forget"}:
+        from xuloom.remote import navigation
+        return {"ok": True, "reason": "completed", **({"references": navigation.references()} if args.action == "references" else navigation.forget(args.id, args.version, confirm=args.confirm))}
     if args.action == "chat": raise ValueError("Use the interactive remote chat entry point; remote exec provides JSONL execution")
     if args.action == "list": return {"ok": True, "reason": "completed", "connections": config.profiles()}
     if args.action == "add":

@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { Server, Plus } from "lucide-react";
+import RemoteReferences, { type ReferenceAction } from "./RemoteReferences";
 
 type Profile = { id: string; name: string; host: string; port: number | null; cwd: string; python: string; platform: "posix" | "windows"; ssh_config: string };
 const empty = (): Profile => ({ id: "", name: "", host: "", port: null, cwd: "", python: "python3", platform: "posix", ssh_config: "" });
 
-export default function RemoteSettings({ open }: { open: (id: string, sessionId?: string) => Promise<void> }) {
+export default function RemoteSettings({ open, navigationAction }: { open: (id: string, sessionId?: string) => Promise<void>; navigationAction: ReferenceAction }) {
   const [rows, setRows] = useState<Profile[]>([]), [form, setForm] = useState<Profile>(empty);
   const [editing, setEditing] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(""), [status, setStatus] = useState("");
   const [history, setHistory] = useState<Record<string, { id: string; title: string; updated: number }[]>>({});
@@ -36,5 +37,6 @@ export default function RemoteSettings({ open }: { open: (id: string, sessionId?
       <div className="actions"><button className="primary" type="submit">保存 SSH 连接</button><button type="button" onClick={() => setEditing(false)}>取消编辑</button></div>
     </fieldset></form>}
     {busy && <p role="status">处理中…</p>}{status && <p role="status">{status}</p>}{error && <p role="alert" className="error">{error}</p>}
+    <RemoteReferences action={navigationAction} />
   </div>;
 }

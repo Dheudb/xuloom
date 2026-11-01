@@ -21,8 +21,8 @@ if sys.argv[2] == "race":
 elif sys.argv[2] == "crash":
     from xuloom.desktop import settings
     write = settings.atomic_json
-    def crash(path, value):
-        write(path, value)
+    def crash(path, value, **options):
+        write(path, value, **options)
         os._exit(87)
     settings.atomic_json = crash
 for spec in specs:

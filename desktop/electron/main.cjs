@@ -128,7 +128,7 @@ function settingsFailure(error, prefix = "工作台设置更新失败，请检�
 }
 function broadcastCatalog() {
   const local = catalog.snapshot();
-  const snapshot = { ...local, projects: [...local.projects, ...remote.projects()], revision: ++catalogRevision };
+  const snapshot = { ...local, projects: [...local.projects, ...remote.projects()], navigationIssues: remote.issues(), revision: ++catalogRevision };
   if (window && !window.isDestroyed())
     window.webContents.send("workbench:event", { type: "catalog_changed", catalog: snapshot });
   return snapshot;
@@ -765,7 +765,7 @@ app.whenReady().then(() => {
     if (typeof method !== "string" || !params || typeof params !== "object")
       throw new Error("Invalid request");
     if (quitting) throw new Error("正在保存并退出，请稍候");
-    if (/^(remote\.open|app\.initialize|chat\.(open|copy)|layout\.save|attachments\.import|execution\.set|collaboration\.set|permissions\.set|config\.(save|select|delete|reasoning)|workspace\.save|archive\.restore|project\.(open|update|close|remove|delete)|session\.(open|new|select|update|fork|move|delete|close|activate)|catalog\.)/.test(method)) {
+    if (/^(remote\.(open|forget)|app\.initialize|chat\.(open|copy)|layout\.save|attachments\.import|execution\.set|collaboration\.set|permissions\.set|config\.(save|select|delete|reasoning)|workspace\.save|archive\.restore|project\.(open|update|close|remove|delete)|session\.(open|new|select|update|fork|move|delete|close|activate)|catalog\.)/.test(method)) {
       const operation = workspaceQueue.then(() => invoke(method, params));
       workspaceQueue = operation.catch(() => {});
       return operation;

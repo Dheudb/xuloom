@@ -1,9 +1,24 @@
 """Merge desktop preference edits while holding the shared OS writer lease."""
 import json
+import hashlib
 import time
+import uuid
 
 from xuloom.core.session_lock import SessionLock, SessionBusyError, SessionConflictError
-from xuloom.core.storage import data_directory, atomic_json
+from xuloom.core.storage import data_directory, atomic_json, atomic_text
+
+
+def preference_version(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()).hexdigest()
+
+
+def read_workbench():
+    path = data_directory() / "workbench.json"
+    if path.is_symlink() or path.exists() and getattr(path.lstat(), "st_file_attributes", 0) & 0x400:
+        raise SessionConflictError("Desktop settings cannot be a link or junction")
+    value = json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else {}
+    if not isinstance(value, dict): raise ValueError("Invalid desktop settings; original file was preserved")
+    return value
 
 
 def _merge(before, after, current, field=""):
@@ -13,6 +28,8 @@ def _merge(before, after, current, field=""):
         merged = dict(current)
         for key in before.keys() | after.keys():
             if key not in after:
+                if key in current and key in before and current[key] != before[key]:
+                    raise SessionConflictError("要移除的设置已由另一实例更改，请刷新后重试；原数据已保留。")
                 merged.pop(key, None)
             elif key not in before or before[key] != after[key]:
                 if key in before and key not in current:
@@ -60,6 +77,19 @@ def save_workbench(spec):
             if legacy.read_bytes() == original: legacy.unlink()
         current = json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else {}
         if not isinstance(current, dict): raise ValueError("Invalid desktop settings; original file was preserved")
+        removal = spec.get("navigation_removal")
+        if removal is not None:
+            if not isinstance(removal, dict): raise ValueError("Invalid remote navigation removal")
+            field, key = removal.get("field"), removal.get("key")
+            if field not in {"remoteChats", "remoteProjects"} or key is not None and not isinstance(key, str):
+                raise ValueError("Invalid remote navigation removal")
+            if field not in current: raise SessionConflictError("导航引用已更改，请刷新后重试")
+            value = current[field]
+            if key is not None:
+                if not isinstance(value, dict) or key not in value: raise SessionConflictError("导航引用已更改，请刷新后重试")
+                value = value[key]
+            if preference_version(value) != removal.get("version"):
+                raise SessionConflictError("导航引用已更改，请刷新后重试；未移除新数据")
         merged = _merge(before, after, current)
         # These two fields describe the last saving window, never a mixed snapshot.
         if changed & {"workspace", "activeConversation"}:
@@ -67,7 +97,20 @@ def save_workbench(spec):
                 if key in after: merged[key] = after[key]
                 elif key in before: merged.pop(key, None)
         if merged != current:
-            atomic_json(path, merged)
-        return {"completed": True, "settings": merged}
+            backup = None
+            if removal is not None:
+                backup_root = data_directory() / "navigation-backups"
+                if backup_root.is_symlink() or backup_root.exists() and getattr(backup_root.lstat(), "st_file_attributes", 0) & 0x400:
+                    raise SessionConflictError("导航备份目录不能是链接；原引用已保留")
+                backup = backup_root / (uuid.uuid4().hex + ".json")
+                atomic_text(backup, json.dumps({"version": 1, "field": field, "key": key, "value": value, "saved_at": time.time()}, ensure_ascii=True, indent=2), create_only=True)
+                if field == "remoteChats":
+                    removed = lambda identity: isinstance(identity, str) and (identity == key if key is not None else identity.startswith("ssh:"))
+                    selection = current.get("activeConversation")
+                    if isinstance(selection, dict) and removed(selection.get("remoteId")): merged["activeConversation"] = None
+                    if isinstance(current.get("workspace"), list):
+                        merged["workspace"] = [row for row in current["workspace"] if not isinstance(row, dict) or not removed(row.get("remoteId"))]
+            atomic_json(path, merged, ensure_ascii=True)
+        return {"completed": True, "settings": merged, **({"backup": str(backup)} if merged != current and backup else {})}
     finally:
         lock.close()
