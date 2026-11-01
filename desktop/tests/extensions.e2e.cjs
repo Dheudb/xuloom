@@ -47,7 +47,13 @@ let app, page; const errors=[];
  await page.getByLabel('扩展指令',{exact:true}).fill('Independently verify the supplied claims.');
  fs.mkdirSync(path.join(root,'test-results'),{recursive:true});
  await page.getByLabel('代理连接',{exact:true}).scrollIntoViewIfNeeded();
- await page.screenshot({path:path.join(root,'test-results/extensions-settings.png')});
+ const png=await app.evaluate(async({BrowserWindow})=>{
+   const web=BrowserWindow.getAllWindows()[0].webContents;
+   await web.capturePage(undefined,{stayHidden:true,stayAwake:true});
+   await new Promise(resolve=>setTimeout(resolve,100));
+   return(await web.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG().toString('base64');
+ });
+ fs.writeFileSync(path.join(root,'test-results/extensions-settings.png'),Buffer.from(png,'base64'));
  await page.getByRole('button',{name:'保存 Subagent',exact:true}).click();
  await page.getByRole('status').filter({hasText:'Subagent 已保存并加载'}).waitFor();
  const caps=await page.evaluate(()=>window.xuloom.invoke('capabilities.list',{session:document.querySelector('.session-item.active').dataset.sessionId}));

@@ -38,14 +38,16 @@ def recovery_status(state):
 
 def configure(engine, definition):
     backend = definition.get("backend", "native")
-    if backend not in {"native", "claude", "pi"}:
+    if backend not in {"native", "claude", "pi", "codex"}:
         raise ValueError("Unsupported external agent backend: " + str(backend))
     if backend == "native":
         engine.tool_context.pop("external_backend", None)
         return
-    providers = {"anthropic", "openai"} if backend == "pi" else {"anthropic"}
+    providers = {"openai"} if backend == "codex" else {"anthropic", "openai"} if backend == "pi" else {"anthropic"}
     if engine.model_provider not in providers:
         raise ValueError("The external backend does not support this configured model protocol")
+    if backend == "codex" and engine.reasoning_profile is not None and engine.reasoning_profile.get("adapter") != "openai":
+        raise ValueError("Codex requires an OpenAI Responses connection and Responses reasoning controls")
     if engine.execution_sandbox.enabled:
         raise ValueError("External CLI execution is not supported by this system isolation backend; no host fallback was started")
     binding = resolve(definition.get("backend_program"), backend=backend, workspace=engine.session_cwd)
@@ -60,10 +62,16 @@ def configure(engine, definition):
 def restore(engine, metadata):
     state = copy.deepcopy(metadata.get("external_agent"))
     if state is not None:
-        if not isinstance(state, dict) or state.get("backend") not in {"claude", "pi"} or state.get("phase") not in {"idle", "running", "interrupted"}:
+        if not isinstance(state, dict) or state.get("backend") not in {"claude", "pi", "codex"} or state.get("phase") not in {"idle", "running", "interrupted"}:
             raise ValueError("Invalid external execution checkpoint")
         if str(uuid.UUID(state["session_id"])) != state["session_id"] or not isinstance(state.get("seen_tool_ids"), list):
             raise ValueError("Invalid external session identity")
+        if state["backend"] == "codex" and state.get("has_session") and str(uuid.UUID(state.get("codex_thread_id", ""))) != state.get("codex_thread_id"):
+            raise ValueError("Invalid Codex thread identity")
+        if state["backend"] == "codex" and state.get("has_session"):
+            digest = state.get("codex_rollout_sha256", "")
+            if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+                raise ValueError("Invalid Codex history checkpoint")
         if type(state.get("message_cursor")) is not int or state["message_cursor"] < 0:
             raise ValueError("Invalid external message checkpoint")
         if any(key in state for key in ("history_sha256", "history_offset", "entry_cursor")):
@@ -135,7 +143,9 @@ async def cleanup(engine, state, process, tasks, files):
 
 
 async def sample(engine, **kwargs):
-    if engine.tool_context["external_backend"]["backend"] == "pi":
+    if engine.tool_context["external_backend"]["backend"] == "codex":
+        from .codex import sample as execute
+    elif engine.tool_context["external_backend"]["backend"] == "pi":
         from .pi import sample as execute
     else:
         from .claude import sample as execute

@@ -1,8 +1,10 @@
-# 可选外部 Agent：Claude Code / Pi
+# 可选外部 Agent：Claude Code / Pi / Codex
 
 Xuloom 的默认后端仍是原生 QueryEngine。`backend: claude` 让已有角色通过用户安装的 Claude Code 执行任务，继续使用 Xuloom 的队列、身份、工具授权、结果记录与取消入口；不会下载或捆绑另一个 Agent、模型权重或供应商 SDK。当前实际验收版本为 Windows Claude Code `2.1.267`，本地 HTTP/SSE 与实际 CLI 联动；没有调用真实供应商或使用个人登录。
 
 `backend: pi` 接入用户安装的 Pi，使用其正式 JSONL RPC 和内置 MCP，支持 **Anthropic Messages / OpenAI Chat Completions** 两种已配置连接。实际本机验收版本为 `@earendil-works/pi-coding-agent 1.4.0`、Node `24.14.0`。Pi 不读取自己的个人登录、项目扩展或私有模型设置，供应商请求继续由 Xuloom 的已有客户端发送。没有安装外部程序时明确失败，原生角色仍正常使用。
+
+`backend: codex` 使用已安装 Codex 的正式 App Server JSONL 和 **OpenAI Responses**。它可以绑定与主代理不同的模型连接，复用原生队列、权限、预算、消息和中央历史；不是把另一套 Codex 登录或 API Key 交给子进程。当前本机协议验收版本是 Codex `0.156.1`，实际程序配合隔离回环 SSE/MCP 服务运行，未调用真实供应商。连接必须实际提供 `/responses`：只支持 Chat Completions 的“兼容 OpenAI”网关不能因此使用此后端。
 
 ## 配置
 
@@ -25,6 +27,24 @@ tools: [Read, Grep, Glob]
 `connection` 是用户在模型设置中建立的连接 ID，不填写 Key 本身；模型填写该接口的实际 ID，不使用 CLI 的 `sonnet` 等简称。可省略连接以继承主代理的 Anthropic 连接；不能将 OpenAI 协议 Key 隐式传给 Claude。程序路径可用 `backend_program: /absolute/path/to/claude` 明确指定。原有 `agent_tool`、`spawn_agent`、程序接入 `engine.agents()`、正式 CLI 和桌面角色选择沿用此定义，不新增独立任务调度器。
 
 执行位置与 Agent 后端是两个维度。`executor: ssh:host-id` 仍引用已配置的 Xuloom 执行主机，在主机解析安装程序、连接、Skills 和 MCP；不上传本机个人配置或 Key。原生 SSH 回归通过，**外部 CLI 经 SSH 的完整联动仍待专项验证**，不能由本机 Claude 通过推出跨机已验证。
+
+Codex 角色使用同一配置入口，后端选择 Codex，模型连接选择支持 Responses 的 OpenAI 连接。例如：
+
+```yaml
+---
+name: independent-reader
+description: 独立核对提供的资料
+backend: codex
+connection: my-responses-connection
+model: inherit
+tools: [Read, Grep, Glob]
+---
+核对事实与证据来源，报告结果和不确定项。
+```
+
+Windows 的官方 npm 安装会解析已安装包的实际二进制，仍不经 Shell 执行 `.cmd`/`.ps1`。其他安装布局可填写 `backend_program` 的绝对可执行路径；缺少程序或接口不匹配时明确报错，不自动下载安装，也不回退到原生模型。Codex 的推理设置使用 Responses `reasoning.effort`；声明为其他供应商 thinking 格式的连接在启动前拒绝，不能把参数拼接成“兼容”。
+
+Codex 的独立 `CODEX_HOME` 位于该 worker 的中央产物目录。App Server 的线程 ID、已完成回合、原始事件、诊断输出和 rollout 文件均保留；供应商 Key 只留在 Xuloom 的现有客户端中，子进程仅收到本次有效的回环令牌。部分 Codex 原生工具无法靠功能开关从目录中完全移除，因此中继同时过滤工具目录并在完整 Responses 回执确认后校验整批调用；所有获准调用仍经原生 MCP 授权，不能用 Codex 的 `approval_mode=auto` 覆盖父任务拒绝。未确认完成、非法调用或保存失败均不释放工具调用成功。
 
 ### Pi 角色
 
@@ -69,10 +89,12 @@ OpenAI Chat 使用模型真实 ID；“兼容”接口仍须遵守工具调用�
 
 停止只作用于本次创建的进程、连接和已有原生工具所有权，不按进程名或保存的 PID 结束用户应用。Pi 的拥有者主动停止先关闭新请求与工具入口，清空队列、等待正式 abort/最终空闲，再对账原生工具回执、RPC 增量历史与实际 JSONL 文件；完整内容、文件指纹及保存均确认后，返回 `external_recovery.resumable: true`。主任务可明确 `followup` 同一 worker，由新进程打开已验证的原历史文件；这不是自动重放或从空白重新执行。App 显示同一恢复状态，正式 CLI 的 JSON 回执也包含该字段。
 
-进程崩溃、停止确认被再次中断、结果未被外部历史完整接收、文件遭修改或保存失败，均不能变成可恢复成功；保留已有记录并拒绝自动重发。`external_recovery.resumable: false` 需先核对副作用。Claude 的异常中断仍采用此保守边界，不能从 Pi 的确认式停止推断其他后端也可恢复。相关本机实程序、故障及 App/CLI 检查见 [停止与恢复验证](external-recovery-validation-2026-11-02.md)。
+进程崩溃、停止确认被再次中断、结果未被外部历史完整接收、文件遭修改或保存失败，均不能变成可恢复成功；保留已有记录并拒绝自动重发。`external_recovery.resumable: false` 需先核对副作用。Claude 和 Codex 的异常中断仍采用此保守边界，不能从 Pi 的确认式停止推断其他后端也可恢复。Codex 正常完成后的续聊会校验实际 rollout 文件所属位置和 SHA256；缺失、变更或另一条线程不能变成空白恢复。相关本机实程序、故障及 App/CLI 检查见 [停止与恢复验证](external-recovery-validation-2026-11-02.md)和 [Codex 验证](codex-backend-validation-2026-11-02.md)。
 
-当前系统隔离后端不支持此外部进程时，在执行前拒绝，不退回宿主运行。工具授权也不等于对可信第三方程序本身建立 OS 沙箱。Linux/macOS 原生 CLI、不同安装版本、外部 SSH、工作区移动后的恢复和长时间真实模型仍需专项验收；Codex/DSH 尚未接入，不假装共用一种协议。完整外部中间对话已保存原始 JSONL，但尚未全部映射进子代理历史界面。
+当前系统隔离后端不支持此外部进程时，在执行前拒绝，不退回宿主运行。工具授权也不等于对可信第三方程序本身建立 OS 沙箱。Linux/macOS 原生 CLI、不同安装版本、外部 SSH、工作区移动后的恢复和长时间真实模型仍需专项验收；DSH 尚未接入，不假装共用一种协议。完整外部中间对话已保存原始 JSONL，但尚未全部映射进子代理历史界面。
 
 实现依据为 [Claude Code CLI 官方参数](https://code.claude.com/docs/en/cli-reference)。可选本地实程序检查通过 `XULOOM_TEST_CLAUDE_PROGRAM` 指定已安装二进制，运行 `tests/test_external_agents.py`；请求只访问测试回环接口，既不是模拟 CLI，也不是一次真实供应商验收。
 
 Pi 协议依据为其官方 [RPC](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md)、[CLI](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/cli.md)、[MCP](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/mcp.md) 与[模型设置](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/models.md)。`XULOOM_TEST_PI_PROGRAM` 指定已安装 `dist/bundle/cli.js` 后运行 `tests/test_pi_agents.py`；测试实际 Pi/Node 与本地协议服务，不消费供应商额度。
+
+Codex 依据 [官方 App Server](https://learn.chatgpt.com/docs/app-server)、[配置参考](https://learn.chatgpt.com/docs/config-file/config-reference)及当前安装程序生成的协议 schema，Responses 依据[官方接口结构](https://developers.openai.com/api/reference/resources/responses/methods/retrieve)。`XULOOM_TEST_CODEX_PROGRAM` 指定实际可执行文件后运行 `tests/test_codex_responses.py`；桌面与正式 CLI 联动检查为 `npm run test:codex-workbench`。这些检查不使用个人 Codex 登录，也不证明其他安装版本或真实模型长任务已经验证。

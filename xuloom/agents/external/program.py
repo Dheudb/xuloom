@@ -10,7 +10,8 @@ import tempfile
 
 REQUIRED = {"claude": ("--restricted", "--bare", "--tools", "--strict-mcp-config", "--input-format",
             "--output-format", "--include-partial-messages", "--system-prompt", "--session-id", "--resume", "--permission-prompts", "--setting-sources"),
-    "pi": ("--mode", "--no-builtin-tools", "--no-extensions", "--no-approve", "--offline", "--no-context-files", "--session", "--session-id", "--session-dir")}
+    "pi": ("--mode", "--no-builtin-tools", "--no-extensions", "--no-approve", "--offline", "--no-context-files", "--session", "--session-id", "--session-dir"),
+    "codex": ("app-server", "--config", "--disable")}
 _probes = {}
 
 
@@ -46,14 +47,23 @@ def resolve(path=None, *, backend="claude", workspace=None):
             raise ValueError(backend + " is not installed; install it separately or choose native execution")
         candidate = Path(found)
         if os.name == "nt" and candidate.suffix.lower() in {".cmd", ".ps1"}:
-            package = candidate.parent / ("node_modules/@anthropic-ai/claude-code/package.json" if backend == "claude" else "node_modules/@earendil-works/pi-coding-agent/package.json")
+            package = candidate.parent / {"claude":"node_modules/@anthropic-ai/claude-code/package.json", "pi":"node_modules/@earendil-works/pi-coding-agent/package.json", "codex":"node_modules/@openai/codex/package.json"}[backend]
             try:
                 metadata = json.loads(package.read_text(encoding="utf-8"))
                 binary = metadata["bin"][backend]
-                expected = "@anthropic-ai/claude-code" if backend == "claude" else "@earendil-works/pi-coding-agent"
-                if metadata["name"] != expected or binary not in ({"bin/claude.exe", "cli.js"} if backend == "claude" else {"dist/bundle/cli.js"}):
+                expected = {"claude":"@anthropic-ai/claude-code", "pi":"@earendil-works/pi-coding-agent", "codex":"@openai/codex"}[backend]
+                allowed = {"claude":{"bin/claude.exe", "cli.js"}, "pi":{"dist/bundle/cli.js"}, "codex":{"bin/codex.js"}}[backend]
+                if metadata["name"] != expected or binary not in allowed:
                     raise ValueError("Unknown installed agent launcher")
                 candidate = package.parent / binary
+                if backend == "codex":
+                    import platform
+                    architecture = "arm64" if platform.machine().lower() in {"arm64", "aarch64"} else "x64" if platform.machine().lower() in {"amd64", "x86_64"} else None
+                    if architecture is None: raise ValueError("Unsupported installed Codex architecture")
+                    triple = "aarch64-pc-windows-msvc" if architecture == "arm64" else "x86_64-pc-windows-msvc"
+                    vendor = package.parent / ("node_modules/@openai/codex-win32-" + architecture) / "vendor" / triple
+                    candidates = [vendor/"bin/codex.exe", vendor/"codex/codex.exe", package.parent/"vendor"/triple/"codex/codex.exe"]
+                    candidate = next((p for p in candidates if p.is_file()), candidates[0])
             except (OSError, KeyError, ValueError) as error:
                 raise ValueError("Select the actual installed agent program; shell shims are not executed") from error
     candidate = candidate.resolve(strict=True)
@@ -86,7 +96,7 @@ async def verify(binding, *, workspace=None):
     if cache in _probes:
         return _probes[cache]
     with tempfile.TemporaryDirectory(prefix="xuloom-program-probe-") as directory:
-        args = [binding["program"], "--help"] if binding["backend"] == "claude" else [binding["runtime"], binding["program"], "--no-approve", "--no-extensions", "--no-context-files", "--offline", "--help"]
+        args = [binding["program"], "--help"] if binding["backend"] in {"claude", "codex"} else [binding["runtime"], binding["program"], "--no-approve", "--no-extensions", "--no-context-files", "--offline", "--help"]
         process = await asyncio.create_subprocess_exec(*args, cwd=directory,
             env=environment(Path(directory)), stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -99,7 +109,7 @@ async def verify(binding, *, workspace=None):
     text = stdout.decode("utf-8", errors="replace")
     if process.returncode or not supports(text, REQUIRED[binding["backend"]]):
         raise ValueError("This installed agent lacks the required controlled streaming interface")
-    _probes[cache] = {"controlled_tools": True, "stream_json": binding["backend"] == "claude", "rpc": binding["backend"] == "pi"}
+    _probes[cache] = {"controlled_tools": True, "stream_json": binding["backend"] == "claude", "rpc": binding["backend"] in {"pi", "codex"}}
     return _probes[cache]
 
 

@@ -1,6 +1,6 @@
 # 外部 Agent 后端：核对与接入约束
 
-2026-11-02。此计划属于持续目标。[可选 Claude Code 后端](external-agents.md) 已接入共享角色与现有 Runtime，并通过本机实际 CLI + 本地协议验收；Pi 已接入受控 RPC；Codex/DSH 仍待分别实现和验收。现有原生角色可绑定不同模型连接并派发到 SSH 主机，不将其算作全部外部 Agent 已完成。
+2026-11-02。此计划属于持续目标。[可选外部后端](external-agents.md) 已接入共享角色与现有 Runtime：Claude Code 使用受控 MCP/stream-json，Pi 使用 RPC，Codex 使用 App Server/Responses。Codex 当前专项见 [验证记录](codex-backend-validation-2026-11-02.md)；DSH 仍待单独实现和验收。现有原生角色可绑定不同模型连接并派发到 SSH 主机，不将其算作全部外部 Agent 已完成。
 
 ## 已核对的 Codex 接口
 
@@ -8,7 +8,7 @@
 
 [App Server](https://learn.chatgpt.com/docs/app-server) 提供连接握手、thread 创建/恢复/分支、turn 与流式事件，以及命令/文件审批请求。它更适合需要连续跟进、用户问题和审批交互的客户端；应消费协议返回的身份，不让模型转抄。官方 [接入方式概述](https://developers.openai.com/blog/codex-as-a-platform) 同样区分一次性 exec 与长期交互场景。
 
-Codex 核对只读取官方文档，没有运行 Codex 模型、读取账户凭据或创建外部聊天。Claude 已另外核对实际 CLI 2.1.267 的受控 MCP/stream-json 与续聊；Pi 已核对并实际验证 1.4.0 RPC/MCP、同一历史续聊及确认式停止；DSH 的具体协议仍需分别核对，不能从一种协议推断其他 CLI 行为。
+初步 Codex 核对只读取官方文档。随后已通过当前安装程序 `0.156.1` 的 schema、App Server 和独立回环 Responses/MCP 验证真实线程、工具调用及正常续聊；没有读取账户凭据或调用真实供应商。Claude 已另外核对实际 CLI 2.1.267 的受控 MCP/stream-json 与续聊；Pi 已核对并实际验证 1.4.0 RPC/MCP、同一历史续聊及确认式停止；DSH 的具体协议仍需分别核对，不能从一种协议推断其他 CLI 行为。
 
 ## 薄后端而非第二套调度
 
@@ -22,7 +22,7 @@ Codex 核对只读取官方文档，没有运行 Codex 模型、读取账户凭�
 
 - 父框架的 Plan、显式拒绝和询问规则不能因进入外部 Agent 而失效。仅转发外部审批弹窗不等于已覆盖父框架全部规则。
 - 后端不能表达或强制当前策略、实际系统隔离不兼容，或协议版本不支持所需审批时，在启动任务前明确拒绝；不用提示词模拟安全约束，不偷偷降级到完全访问。
-- 不以跳过审批参数授予任意宿主工具执行权。受控 MCP 可关闭外部 CLI 的重复询问，但必须保留 Xuloom 的真实授权入口、禁用外部原生执行工具并限定连接；不能将其解释为绕过父权限。用户选择 Ultra 只改变协作倾向，不改变外部执行权限。
+- 不以跳过审批参数授予任意宿主工具执行权。受控 MCP 可关闭外部 CLI 的重复询问，但必须保留 Xuloom 的真实授权入口，阻止未经控制的外部原生工具进入供应商请求和执行，并限定连接；目录隐藏或功能开关不能代替调用校验。用户选择 Ultra 只改变协作倾向，不改变外部执行权限。
 - 不把主 Agent 的 API Key、模型地址或整份环境自动传给外部 CLI。各后端使用用户明确配置的连接或自己的授权方式，凭据不进入参数日志和会话深链接。
 - 可执行文件与参数分开构造，prompt 通过协议或 stdin 发送，不拼成 shell 命令。解析程序路径时避免被项目目录中的同名程序抢先命中。
 
@@ -45,3 +45,9 @@ App 和 CLI 共享角色配置、连接与回执；缺少程序、错误协议�
 官方 [配置说明](https://learn.chatgpt.com/docs/config-file/config-basic)列出 `features.shell_tool`、Hooks、Apps 和子代理等独立开关。下一步需实际验证禁用配置后的全部工具请求，尤其文件、内置命令、托管工具与外部工具的边界；关掉一项不代表其他路径也受控。采用独立配置目录，不读取个人登录或启动项目扩展。响应转发也要单独实现 Responses 契约，不能把现有 Chat Completions／Messages 转发器换个地址就称为支持 Codex。
 
 这一步只核对文档与已有只读 Schema，未启动模型回合，未新增运行依赖；Codex 后端仍未作为可用选项发布。
+
+## 后续实现核对（2026-11-02）
+
+上述前置核对后，App Server / Responses 适配已实现；实际 `0.156.1` 通过了独立回环 SSE/MCP 的正常执行、相同线程续聊和故障检查，源码 App 与正式 CLI 的跨进程恢复也已通过。当前实施、验收与安装状态集中记录于 [Codex 验证](codex-backend-validation-2026-11-02.md)。实现采用已有受控 MCP，不增加 dynamicTools 回调层；目录过滤之外也对完整工具调用做授权和身份校验。
+
+DSH 仍需独立适配。其公开 [Agent API](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/core/agent/README.md) 区分进程内 initiator、Agent handle 和可替换 driver；跨进程传递所有权不能只依赖其进程内归属。接入时继续保留 Xuloom 的父子身份、原生回执和权限，不能仅启动命令后把退出码当成任务完成。

@@ -13,7 +13,7 @@
 
 Windows 下载包自带 Python 和 MCP SDK，无需安装 Python、选择解释器或安装 Node.js。第三方 MCP 程序可能另需 Node.js、uv 等环境，按服务说明准备。
 
-当前源码版本为 **v0.1.12**，可下载成品及校验和以 Releases 为准。成品面向 Windows x64；Linux/macOS 可使用源码 CLI，尚无对应的桌面发行包。
+当前源码版本为 **v0.1.14**，可下载成品及校验和以 Releases 为准。成品面向 Windows x64；Linux/macOS 可使用源码 CLI，尚无对应的桌面发行包。
 
 执行过程按操作显示图标和简短说明：图片、编辑、终端、搜索等各有标识，点击过程行可展开参数与结果，完成后整轮过程自动折叠。读取图片会显示可点击放大的缩略图；会话保存图片快照，原文件被修改或删除后仍能回看。预览本身不会调用模型；模型理解图片还需所连接的接口支持图片输入。
 
@@ -37,7 +37,7 @@ SSH 会话的 HTML 可直接在文件面板预览，支持工作区内的相对 
 
 **原生分布式子代理：** 在 **设置 → Subagents → 新建** 选择执行位置（本机或已配置 SSH 主机）、对应主机的模型连接及模型。角色仍由现有队列派发，支持跟进、消息、结果和拥有者确认的取消；无后台命令的已完成 worker 会释放 SSH 连接。远端历史和文件可以从代理卡片打开，受控历史不能绕过主会话执行。App 与 CLI 共用角色文件，执行主机需安装兼容的 v0.1.6 worker 协议；不会复制本机模型凭据或 Skill 文件。详见 [分布式子代理](docs/distributed-workers-plan.md)。
 
-可选的 [Claude Code / Pi 后端](docs/external-agents.md) 可使用用户已安装 CLI，继续走 Xuloom 的原生队列、工具授权和中央历史。Claude 使用 Anthropic Messages；Pi 支持 Anthropic Messages 和 OpenAI Chat。Pi 主动停止在回执与历史确认后可通过同一 worker 明确续聊，未知结果不会自动重放，见 [停止与恢复边界](docs/external-agents.md#续聊停止与边界)。Codex、DSH 外部后端及外部 CLI 经 SSH 的组合仍在 [持续目标](docs/product-roadmap.md) 中，不能把原生 SSH worker 当成所有后端已验收。
+可选的 [Claude Code / Pi / Codex 后端](docs/external-agents.md) 可使用用户已安装 CLI，继续走 Xuloom 的原生队列、工具授权和中央历史。Claude 使用 Anthropic Messages；Pi 支持 Anthropic Messages 和 OpenAI Chat，Codex 使用 OpenAI Responses。Pi 主动停止在回执与历史确认后可通过同一 worker 明确续聊，未知结果不会自动重放，见 [停止与恢复边界](docs/external-agents.md#续聊停止与边界)。DSH 外部后端及外部 CLI 经 SSH 的完整联动仍在 [持续目标](docs/product-roadmap.md) 中，不能把原生 SSH worker 当成所有后端已验收。
 
 按需发现的工具会随会话保存，续聊时恢复当前角色仍允许使用的工具；晚注册的 MCP 工具也重新检查角色范围。外部 CLI 缓存工具定义不等于获得执行权限，模型请求和实际执行仍受原生可见性及授权约束。详见 [工具发现与恢复验证](docs/tool-discovery-validation-2026-11-02.md)。
 
@@ -96,7 +96,7 @@ skills: [literature-review]
 报告来源与理由，不擅自修改文件。
 ```
 
-先添加示例依赖的 `literature-review` Skill。`tools` 可使用 Read、Write、Edit、Exec、Grep、Glob、Skill 等别名或实际工具名；省略 `tools` 继承工具，手动填写 `tools: []` 表示禁用全部工具。省略 `connection` 时，`model` 使用主代理连接；添加 `connection: <已配置连接的 ID>` 可跨供应商运行原生子代理。桌面与 CLI 共用定义和凭据，详见 [角色连接](docs/capabilities.md#角色连接与异构原生子代理)。[原生 SSH worker](docs/distributed-workers-plan.md) 使用执行主机的连接和配置；可选的 [Claude Code / Pi 后端](docs/external-agents.md) 使用用户已安装 CLI 和受控 MCP 工具，不捆绑外部程序或使用个人登录。Codex、DSH 外部后端仍待接入。
+先添加示例依赖的 `literature-review` Skill。`tools` 可使用 Read、Write、Edit、Exec、Grep、Glob、Skill 等别名或实际工具名；省略 `tools` 继承工具，手动填写 `tools: []` 表示禁用全部工具。省略 `connection` 时，`model` 使用主代理连接；添加 `connection: <已配置连接的 ID>` 可跨供应商运行原生子代理。桌面与 CLI 共用定义和凭据，详见 [角色连接](docs/capabilities.md#角色连接与异构原生子代理)。[原生 SSH worker](docs/distributed-workers-plan.md) 使用执行主机的连接和配置；可选的 [Claude Code / Pi / Codex 后端](docs/external-agents.md) 使用用户已安装 CLI 和受控 MCP 工具，不捆绑外部程序或使用个人登录。DSH 外部后端仍待接入；Codex 需要真正支持 Responses 的连接，不能将 Chat Completions 网关视为已经兼容。
 
 在右侧“代理”中点角色的 **分配任务**，或在 prompt 中明确指定角色。创建定义不会自动启动代理。输入框中的 **Solo** 关闭委派，**Auto** 按需委派，**Ultra** 更积极地寻找并行机会。两档默认不设子代理数量限制；只有显式设置宿主并发限制时，超额已接受任务才排队。详见 [协作与配置](docs/capabilities.md)。
 

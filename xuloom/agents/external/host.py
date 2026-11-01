@@ -94,12 +94,12 @@ class LocalHost:
             expected = self.calls.get(identity)
             if expected is None or expected != (name, values) or name not in self.tools():
                 raise ValueError("This tool invocation has no matching owned model call")
-            if self.stopping or self.engine.abort_event.is_set():
+            if self.failure or self.stopping or self.engine.abort_event.is_set():
                 raise ValueError("The owning execution has stopped")
             # External MCP calls do not pass through the native batch partitioner.
             # Serialize this boundary so mutations and duplicate transports cannot race.
             async with self.execution_lock:
-                if self.stopping or self.engine.abort_event.is_set():
+                if self.failure or self.stopping or self.engine.abort_event.is_set():
                     raise ValueError("The owning execution has stopped")
                 before = set(self.catalog())
                 try:
@@ -137,9 +137,18 @@ class LocalHost:
         core = Starlette(routes=[Route("/mcp", MCPRoute(), methods=["GET", "POST", "DELETE"]),
             Route("/v1/messages", self.messages, methods=["POST"]),
             Route("/v1/chat/completions", self.chat_completions, methods=["POST"]),
+            Route("/v1/responses", self.responses, methods=["POST"]),
             Route("/v1/messages/count_tokens", self.count_tokens, methods=["POST"])], lifespan=lifespan)
         async def application(scope, receive, send):
             if scope["type"] == "http":
+                # Some installed clients use the explicit owned loopback proxy
+                # even for its own URL. It is not an open forwarding proxy.
+                if scope.get("path", "").startswith(("http://", "https://")):
+                    from urllib.parse import urlsplit
+                    target = urlsplit(scope["path"])
+                    if target.scheme + "://" + target.netloc != owner.url:
+                        await JSONResponse({"error":"Unowned destination"}, status_code=403)(scope, receive, send); return
+                    scope = {**scope, "path": target.path, "raw_path": target.path.encode(), "query_string": target.query.encode()}
                 headers = dict(scope.get("headers", []))
                 key = headers.get(b"x-api-key") or headers.get(b"authorization", b"").removeprefix(b"Bearer ")
                 if headers.get(b"origin") or not hmac.compare_digest(key, owner.token.encode()):
@@ -185,12 +194,15 @@ class LocalHost:
             self.socket.close()
         if storage_error is not None: raise storage_error
 
-    async def payload(self, request, protocol="anthropic"):
+    async def read_payload(self, request):
         data = bytearray()
         async for part in request.stream():
             data.extend(part)
             if len(data) > LIMIT: raise ValueError("External request is too large")
-        value = json.loads(data)
+        return json.loads(data)
+
+    async def payload(self, request, protocol="anthropic"):
+        value = await self.read_payload(request)
         if not isinstance(value, dict) or value.get("model") != self.engine.primary_model:
             raise ValueError("External request changed its frozen model")
         tools, messages = value.get("tools", []), value.get("messages")
@@ -254,14 +266,21 @@ class LocalHost:
     async def chat_completions(self, request):
         return await self.relay(request, "openai")
 
+    async def responses(self, request):
+        return await self.relay(request, "responses")
+
     async def relay(self, request, protocol):
         from starlette.responses import StreamingResponse
         if self.failure or self.stopping or self.engine.abort_event.is_set():
             return self.failure_response(409, "The owning execution has stopped; no new model request was permitted")
         try:
-            if self.engine.model_provider != protocol: raise ValueError("Changed provider protocol")
-            value = await self.payload(request, protocol)
-            maximum = value.get("max_completion_tokens", value.get("max_tokens")) if protocol == "openai" else value.get("max_tokens")
+            if self.engine.model_provider != ("openai" if protocol == "responses" else protocol): raise ValueError("Changed provider protocol")
+            if protocol == "responses":
+                from .responses import payload
+                if self.state.get("backend") != "codex": raise ValueError("The owned backend does not use Responses")
+                value = payload(self, await self.read_payload(request))
+            else: value = await self.payload(request, protocol)
+            maximum = value.get("max_output_tokens", self.maximum) if protocol == "responses" else value.get("max_completion_tokens", value.get("max_tokens")) if protocol == "openai" else value.get("max_tokens")
             if type(maximum) is not int or maximum <= 0 or (protocol == "openai" and (type(value.get("n", 1)) is not int or value.get("n", 1) != 1)):
                 raise ValueError("Invalid output grant request")
             if type(value.get("stream", False)) is not bool: raise ValueError("Invalid streaming mode")
@@ -269,7 +288,10 @@ class LocalHost:
             self.fail("protocol_error")
             return self.failure_response(400, "External request does not match its controlled capability")
         queue, ready = asyncio.Queue(64), asyncio.get_running_loop().create_future()
-        if protocol == "openai":
+        if protocol == "responses":
+            from .responses import forward
+            execution = forward(self, value, queue, ready)
+        elif protocol == "openai":
             from .openai import forward
             execution = forward(self, value, queue, ready)
         else:
