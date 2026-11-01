@@ -169,6 +169,46 @@ class SSHWireTests(unittest.IsolatedAsyncioTestCase):
         client = await self.connect(); sid = (await client.request("sessions.create"))["sessionId"]
         await client.aclose(); return sid
 
+    async def test_attachment_cli_upload_listing_download_and_prompt_use_remote_copies(self):
+        import hashlib
+        from PIL import Image
+        sid = await self.empty_chat()
+        source = self.root / 'local paper.pdf'; content = b'%PDF-fixture' * 70000; source.write_bytes(content)
+        before = len(self.local.records)
+        code, events, error = await self.run_cli('attach', 'test', str(source), '--session', sid)
+        self.assertEqual(code, 0, error + str(events))
+        item = events[-1]['result']['attachments'][0]; identity = item['id']
+        self.assertEqual(item['sha256'], hashlib.sha256(content).hexdigest())
+        self.assertNotIn(str(source), item['path'])
+        source.unlink()
+        code, events, error = await self.run_cli('attachments', 'test', '--session', sid)
+        self.assertEqual(code, 0, error); self.assertEqual(events[-1]['result']['attachments']['items'][0]['id'], identity)
+        destination = self.root / 'download.pdf'
+        code, events, error = await self.run_cli('download', 'test', identity, str(destination), '--session', sid)
+        self.assertEqual(code, 0, error); self.assertEqual(destination.read_bytes(), content)
+        self.assertEqual(len(self.local.records), before, 'Transfer and listing must not invoke a model')
+        image = self.root / 'pixels.png'; Image.new('RGB', (30, 20), 'red').save(image)
+        code, events, error = await self.run_cli('exec', 'test', 'Read attachment pixels', '--session', sid, '--attach', str(image), '--attachment', identity)
+        self.assertEqual(code, 0, error + str(events))
+        request = next(record['body'] for record in reversed(self.local.records) if record['body'].get('stream'))
+        user = next(row for row in reversed(request['messages']) if row['role'] == 'user')
+        self.assertTrue(any(block.get('type') == 'image_url' for block in user['content']))
+        self.assertIn(item['path'].replace('\\', '/'), str(user))
+        self.assertNotIn(str(source), str(user)); self.assertFalse((self.root / 'local-data' / 'history').exists())
+
+    async def test_interactive_attachment_selection_survives_separate_readonly_download(self):
+        sid = await self.empty_chat(); source = self.root / 'local notes.txt'; source.write_text('independent copy', encoding='utf-8')
+        commands = iter(['/attach ' + str(source), '/attachments', 'Review attached notes', '/attachments clear', '/quit'])
+        output = io.StringIO()
+        async def read(_): return next(commands)
+        with patch('xuloom.remote.proxy.resolve', return_value=self.profile):
+            result = await interactive_chat('test', session_id=sid, read=read, console=Console(file=output))
+        self.assertTrue(result['ok'], result); self.assertIn('Next message attachments:', output.getvalue())
+        client = await self.connect(); initial = await client.request('initialize', {'sessionId': sid})
+        user = next(row for row in initial['history'] if row['role'] == 'user')
+        self.assertEqual(user['text'], 'Review attached notes'); self.assertEqual(len(user['attachments']), 1)
+        self.assertNotEqual(user['attachments'][0]['path'], str(source))
+
     async def test_real_cli_links_and_terminal_resume_use_remote_history_and_never_a_local_engine(self):
         sid = await self.empty_chat()
         connections = len(self.server.commands)
@@ -408,7 +448,7 @@ class SSHWireTests(unittest.IsolatedAsyncioTestCase):
     async def test_cli_cancellation_confirms_owned_stop(self):
         started = self.hold_model(); events = []
         async def emit(event): events.append(event)
-        args = SimpleNamespace(action="exec", id="test", session=None, prompt="wait", resume=False, permission="full", collaboration=None, skill=[])
+        args = SimpleNamespace(action="exec", id="test", session=None, prompt="wait", resume=False, permission="full", collaboration=None, skill=[], attach=[], attachment=[])
         with patch("xuloom.remote.config.resolve", return_value=self.profile):
             task = asyncio.create_task(remote_dispatch(args, emit))
             self.assertTrue(await asyncio.to_thread(started.wait, 15))

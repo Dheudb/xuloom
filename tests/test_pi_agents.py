@@ -11,7 +11,10 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-import test_external_agents as external
+if __package__:
+    from . import test_external_agents as external
+else:
+    import test_external_agents as external
 from xuloom.agents.external.program import resolve
 from xuloom.core.storage import IOPath
 

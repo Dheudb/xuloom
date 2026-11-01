@@ -4,6 +4,7 @@ const path = require("node:path");
 const { remoteKey: keyOf, remoteId } = require("./chat-links.cjs");
 const object = value => !!value && typeof value === "object" && !Array.isArray(value);
 const flags = value => ["open", "collapsed", "pinned", "archived"].every(key => !(key in value) || typeof value[key] === "boolean");
+const attachmentIds = value => Array.isArray(value) && value.length <= 10 && value.every(id => typeof id === "string" && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(id));
 function validRow(id, row) {
   try {
     return remoteId(id) && object(row) && object(row.binding) &&
@@ -17,7 +18,7 @@ function validRow(id, row) {
       ["title", "draft", "draftEditId"].every(key => !(key in row) || typeof row[key] === "string" && row[key].length <= (key === "draft" ? 1000000 : key === "title" ? 200 : 128)) &&
       ["created", "updated"].every(key => !(key in row) || Number.isFinite(row[key]) && Math.abs(row[key]) <= 8640000000000000) &&
       (!row.machine || object(row.machine) && ["hostname", "platform", "cwd"].every(key => typeof row.machine[key] === "string" && row.machine[key])) &&
-      (!("draftAttachments" in row) || Array.isArray(row.draftAttachments) && !row.draftAttachments.length) &&
+      (!("draftAttachments" in row) || attachmentIds(row.draftAttachments)) &&
       (!("permissionMode" in row) || ["ask", "full"].includes(row.permissionMode));
   } catch { return false; }
 }
@@ -62,8 +63,8 @@ function remoteWorkspaces(context) {
       if (!["ask", "full"].includes(patch.permissionMode)) throw new Error("权限模式无效"); next.permissionMode = patch.permissionMode;
     }
     if ("draftAttachments" in patch) {
-      if (!Array.isArray(patch.draftAttachments) || patch.draftAttachments.length) throw new Error("远端附件传输尚未接入，未保存本机路径");
-      next.draftAttachments = [];
+      if (!attachmentIds(patch.draftAttachments)) throw new Error("远端附件必须是会话附件 ID，不能保存本机路径");
+      next.draftAttachments = [...new Set(patch.draftAttachments)];
     }
     if ("updated" in patch) next.updated = patch.updated;
     return writeRow(next);
@@ -96,7 +97,7 @@ function remoteWorkspaces(context) {
     return writeRow({ ...old, id, binding: profile, machine, sessionId, project: initial.project, scope: "project",
       title: old?.title || title || initial.history.find(row => row.role === "user")?.text?.split("\n")[0]?.slice(0, 80) || "新会话",
       created: old?.created || Date.now(), updated: old?.updated || Date.now(), permissionMode: old?.permissionMode || "ask",
-      draft: old?.draft || "", draftEditId: old?.draftEditId || "", draftAttachments: [], pinned: !!old?.pinned, archived: !!old?.archived });
+      draft: old?.draft || "", draftEditId: old?.draftEditId || "", draftAttachments: old?.draftAttachments || [], pinned: !!old?.pinned, archived: !!old?.archived });
   }
   async function openRow(row, { newChat = false } = {}) {
     writable(`ssh:${keyOf(row.binding)}`);
@@ -117,10 +118,12 @@ function remoteWorkspaces(context) {
       const initial = await pipe.request("initialize", { sessionId: sid, permissionMode: row.permissionMode || "ask" });
       row = add(connection.profile, connection.machine, sid, initial, newChat ? "新会话" : row.title);
       id = row.id;
-      sessions.set(id, { transport: pipe, project: initial.project, resumeId: sid, scope: "project", remote: { connectionId: row.binding.id, name: row.binding.name, host: row.binding.host, key: keyOf(row.binding), hostname: connection.machine.hostname }, busy: false, workers: new Map() });
+      sessions.set(id, { transport: pipe, project: initial.project, resumeId: sid, scope: "project", ...(initial.controlledExecution ? { controlledExecution: true } : {}), remote: { connectionId: row.binding.id, name: row.binding.name, host: row.binding.host, key: keyOf(row.binding), hostname: connection.machine.hostname, ...(connection.machine.attachments === 1 ? { attachments: true } : {}) }, busy: false, workers: new Map() });
       updateProject(`ssh:${keyOf(row.binding)}`, { open: true, collapsed: false });
       activate(id); saveWorkspace();
-      return { ...initial, id, title: row.title, scope: "project", remote: sessions.get(id).remote, savedDraft: row.draft, savedDraftEditId: row.draftEditId, savedAttachments: [], activeId: id, catalog: broadcast() };
+      const ids = row.draftAttachments || [];
+      const savedAttachments = !ids.length ? [] : connection.machine.attachments === 1 ? (await pipe.request("attachments.list", { ids })).items : ids.map(id => ({ id, name: "待恢复附件 " + id.slice(0, 8), kind: "file", size: 0, path: "", available: false, state: "interrupted" }));
+      return { ...initial, id, title: row.title, scope: "project", remote: sessions.get(id).remote, savedDraft: row.draft, savedDraftEditId: row.draftEditId, savedAttachments, activeId: id, catalog: broadcast() };
     } catch (error) { await pipe.close().catch(() => {}); throw error; }
   }
   async function withPipe(row, work) {
@@ -217,10 +220,25 @@ function remoteWorkspaces(context) {
     if (["preview.close", "media-preview.close"].includes(method)) return { handled: false };
     if (source.moving) throw new Error("会话正在移除本机引用，请稍候");
     if (source.disconnected && method !== "session.close") throw new Error("SSH 连接已断开，结果未确认。请重新选择会话查看保存状态；不会自动重发任务。");
-    if (["attachments.import", "attachments.open", "attachments.preview", "project.reveal", "capabilities.directory", "capabilities.import"].includes(method))
-      throw new Error("远端文件传输/网页预览入口尚未接入；未尝试打开本机同名路径");
-    if (["session.close", "session.activate", "preview.open", "preview.close", "media-preview.open", "media-preview.close"].includes(method)) return { handled: false };
+    if (["project.reveal", "capabilities.directory", "capabilities.import"].includes(method))
+      throw new Error("此操作需要在远端管理；未尝试打开本机同名路径");
+    if (["session.close", "session.activate", "preview.open", "preview.close", "media-preview.open", "media-preview.close", "attachments.open"].includes(method)) return { handled: false };
+    if (method === "attachments.import") {
+      if (!source.remote.attachments) throw new Error("请先更新远端 Xuloom，再传输附件");
+      if (source.controlledExecution || running(source) || source.attachmentImport) throw new Error("请等待任务结束；受控子代理会话只能查看附件");
+      if (!Array.isArray(params.files) || !params.files.length || !attachmentIds(params.existing || [])) throw new Error("附件输入无效");
+      const ids = params.ids || params.files.map(() => crypto.randomUUID()), existing = params.existing || [];
+      if (!attachmentIds(ids) || ids.length !== params.files.length || new Set([...existing, ...ids]).size !== existing.length + ids.length || existing.length + ids.length > 10) throw new Error("每条消息最多 10 个不同的附件");
+      source.attachmentImport = (async () => {
+        await source.transport.request("attachments.list", { ids: existing });
+        update(params.session, { draftAttachments: [...existing, ...ids] });
+        return source.transport.request("attachments.import", { files: params.files, ids, existing });
+      })();
+      try { return { handled: true, value: await source.attachmentImport }; }
+      finally { source.attachmentImport = undefined; broadcast(); }
+    }
     const { session, ...payload } = params;
+    if (method === "attachments.list" && !Object.prototype.hasOwnProperty.call(payload, "ids")) payload.ids = find(session).draftAttachments || [];
     if (method === "permissions.set") {
       if (!["ask", "full"].includes(params.mode)) throw new Error("权限模式无效");
       try {
@@ -230,12 +248,12 @@ function remoteWorkspaces(context) {
       }
     }
     if (method === "prompt" || method === "prompt.resume" || method === "media.control") {
-      if (source.busy) throw new Error("远端会话已有运行中的任务");
-      if (params.attachments?.length) throw new Error("远端附件尚未传输；未提交任务");
+      if (source.busy || source.attachmentImport) throw new Error("远端会话已有运行中的任务或附件传输");
+      if (params.attachments?.length && !source.remote.attachments) throw new Error("请先更新远端 Xuloom；未提交带附件的任务");
       source.busy = true;
       try {
         const value = await source.transport.request(method, payload), row = find(session);
-        if (method === "prompt") update(session, { draft: "", draftEditId: "", updated: Date.now(), ...(row.title === "新会话" ? { title: String(params.text || "").split("\n")[0].slice(0, 80) } : {}) });
+        if (method === "prompt") update(session, { draft: "", draftEditId: "", draftAttachments: [], updated: Date.now(), ...(row.title === "新会话" ? { title: String(params.text || "").split("\n")[0].slice(0, 80) } : {}) });
         broadcast(); return { handled: true, value };
       } catch (error) { source.busy = false; throw error; }
     }

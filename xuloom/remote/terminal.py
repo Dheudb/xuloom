@@ -4,6 +4,8 @@ import json
 import os
 import stat
 import sys
+import shlex
+import uuid
 
 from rich.console import Console
 from rich.markdown import Markdown
@@ -62,6 +64,7 @@ async def interactive_chat(identity, *, session_id=None, binding=None, machine=N
         queue.put_nowait(value)
     bridge = SSHBridge(identity, binding, machine, event)
     capabilities = {"skills": []}
+    attachment_ids = []
     class Skills:
         def active(self): return [item for item in capabilities["skills"] if item.get("valid", True) and item.get("enabled", True) and not item.get("shadowed")]
     if read is None:
@@ -128,8 +131,9 @@ async def interactive_chat(identity, *, session_id=None, binding=None, machine=N
         active_turn = False
 
     async def turn(method, payload):
-        nonlocal active_turn
+        nonlocal active_turn, attachment_ids
         await bridge.dispatch(method, payload)
+        if method == "prompt": attachment_ids = []
         active_turn = True
         receipt, streamed = None, ""
         while True:
@@ -172,7 +176,33 @@ async def interactive_chat(identity, *, session_id=None, binding=None, machine=N
                 command, _, argument = text.partition(" ")
                 if command in {"/quit", "/q", "/exit"}: break
                 if command == "/help":
-                    console.print("/link /status /git /summary [all] /files [path] /read <path> /preview <HTML path> /skills /agents /model list|status|use N\n/permission ask|full /collaboration solo|auto|ultra /thinking enabled|disabled /effort LEVEL\n/sandbox host|workspace /plan on|off /continue /quit", markup=False); continue
+                    console.print("/link /status /git /summary [all] /files [path] /read <path> /preview <HTML path> /skills /agents /model list|status|use N\n/attach <local file> /attachments /attachments use UUID /attachments clear /download UUID <local file>\n/permission ask|full /collaboration solo|auto|ultra /thinking enabled|disabled /effort LEVEL\n/sandbox host|workspace /plan on|off /continue /quit", markup=False); continue
+                if command == "/attach":
+                    filename = argument.strip().strip('"')
+                    if not filename: raise ValueError("Use /attach <local file>")
+                    identities = [str(uuid.uuid4())]
+                    console.print("Attachment: " + identities[0], markup=False)
+                    items = await bridge.dispatch("attachments.import", {"files": [{"path": filename}], "ids": identities, "existing": attachment_ids})
+                    attachment_ids = [item["id"] for item in items]
+                    console.print(json.dumps(items, ensure_ascii=False, indent=2), markup=False); continue
+                if command == "/attachments":
+                    if argument == "clear": attachment_ids = []
+                    elif argument.startswith("use "):
+                        identity = argument[4:].strip()
+                        items = (await bridge.dispatch("attachments.list", {"ids": [identity]}))["items"]
+                        if not items or not items[0].get("available"): raise ValueError("Attachment is unavailable; re-upload the original file")
+                        if len(attachment_ids) >= 10: raise ValueError("Each message supports at most 10 attachments")
+                        attachment_ids = list(dict.fromkeys([*attachment_ids, identity]))
+                    elif argument: raise ValueError("Use /attachments, /attachments use UUID or /attachments clear")
+                    else:
+                        value = await bridge.dispatch("attachments.list", {})
+                        console.print(json.dumps(value, ensure_ascii=False, indent=2), markup=False)
+                    console.print("Next message attachments: " + ", ".join(attachment_ids), markup=False); continue
+                if command == "/download":
+                    parts = shlex.split(argument, posix=False)
+                    if len(parts) != 2: raise ValueError('Use /download UUID "local filename"')
+                    value = await bridge.dispatch("attachments.download", {"id": parts[0], "path": parts[1].strip('"')})
+                    console.print(json.dumps(value, ensure_ascii=False, indent=2), markup=False); continue
                 if command == "/link":
                     from xuloom.features.chat_links import remote_chat_link
                     console.print(remote_chat_link(connection["profile"], session_id), markup=False, soft_wrap=True); continue
@@ -209,7 +239,7 @@ async def interactive_chat(identity, *, session_id=None, binding=None, machine=N
                     continue
                 if command.startswith("/") and command != "/continue": raise ValueError("Unknown command; use /help")
                 if command == "/continue" and argument: raise ValueError("/continue cannot replace the saved prompt")
-                await turn("prompt.resume" if command == "/continue" else "prompt", {} if command == "/continue" else {"text": text, "mode": "plan" if plan else "normal"})
+                await turn("prompt.resume" if command == "/continue" else "prompt", {} if command == "/continue" else {"text": text, "mode": "plan" if plan else "normal", "attachments": attachment_ids})
             except (KeyboardInterrupt, asyncio.CancelledError):
                 await stop()
                 console.print("已停止当前连接拥有的任务；/continue 继续。", markup=False)

@@ -16,6 +16,7 @@ class SSHBridge:
         self.client = None
         self.lock = asyncio.Lock()
         self.disconnected = False
+        self.attachment_cancel = None
 
     def event(self, event):
         if event["type"] == "remote_disconnected":
@@ -47,13 +48,24 @@ class SSHBridge:
         client = await self.connect()
         if method == "remote.connection":
             return {"profile": client.profile, "machine": client.info}
+        if method == "stop" and self.attachment_cancel is not None: self.attachment_cancel.set()
         try:
+            if method in {"attachments.import", "attachments.download"}:
+                from xuloom.remote import attachments
+                if self.attachment_cancel is not None: raise ValueError("An attachment transfer is already running")
+                cancelled = self.attachment_cancel = asyncio.Event()
+                try:
+                    if method == "attachments.import":
+                        return await attachments.upload(client, params.get("files"), params.get("ids"), params.get("existing", []), cancelled=cancelled)
+                    return await attachments.download(client, params.get("id"), params.get("path"), cancelled=cancelled)
+                finally: self.attachment_cancel = None
             return await client.request(method, params, timeout=180 if method == "mcp.reload" else 60)
         except RemoteDisconnected as error:
             if not self.disconnected: self.event({"type": "remote_disconnected", "message": str(error), "outcome_unknown": True})
             raise
 
     async def close(self):
+        if self.attachment_cancel is not None: self.attachment_cancel.set()
         if self.client: await self.client.aclose()
 
 

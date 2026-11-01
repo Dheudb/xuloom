@@ -104,7 +104,7 @@ skills: [literature-review]
 
 开发版本已加入 [SSH 桌面聊天与 CLI](docs/remote.md)：使用另一台机器自己的模型、Skills、MCP 和历史。设置 → SSH 远程可创建或打开远端会话；CLI 可运行 `xuloom remote chat lab --session <ID>` 交互聊天，或 `xuloom remote exec lab "任务" --json` 非交互执行。停止、选择题、审批和模型切换仍由远端原有运行时处理，不上传本机 API Key。
 
-右键会话可复制[本机或 SSH 聊天链接](docs/chat-links.md)，桌面粘贴打开，或 `xuloom --chat "xuloom://chat/…"` 在终端打开。远端链接只选择已配置连接，不导入主机或自动发送 prompt。远端附件/网页预览、跨机器子代理和外部 Agent CLI 后端仍未完成；不把聊天接通当作分布式协作已实现。
+右键会话可复制[本机或 SSH 聊天链接](docs/chat-links.md)，桌面粘贴打开，或 `xuloom --chat "xuloom://chat/…"` 在终端打开。远端链接只选择已配置连接，不导入主机或自动发送 prompt。SSH 现已支持[附件传输与副本下载](docs/remote-attachments.md)、HTML 预览和[原生远端子代理](docs/distributed-workers-plan.md)。可选 [Claude Code／Pi 后端](docs/external-agents.md)有各自的本地验证范围；Codex／DSH、外部后端经 SSH、物理两机与跨平台等剩余工作见[完整目标](docs/product-roadmap.md)，不把回环协议测试算作全部部署验收。
 
 ## MCP：连接工具与外部服务
 

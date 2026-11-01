@@ -71,6 +71,7 @@ const engineMethods = new Set([
   "files.image",
   "files.mediaInfo", "files.mediaChunk",
   "files.htmlInfo", "files.htmlChunk",
+  "attachments.list", "attachments.info", "attachments.read", "attachments.preview",
   "media.read",
   "media.connections", "media.save", "media.remove", "media.jobs", "media.control",
   "files.undo",
@@ -360,6 +361,7 @@ async function disposeSession(id) {
   const source = sessions.get(id);
   if (!source) return;
   browserCaptures.cancel(id);
+  if (source.remote && source.attachmentImport) await source.transport.request("stop").catch(() => {});
   if (source.attachmentImport) await source.attachmentImport.catch(() => {});
   await source.transport.close();
   htmlPreviews.revokeSession(id);
@@ -655,6 +657,18 @@ async function invoke(method, params) {
     finally { source.attachmentImport = undefined; }
   }
   if (method === "attachments.open") {
+    if (source.remote) {
+      if (!source.remote.attachments) throw new Error("请先更新远端 Xuloom，再下载附件");
+      const item = await source.transport.request("attachments.info", { id: params.id });
+      if (typeof item.name !== "string" || !item.available) throw new Error("附件尚未上传完成");
+      let defaultPath = path.basename(item.name);
+      try { defaultPath = path.join(app.getPath("downloads"), defaultPath); } catch { /* A redirected/missing Downloads folder must not disable Save As. */ }
+      const chosen = await dialog.showSaveDialog(window, { title: "保存远端附件到本机", defaultPath });
+      if (chosen.canceled || !chosen.filePath) return false;
+      const saved = await source.transport.request("attachments.download", { id: params.id, path: chosen.filePath });
+      shell.showItemInFolder(saved.path);
+      return true;
+    }
     const item = attachments.get(catalog.find(params.session), params.id);
     shell.showItemInFolder(item.path);
     return true;

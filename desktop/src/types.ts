@@ -75,7 +75,7 @@ export type TurnTrace = {
   pendingText?: string;
   steps: ({ kind: "text"; text: string } | { kind: "tool"; tool: ToolActivity })[];
 };
-export type Attachment = { id: string; name: string; path: string; size: number; kind: "image" | "file"; preview?: string };
+export type Attachment = { id: string; name: string; path: string; size: number; kind: "image" | "file"; preview?: string; available?: boolean; state?: string };
 export type HistoryItem = { id?: string; role: "user" | "assistant"; text: string; trace?: TurnTrace; attachments?: Attachment[] };
 export type SavedSession = { id: string; title: string; updated: number };
 export type CatalogSession = SavedSession & {
@@ -132,7 +132,7 @@ export type InitialSession = {
   activity?: ToolActivity[];
   workers?: Worker[];
 };
-export type RemoteLocation = { connectionId: string; host: string; name: string; key: string; hostname?: string };
+export type RemoteLocation = { connectionId: string; host: string; name: string; key: string; hostname?: string; attachments?: boolean };
 export type EngineEvent = { session: string; type: string; [key: string]: any };
 export type Worker = {
   backend?: "native" | "claude" | "pi";
@@ -203,7 +203,7 @@ declare global {
   interface Window {
     xuloom: {
       flushDrafts(drafts: { id: string; draft: string; draftEditId: string; draftAttachments: string[] }[]): boolean;
-      importFiles(session: string, files: File[], existing: string[]): Promise<Attachment[]>;
+      importFiles(session: string, files: File[], existing: string[], ids?: string[]): Promise<Attachment[]>;
       invoke<T = any>(
         method: string,
         params?: Record<string, unknown>,

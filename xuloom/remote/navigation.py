@@ -39,7 +39,7 @@ def _public(field, key, value):
             if not isinstance(value.get("project"), str) or not value["project"]: raise ValueError("invalid directory")
             for name in ("created", "updated"):
                 if name in value and (type(value[name]) not in (int, float) or not -8640000000000000 <= value[name] <= 8640000000000000): raise ValueError("invalid date")
-            if "draftAttachments" in value and value["draftAttachments"] != []: raise ValueError("invalid attachments")
+            if "draftAttachments" in value and (not isinstance(value["draftAttachments"], list) or len(value["draftAttachments"]) > 10 or any(not isinstance(i, str) or not re.fullmatch(r"[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}", i) for i in value["draftAttachments"])): raise ValueError("invalid attachments")
             for name, limit in (("title", 200), ("draft", 1_000_000), ("draftEditId", 128)):
                 if name in value and (not isinstance(value[name], str) or len(value[name]) > limit): raise ValueError("invalid field")
                 if name in value: value[name].encode("utf-8")

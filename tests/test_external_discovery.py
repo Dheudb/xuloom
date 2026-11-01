@@ -6,8 +6,12 @@ from pathlib import Path
 import sys
 import unittest
 
-import test_external_agents as fixtures
-from external_discovery_api import CatalogModel
+if __package__:
+    from . import test_external_agents as fixtures
+    from .external_discovery_api import CatalogModel
+else:
+    import test_external_agents as fixtures
+    from external_discovery_api import CatalogModel
 
 
 class DiscoveryContract(fixtures.ExternalFixture):

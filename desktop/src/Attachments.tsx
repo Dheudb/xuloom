@@ -3,15 +3,15 @@ import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { Attachment } from "./types";
 
-export default function Attachments({ items, remove, open, disabled }: {
-  items: Attachment[]; remove?: (id: string) => void; open: (item: Attachment) => void; disabled?: boolean;
+export default function Attachments({ items, remove, open, disabled, remote }: {
+  items: Attachment[]; remove?: (id: string) => void; open: (item: Attachment) => void; disabled?: boolean; remote?: boolean;
 }) {
   if (!items.length) return null;
   return <div className={"attachments " + (remove ? "attachment-draft" : "attachment-sent")} aria-label={remove ? "待发送附件" : "消息附件"}>
     {items.map((item) => <div className="attachment-chip" key={item.id}>
-      <button className="attachment-file" title={item.name} aria-label={"查看附件 " + item.name} onClick={() => open(item)}>
+      <button className="attachment-file" disabled={item.available === false} title={item.name} aria-label={(remote && item.kind !== "image" ? "下载附件 " : "查看附件 ") + item.name} onClick={() => open(item)}>
         {item.preview ? <img src={item.preview} alt={item.name} /> : <FileText size={22} />}
-        <span><strong>{item.name}</strong><small>{item.size >= 1024 * 1024 ? (item.size / 1024 / 1024).toFixed(1) + " MB" : Math.max(1, Math.round(item.size / 1024)) + " KB"}{item.kind === "image" ? " · 图片" : ""}</small></span>
+        <span><strong>{item.name}</strong><small>{item.available === false ? item.state === "uploading" ? "上传中／待确认" : "上传未完成，请移除后重新添加" : <>{item.size >= 1024 * 1024 ? (item.size / 1024 / 1024).toFixed(1) + " MB" : item.size ? Math.max(1, Math.round(item.size / 1024)) + " KB" : "0 B"}{item.kind === "image" ? " · 图片" : ""}{remote && item.kind !== "image" ? " · 保存副本" : ""}</>}</small></span>
       </button>
       {remove && <button className="attachment-remove" disabled={disabled} aria-label={"移除附件 " + item.name} onClick={() => remove(item.id)}><X size={12} /></button>}
     </div>)}

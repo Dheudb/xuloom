@@ -86,6 +86,7 @@ export default function App() {
   const [buildId, setBuildId] = useState("");
   const [appVersion, setAppVersion] = useState("");
   const [importing, setImporting] = useState(false);
+  const importOwner = useRef<{ id: string; remote: boolean } | null>(null);
   const [fileDrag, setFileDrag] = useState(false);
   const [attachmentPreview, setAttachmentPreview] = useState<{ name: string; source: string }>();
   const dragDepth = useRef(0);
@@ -335,6 +336,7 @@ export default function App() {
     if (active?.controlledExecution) return;
     if (resumeAvailable) { await resume(); return; }
     if (opening || importing || modelChanging || permissionChanging || collaborationChanging || !active || active.busy || (!active.draft.trim() && !active.attachments.length)) return;
+    if (active.attachments.some(item => item.available === false)) { onError("附件上传未完成；请移除后重新添加，再发送任务。"); return; }
     if (active.goalMode) {
       if (active.attachments.length || active.editingId) { onError("目标模式请直接输入目标；附件或提示词编辑请先单独发送。"); return; }
       const id = active.id, objective = active.draft.trim();
@@ -389,20 +391,35 @@ export default function App() {
     if (!files.length) return;
     if (importing || opening) { onError(importing ? "正在添加附件，请稍后再添加" : "会话正在打开，请稍后再添加附件"); return; }
     if (active?.busy) { onError("请先停止当前任务，再添加附件"); return; }
+    if (active?.remote && !active.remote.attachments) { onError("请先更新远端 Xuloom，再传输附件。"); return; }
     setImporting(true);
+    let id = activeId;
+    const remote = !!active?.remote;
     try {
-      let id = activeId;
       const existing = active?.attachments.map((item) => item.id) || [];
+      if (existing.length + files.length > 10) throw new Error("每条消息最多添加 10 个附件");
       if (!active) {
         const value = await window.xuloom.invoke("session.new", { scope: "standalone" });
         if (value.catalog) receiveCatalog(value.catalog);
         setSessions((previous) => [...previous, createSession(value)]);
         id = value.id; setActiveId(id);
       }
-      const items = await window.xuloom.importFiles(id, files, existing);
+      importOwner.current = { id, remote };
+      const pending: Attachment[] = remote ? files.map(file => ({ id: crypto.randomUUID(), name: file.name || "粘贴图片", path: "", size: file.size,
+        kind: /\.(png|jpe?g|webp|gif|bmp)$/i.test(file.name) ? "image" : "file", available: false, state: "uploading" })) : [];
+      if (pending.length) setSessions(previous => previous.map(session => session.id === id ? { ...session, attachments: [...session.attachments, ...pending] } : session));
+      const items = await window.xuloom.importFiles(id, files, existing, remote ? pending.map(item => item.id) : undefined);
       setSessions((previous) => previous.map((session) => session.id === id ? { ...session, attachments: items } : session));
-    } catch (error) { onError(error); }
-    finally { setImporting(false); }
+    } catch (error) {
+      if (remote && id) {
+        try {
+          const saved = await window.xuloom.invoke("attachments.list", { session: id });
+          setSessions(previous => previous.map(session => session.id === id ? { ...session, attachments: saved.items } : session));
+        } catch { /* Disconnected transfers retain their IDs for the next explicit reopen. */ }
+      }
+      onError(error);
+    }
+    finally { importOwner.current = null; setImporting(false); }
   }
   async function openAttachment(item: Attachment) {
     try {
@@ -728,7 +745,7 @@ export default function App() {
                         <span className="muted">此次任务未返回文本。</span>
                       ) : null}
                     </div>
-                    {!!message.attachments?.length && <Attachments items={message.attachments} open={openAttachment} />}
+                    {!!message.attachments?.length && <Attachments items={message.attachments} open={openAttachment} remote={!!active?.remote} />}
                     {!!message.trace?.files?.length && <FileChanges files={message.trace.files} project={active.project} onOpen={openFile}
                       onUndo={!active.busy && !runningWorkers && !runningCommands ? async (file) => {
                         await window.xuloom.invoke("files.undo", { session: active.id, revisionId: file.revisionId, confirm: true });
@@ -786,8 +803,8 @@ export default function App() {
           <div className={"composer " + (!active ? "disabled" : "")} onPaste={(event) => { if (event.clipboardData.files.length) { event.preventDefault(); void importFiles(Array.from(event.clipboardData.files)); } }}>
             {active?.editingId && <div className="editing-prompt"><span>编辑上一条提示词 · 发送后重新执行，已修改的文件保留</span>
               <button aria-label="取消编辑提示词" disabled={active.busy} onClick={() => update({ editingId: undefined, draft: active.draftBeforeEdit || "", draftBeforeEdit: undefined, attachments: active.attachmentsBeforeEdit || [], attachmentsBeforeEdit: undefined })}><X size={13} /></button></div>}
-            {active && <Attachments items={active.attachments} open={openAttachment} disabled={importing || active.busy} remove={(id) => update({ attachments: active.attachments.filter((item) => item.id !== id) })} />}
-            {importing && <div className="attachment-loading" role="status"><LoaderCircle size={13} className="spin" />正在添加附件…</div>}
+            {active && <Attachments items={active.attachments} open={openAttachment} remote={!!active.remote} disabled={importing || active.busy} remove={(id) => update({ attachments: active.attachments.filter((item) => item.id !== id) })} />}
+            {importing && <div className="attachment-loading" role="status"><LoaderCircle size={13} className="spin" />正在添加附件…{importOwner.current?.remote && <button className="text-button" onClick={() => { const owner = importOwner.current; if (owner) void window.xuloom.invoke("stop", { session: owner.id }).catch(onError); }}>取消附件传输</button>}</div>}
             <div className={"composer-input " + (active?.selected.length ? "has-skills" : "")}>
             {active && active.selected.length > 0 && (
               <div className="selected-skills">
@@ -860,7 +877,7 @@ export default function App() {
                     className={"send-button" + (resumeAvailable ? " resume" : "")}
                     aria-label={resumeAvailable ? "继续执行" : "发送任务"}
                     title={resumeAvailable ? "继续原任务，不新增消息" : "发送任务"}
-                    disabled={opening || importing || modelChanging || permissionChanging || collaborationChanging || !!active?.controlledExecution || (!resumeAvailable && !active?.draft.trim() && !active?.attachments.length)}
+                    disabled={opening || importing || modelChanging || permissionChanging || collaborationChanging || !!active?.controlledExecution || !!active?.attachments.some(item => item.available === false) || (!resumeAvailable && !active?.draft.trim() && !active?.attachments.length)}
                     onClick={() => void send()}
                   >
                     {resumeAvailable ? <Play size={16} fill="currentColor" /> : <ArrowUp size={19} />}

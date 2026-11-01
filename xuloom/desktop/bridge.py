@@ -80,6 +80,8 @@ class DesktopBridge:
         self.mcp_testing = False
         self.model_signature = None
         self.file_changes = []
+        self.attachment_upload = None
+        self.attachment_guard = asyncio.Lock()
 
     def emit(self, event):
         if self.recorder and self.recorder.accept(event):
@@ -134,6 +136,7 @@ class DesktopBridge:
         return self.turn_task is not None and not self.turn_task.done()
 
     def require_idle(self):
+        if self.attachment_upload is not None: raise ValueError("Wait for the attachment upload to finish or abort it")
         workers = self.engine and self.engine.tool_context["subagent_tasks"].tasks.values()
         commands = self.engine and self.engine.tool_context["command_sessions"].records.values()
         if self.busy() or (workers and any(not task.done() for task in workers)) or (commands and any(row["status"] == "running" for row in commands)):
@@ -399,7 +402,10 @@ class DesktopBridge:
             import socket
             from xuloom import __version__
             return {"protocol": 1, "version": __version__, "hostname": socket.gethostname(),
-                "platform": sys.platform, "cwd": str(self.cwd), "transport": "ssh" if os.environ.get("XULOOM_REMOTE") == "1" else "stdio"}
+                "platform": sys.platform, "cwd": str(self.cwd), "attachments": 1, "transport": "ssh" if os.environ.get("XULOOM_REMOTE") == "1" else "stdio"}
+        if method.startswith("attachments."):
+            from xuloom.desktop import attachment_transfer
+            return await attachment_transfer.dispatch(self, method, params)
         if method.startswith("remote."):
             if method in {"remote.references", "remote.forget"}:
                 from xuloom.remote import navigation
@@ -670,6 +676,7 @@ class DesktopBridge:
                     self.mcp_testing = False
             return self.mcp_snapshot()
         if method == "initialize":
+            if self.attachment_upload is not None: raise ValueError("Finish the attachment upload before switching sessions")
             self.approval_policy.set_mode(params.get("permissionMode", "ask"))
             sid = params.get("sessionId")
             if sid and not re.fullmatch(r"[a-zA-Z0-9_-]+", sid):
@@ -803,6 +810,7 @@ class DesktopBridge:
             self.turn_task = asyncio.create_task(self.turn("", [], engine.get_mode(), resume_trace=copy.deepcopy(previous)))
             return {"started": True}
         if method == "prompt":
+            if self.attachment_upload is not None: raise ValueError("Attachment upload has not finished; task was not submitted")
             if self.busy() or self.mcp_testing:
                 raise ValueError("A turn or MCP connection operation is already running")
             attachment_ids = params.get("attachments", [])
@@ -836,6 +844,8 @@ class DesktopBridge:
             await self.close()
             return {"closed": True}
         if method == "stop":
+            from xuloom.desktop import attachment_transfer
+            await attachment_transfer.cancel(self)
             self.stop_requested = self.busy()
             if self.engine and getattr(self.engine, "goal", None) and self.engine.goal["status"] == "active":
                 self.engine.goal["status"], self.engine.goal["reason"] = "paused", "Stopped by user"

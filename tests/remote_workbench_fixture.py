@@ -35,6 +35,22 @@ def main():
             text = json.dumps(last.get("content", ""))
             has_tool = body["messages"][-1]["role"] == "tool"
             delta, finish = {"content": "REMOTE_REPLY_"+body["model"]}, "stop"
+            if "verify remote attachments" in text:
+                blocks = last.get("content", [])
+                pixels = isinstance(blocks, list) and any(block.get("type") == "image_url" and block.get("image_url", {}).get("url", "").startswith("data:image/jpeg;base64,") for block in blocks)
+                refs = []
+                for block in blocks if isinstance(blocks, list) else []:
+                    if block.get("type") == "text":
+                        for line in block.get("text", "").splitlines():
+                            try:
+                                item = json.loads(line)
+                                if isinstance(item, dict) and item.get("name") == "research notes.txt": refs.append(item)
+                            except ValueError: pass
+                if not pixels or not refs: delta = {"content": "ATTACHMENTS_MISSING"}
+                elif not has_tool:
+                    delta, finish = {"tool_calls": [{"index": 0, "id": "read-attachment", "type": "function", "function": {"name": "file_read_tool", "arguments": json.dumps({"file_path": refs[0]["path"]})}}]}, "tool_calls"
+                else:
+                    delta = {"content": "REMOTE_ATTACHMENTS_VERIFIED" if "REMOTE_UPLOAD_DOCUMENT" in str(body["messages"][-1]) else "ATTACHMENT_READ_FAILED"}
             if "delegate remote fixture" in text and self.path.startswith("/local-models/"):
                 tools = [row for row in body["messages"] if row["role"] == "tool"]
                 if not any(row.get("tool_call_id") == "spawn-remote-ui" for row in tools):

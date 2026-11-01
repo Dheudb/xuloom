@@ -36,4 +36,4 @@
 
 ## 远程执行
 
-[SSH 远程执行](remote.md) 包含桌面聊天、交互/非交互 CLI、共享连接设置、聊天链接和离线导航恢复。[原生分布式委派](distributed-workers-plan.md)已通过本机加密 SSH 检查；远端附件、HTML 预览、外部 CLI 经 SSH 和跨平台原生验收继续按持续目标推进。
+[SSH 远程执行](remote.md) 包含桌面聊天、交互/非交互 CLI、共享连接设置、聊天链接、离线导航恢复、[HTML 资源预览](remote-html-validation-2026-11-02.md)和[附件传输](remote-attachments.md)。[原生分布式委派](distributed-workers-plan.md)已通过本机加密 SSH 检查；外部 CLI 经 SSH、远端截图和跨平台原生验收继续按持续目标推进。

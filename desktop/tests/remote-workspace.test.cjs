@@ -1,6 +1,6 @@
 const test = require('node:test'), assert = require('node:assert/strict');
 const {remoteWorkspaces, keyOf} = require('../electron/remote-workspace.cjs');
-function fixture() {
+function fixture(options={}) {
  let saved={}, active;
  const sessions=new Map(), calls=[], disposed=[];
  const profile={id:'lab',name:'Lab',host:'my-host',cwd:'/remote/project',python:'python3',platform:'posix',port:null,ssh_config:''};
@@ -11,11 +11,13 @@ function fixture() {
   dispose:async id=>{disposed.push(id);await disposeWork(id);sessions.delete(id);},
   transport:(_remote,onEvent)=>({closed:false,close:async()=>{},request:async(method,params)=>{
    calls.push({method,params});
-   if(method==='remote.connection')return {profile,machine:{hostname:'remote-host',platform:'linux',cwd:profile.cwd}};
+   if(method==='remote.connection')return {profile,machine:{hostname:'remote-host',platform:'linux',cwd:profile.cwd,...(options.attachments?{attachments:1}:{})}};
    if(method==='sessions.create')return {sessionId:'saved-1'};
    if(method==='initialize')return {project:profile.cwd,history:[],config:{model:'remote-model'},capabilities:{skills:[],agents:[]}};
    if(method==='permissions.set'&&failPermission)throw new Error('lost reply');
    if(method==='schedule.due')return due;
+   if(method==='attachments.list')return {items:(params?.ids||[]).map(id=>({id,name:'remote.txt',available:true,state:'ready',kind:'file',size:3,path:'/remote/history/'+id}))};
+   if(method==='attachments.import'&&options.import)return options.import(method,params);
    return {started:true};
   }})};
  const work=remoteWorkspaces(context);
@@ -30,6 +32,30 @@ test('SSH navigation stores only references and routes prompts through its trans
  assert(f.calls.some(row=>row.method==='prompt'&&row.params.text==='real task'));
  assert.equal(f.work.find(value.id).draft,'');
  assert(!JSON.stringify(f.saved()).includes('api_key'));
+});
+
+test('remote draft attachment identities survive reopen and a lost upload acknowledgement',async()=>{
+ const f=fixture({attachments:true,import:async()=>{throw new Error('lost upload acknowledgement');}});
+ const {value}=await f.work.handle('remote.open',{id:'lab'}),identity='83e7bbc7-b802-4b9c-9b55-32ce7619b881';
+ f.work.update(value.id,{draft:'keep my task'});
+ await assert.rejects(f.work.handle('attachments.import',{session:value.id,files:[{path:'C:/local/private.txt'}],ids:[identity],existing:[]}),/lost upload/);
+ assert.deepEqual(f.work.find(value.id).draftAttachments,[identity]);
+ assert(!JSON.stringify(f.saved()).includes('private.txt'),'Local paths cannot enter remote navigation records');
+ assert(!f.calls.some(row=>row.method==='prompt'));
+ f.sessions.delete(value.id);
+ const reopened=await f.work.handle('session.select',{id:value.id});
+ assert.equal(reopened.value.savedDraft,'keep my task');assert.equal(reopened.value.savedAttachments[0].id,identity);assert.equal(reopened.value.savedAttachments[0].available,true);
+ assert.deepEqual(f.work.find(value.id).draftAttachments,[identity]);
+});
+
+test('one remote transfer gates concurrent imports and prompts without dropping saved identities',async()=>{
+ let entered,release;const started=new Promise(resolve=>{entered=resolve;}),gate=new Promise(resolve=>{release=resolve;});
+ const f=fixture({attachments:true,import:async()=>{entered();await gate;return[];}}),{value}=await f.work.handle('remote.open',{id:'lab'});
+ const identity='83e7bbc7-b802-4b9c-9b55-32ce7619b881',params={session:value.id,files:[{path:'local.txt'}],ids:[identity],existing:[]};
+ const transfer=f.work.handle('attachments.import',params);await started;
+ await assert.rejects(f.work.handle('attachments.import',params),/等待任务结束/);
+ await assert.rejects(f.work.handle('prompt',{session:value.id,text:'cannot run yet'}),/附件传输/);
+ assert.deepEqual(f.work.find(value.id).draftAttachments,[identity]);release();await transfer;
 });
 
 test('broken references and display groups cannot poison the catalog or expose raw fields',async()=>{
@@ -88,7 +114,8 @@ test('permission acknowledgement loss closes ownership without saving full acces
 });
 test('SSH file actions never fall through to a local path or mixed delete',async()=>{
  const f=fixture();const {value}=await f.work.handle('remote.open',{id:'lab'});
- for(const method of ['attachments.import','project.reveal','capabilities.directory'])
+ await assert.rejects(f.work.handle('attachments.import',{session:value.id,files:[{path:'local.pdf'}]}),/更新远端/);
+ for(const method of ['project.reveal','capabilities.directory'])
   await assert.rejects(f.work.handle(method,{session:value.id,path:'/remote/project'}),/未尝试打开本机/);
  assert.deepEqual(await f.work.handle('preview.open',{session:value.id,path:'/remote/project/page.html'}),{handled:false});
  await assert.rejects(f.work.handle('session.delete',{ids:[value.id,'local-row'],confirm:true}),/分别管理/);
