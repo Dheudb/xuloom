@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { X, KeyRound, Check, FolderOpen, Archive, Puzzle, Bot, Plug, Link2 } from "lucide-react";
+import { X, KeyRound, Check, FolderOpen, Archive, Puzzle, Bot, Plug, Link2, Server } from "lucide-react";
 import type { EngineEvent, ModelConfig, SessionCatalog } from "./types";
 import Markdown from "./Markdown";
 import ArchivePanel from "./ArchivePanel";
 import ExtensionSettings from "./ExtensionSettings";
+import RemoteSettings from "./RemoteSettings";
 import type { Capabilities } from "./types";
 import { ReasoningSettings } from "./ReasoningControls";
 
@@ -119,11 +120,12 @@ export function SettingsDialog({
               const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
               buttons[event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (index + (event.key === "ArrowUp" ? -1 : 1) + buttons.length) % buttons.length]?.click();
             }}>
-            {[{ id: "model", label: "模型连接", icon: KeyRound }, { id: "skills", label: "Skills", icon: Puzzle }, { id: "agents", label: "Subagents", icon: Bot }, { id: "mcp", label: "MCP 服务", icon: Plug }, { id: "workspace", label: "工作区", icon: FolderOpen }, { id: "archives", label: "已归档会话", icon: Archive }].map(({ id, label, icon: Icon }) =>
+            {[{ id: "model", label: "模型连接", icon: KeyRound }, { id: "skills", label: "Skills", icon: Puzzle }, { id: "agents", label: "Subagents", icon: Bot }, { id: "mcp", label: "MCP 服务", icon: Plug }, { id: "remote", label: "SSH 远程", icon: Server }, { id: "workspace", label: "工作区", icon: FolderOpen }, { id: "archives", label: "已归档会话", icon: Archive }].map(({ id, label, icon: Icon }) =>
               <button key={id} role="tab" id={"settings-tab-" + id} aria-selected={tab === id} aria-controls={"settings-panel-" + id} tabIndex={tab === id ? 0 : -1}
                 onClick={(event) => { setTab(id); setError(""); event.currentTarget.focus(); }}><Icon size={16} />{label}</button>)}
           </nav>
           <div className="settings-content">
+        {tab === "remote" && <div role="tabpanel" id="settings-panel-remote" aria-labelledby="settings-tab-remote"><RemoteSettings /></div>}
         {["skills", "agents", "mcp"].includes(tab) && <div role="tabpanel" id={"settings-panel-" + tab} aria-labelledby={"settings-tab-" + tab}>
           {!extensions ? <p>请先新建或打开一个会话，再管理扩展；无需配置模型或打开代码仓库。</p> : tab === "mcp" ? <><h3>MCP 服务</h3><p>连接外部工具。支持本地 stdio 与远程 Streamable HTTP，可浏览市场、自定义服务、测试连接及启停。</p><p>配置保存在当前工作区的 .xuloom/mcp_servers.json；API Key 与本地运行环境由服务提供方决定。</p><button onClick={extensions.openMcp}>打开 MCP 管理</button></> : <ExtensionSettings key={tab} kind={tab as "skills" | "agents"} {...extensions} />}
         </div>}

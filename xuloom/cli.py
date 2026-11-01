@@ -16,7 +16,7 @@ from xuloom.core.session_lock import SessionBusyError, SessionConflictError
 from xuloom.features import goals, schedules
 from xuloom.security.permissions import ApprovalPolicy
 
-EXIT_CODES = {"completed": 0, "cancelled": 130, "session_busy": 4, "session_conflict": 4, "persistence_error": 5,
+EXIT_CODES = {"completed": 0, "cancelled": 130, "session_busy": 4, "session_conflict": 4, "persistence_error": 5, "remote_disconnected": 9,
     "paused": 6, "blocked": 7, "awaiting_review": 7, "interrupted": 7, "budget_exhausted": 8, "approval_required": 3, "input_required": 3}
 
 
@@ -63,6 +63,8 @@ def parser():
                 when.add_argument("--at", help="ISO 8601 due time with timezone")
                 item.add_argument("--interval", type=float, help="Repeat every N seconds, minimum 60; missed occurrences coalesce")
                 item.add_argument("--once", action="store_true", help="Process current due messages then exit")
+    from xuloom.remote.cli import add_parser as add_remote_parser
+    add_remote_parser(sub)
     return p
 
 
@@ -120,6 +122,9 @@ async def open_engine(args, emit):
 
 
 async def dispatch(args, emit):
+    if args.command == "remote":
+        from xuloom.remote.cli import dispatch as remote_dispatch
+        return await remote_dispatch(args, emit)
     if args.command == "chat-link":
         from xuloom.features.chat_links import chat_link, resolve_link
         url = args.resolve if args.resolve else chat_link(args.cwd, args.session)

@@ -13,6 +13,21 @@ from unittest.mock import patch, AsyncMock, Mock
 
 
 class BridgeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_final_trace_save_failure_is_published_before_turn_finished(self):
+        from types import SimpleNamespace
+        async def submit(text, **kwargs):
+            yield {"type": "final", "text": "answer", "result": {"ok": True, "reason": "completed", "persisted": True}}
+        engine = SimpleNamespace(messages=[], turn_traces=[], set_mode=Mock(), submit_message=submit,
+            session_id="fixture", active_turn_trace=None, session_manager=SimpleNamespace(owns_writer=Mock(return_value=True)),
+            persist_session_state=Mock(return_value=False))
+        self.bridge.engine = engine
+        self.bridge.ensure_engine = AsyncMock(return_value=engine)
+        result = await self.bridge.turn("task", [], "normal")
+        self.assertEqual(result["reason"], "persistence_error")
+        types = [event["type"] for event in self.events]
+        self.assertLess(types.index("turn_error"), types.index("turn_finished"))
+        self.assertEqual(engine.turn_traces[-1]["status"], "error")
+
     async def test_resume_dispatch_only_accepts_latest_stopped_task(self):
         from types import SimpleNamespace
         original = {"role": "user", "_uuid": "original", "content": "task"}

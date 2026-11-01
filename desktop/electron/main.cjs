@@ -440,6 +440,8 @@ async function invoke(method, params) {
     return true;
   }
   if (method === "config.get") return globalConfig().request("config.get");
+  if (["remote.profiles", "remote.save", "remote.remove", "remote.check"].includes(method))
+    return globalConfig().request(method, params);
   if (method === "config.models") return globalConfig().request(method, params);
   if (method === "config.delete") {
     if ([...sessions.values()].some(running)) throw new Error("请先停止运行中的任务，再删除 API 连接");

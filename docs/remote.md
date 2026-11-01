@@ -1,0 +1,93 @@
+# SSH 远程执行（开发版本）
+
+使用系统 OpenSSH 连接另一台安装了 Xuloom 的机器，复用现有桌面 JSONL 运行时、QueryEngine、中央历史、权限与子代理生命周期。不安装常驻服务，不复制本机模型配置，不在产品里保存 SSH 密码或私钥，不新增 SSH SDK 运行依赖。
+
+当前已经实现：CLI 远端任务/继续/历史/文件/Git 查询，程序 RPC 客户端，以及桌面设置中的连接管理与测试。**桌面聊天工作台的完整远程会话导航、远端附件与 HTML 预览，以及把子代理派发到 SSH 主机仍在实现中**。设置中“测试成功”不等于这些界面能力已完成。完整范围见 [持续目标](product-roadmap.md)。
+
+## 准备远端
+
+远端需要 SSH 服务及安装了本开发版本 Xuloom 的 Python。先在远端源码目录执行 `python3 -m pip install .`，也可在虚拟环境中安装；本机和远端都需要包含本页所述的 `runtime.info` 协议。旧公开 v0.1.1 尚不包含此 SSH 协议，不能仅升级本机后期待旧远端兼容。
+
+在本机终端先用 `ssh my-lab` 验证登录和主机指纹。Xuloom 使用 `BatchMode=yes`、`StrictHostKeyChecking=yes`，不自动信任新主机、不弹密码框；可复用系统 SSH agent、密钥文件及 `~/.ssh/config` 主机别名。支持别名里的跳板机配置，关闭 agent/X11/端口转发，不复用后台 ControlMaster；你的 SSH 配置及 ProxyCommand 本身属于受信任的用户配置，不能当作对恶意本机配置的沙箱。
+
+远端自己配置模型 API、Skills、MCP 与角色。没有配置远端模型也可以检查握手、查看远端文件和历史；提交任务时需要远端模型可用。
+
+## 添加连接
+
+桌面：设置 → **SSH 远程** → 新增连接，填写主机别名、远端绝对工作目录及 Python 路径，保存后测试。Linux/macOS 选择 POSIX，Windows 选择 Windows。Windows 远端通过 PowerShell 编码命令启动；不会拼接用户输入为额外 Shell 命令。
+
+CLI 使用同一个本机 `config.json` 的 `ssh_connections`：
+
+```sh
+xuloom remote add lab --host my-lab --cwd /home/me/project --python /home/me/venv/bin/python --json
+xuloom remote list --json
+xuloom remote check lab --json
+```
+
+`lab` 是连接 ID。`--name` 设置显示名称；`--port` 显式覆盖主机配置中的端口，省略则使用 OpenSSH 配置。`--ssh-config` 可指定本机已有配置文件的绝对路径。Windows 示例：
+
+```powershell
+xuloom remote add winlab --host win-host --platform windows --cwd 'C:\work\project' --python 'C:\venv\Scripts\python.exe' --json
+```
+
+这些操作不上传源码、模型 Key、私钥或私人 Skill。工作文件仍在远端工作目录，历史保存在远端用户的中央数据目录。
+
+## 执行与恢复
+
+```sh
+xuloom remote exec lab "检查这些资料，给出证据和结论" --json
+xuloom remote sessions lab --json
+xuloom remote inspect lab --session SAVED_ID --json
+xuloom remote exec lab "根据已有结论继续" --session SAVED_ID --json
+xuloom remote exec lab --session SAVED_ID --resume --json
+```
+
+`--resume` 仅继续已有的停止回合，不追加合成 prompt，也不能同时传新 prompt。只在已有回合确实被停止/中断时使用。`--skill NAME` 选择远端技能；`--collaboration solo/auto/ultra` 调整远端原生协作。
+
+默认 `--permission ask`。非交互 CLI 不会假设批准，也不会替用户回答问题：需要批准或输入时停止并返回 `approval_required/input_required`（退出码 3）。显式 `--permission full` 仍遵守远端的显式拒绝/询问规则；它不提供系统级沙箱。
+
+JSONL 先报告真实机器和会话 ID，然后才提交可能产生副作用的任务；只输出一个最终回执。执行结束和最终存档完成分别检查。`session_busy` 返回退出码 4，连接中断或超时为 `remote_disconnected`、退出码 9，并标记 `outcome_unknown=true`。该状态不代表远端一定停止或任务一定失败。此实现没有自动重发 prompt、自动接管写锁或按历史 PID 杀进程。
+
+Ctrl+C 请求当前连接拥有的停止，只有收到远端确认才报告 `stop_confirmed=true`。SSH stdin 关闭会触发现有远端运行时的清理；网络异常时清理可能延迟，必须重新连接后查看占用和保存状态。另一个连接的 `stop` 不会取消已有写者的工作。远端进程或机器强制退出后，已有不确定副作用仍按原恢复规则检查，不能宣称 exactly-once。
+
+## 读取远端产物
+
+```sh
+xuloom remote files lab --json
+xuloom remote read lab report.md --json
+xuloom remote git-status lab --json
+xuloom remote remove lab --json
+```
+
+文件查询沿用工作区的目录/文本预览约束。删除连接配置不删除远端文件或历史。当前远端截图不会静默改为截取本机浏览器；没有连接远端渲染器时明确失败。
+
+## 程序接口
+
+```python
+import asyncio
+from xuloom.remote.config import resolve
+from xuloom.remote.ssh import SSHClient
+
+events = asyncio.Queue()
+client = SSHClient(resolve("lab"), on_event=events.put_nowait)
+try:
+    machine = await client.start()
+    created = await client.request("sessions.create")
+    await client.request("initialize", {"sessionId": created["sessionId"]})
+    await client.request("prompt", {"text": "你的任务"})
+    # 从 events 读取真实事件；turn_finished 之前检查 final/turn_error。
+finally:
+    await client.aclose()
+```
+
+`on_event` 是快速同步回调，例如 `asyncio.Queue.put_nowait`，不能阻塞读循环。请求超时不自动重试；重新连接后的历史/占用查询不创建模型请求。
+
+## 验收范围
+
+`tests/test_remote_ssh.py` 使用本机系统 OpenSSH、临时密钥及主机密钥、仅监听 127.0.0.1 的加密 SSH 服务，再启动真实远端桥接进程；模型请求只访问隔离本地 HTTP/SSE。覆盖握手、Windows 路径中的空格/中文/引号、错误主机密钥、远端凭据与历史归属、活动任务断线、停止所有权、并发写者、显式恢复和非交互提问。Paramiko 仅为可选的开发测试依赖，未加入运行依赖或成品；缺少时对应 wire 测试明确跳过。
+
+这是真实 SSH 回环协议证据，不是两台物理机器、真实科研长任务或 Linux/macOS 原生部署验收。POSIX 命令构造需要继续做原生远端验证。桌面 `test:remote-settings` 检查实际配置界面与正式 CLI 读取同一份配置。检查未使用用户真实 Key，不调用远端模型，不修改或打包私人 Taiyi Skill。
+
+2026-11-01 最终检查：Python 3.12 全量 433 项（432 通过、1 跳过），桌面逻辑 55 项通过；源码提问、停止/恢复和 SSH 设置 E2E 通过。原 EXE 构建 `20261101-123406`，同一安装的 Python 作为 SSH 远端及正式 CLI 的加密回环检查 11 项通过，安装版 SSH 设置 E2E 通过。源码与包内 134 个 Python/技能文件逐字节一致，仍只包含九个公开内置 Skill，运行时未加入 Paramiko。公开 GitHub/Release 尚未由本轮更新。
+
+参考：[OpenSSH 命令手册](https://man.openbsd.org/ssh.1)、[OpenSSH 配置手册](https://man.openbsd.org/ssh_config.5)、[Paramiko 测试服务接口](https://docs.paramiko.org/en/stable/api/server.html)。

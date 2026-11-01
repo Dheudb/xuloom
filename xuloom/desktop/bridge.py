@@ -58,6 +58,7 @@ class DesktopBridge:
         self.skills = SkillRegistry(self.cwd)
         self.agents = AgentRegistry(self.cwd)
         self.engine = None
+        self.engine_initialization = asyncio.Lock()
         self.turn_task = None
         self.stop_requested = False
         self.pending = {}
@@ -206,6 +207,8 @@ class DesktopBridge:
             explicit=bool(request.classifier_input.get("forced_prompt_reasons")))
 
     async def capture(self, input):
+        if os.environ.get("XULOOM_REMOTE") == "1":
+            return {"ok": False, "error": "Remote browser capture is not connected to a renderer; no local machine was used as a fallback"}
         request_id = str(uuid.uuid4())
         future = asyncio.get_running_loop().create_future()
         self.capture_pending[request_id] = future
@@ -217,6 +220,10 @@ class DesktopBridge:
             self.output({"type": "browser_capture_cancel", "requestId": request_id})
 
     async def ensure_engine(self, write=False):
+        async with self.engine_initialization:
+            return await self._ensure_engine(write)
+
+    async def _ensure_engine(self, write=False):
         if self.engine is not None:
             if write:
                 self.engine.require_writer()
@@ -349,16 +356,67 @@ class DesktopBridge:
                         self.engine.messages.append(create_assistant_message(partial, stop_reason="interrupted"))
                         self.engine._sync_message_context()
                 self.emit({"type": "turn_cancelled"})
-            self.emit({"type": "turn_finished"})
+            # Settle the trace before saving, but publish completion only after
+            # that final save. JSONL callers must not miss a late storage error.
+            finished = {"type": "turn_finished"}
+            self.recorder.accept(finished)
             if self.engine and self.engine.session_manager.owns_writer(self.engine.session_id):
                 self.engine.active_turn_trace = None
                 if not self.engine.persist_session_state():
                     receipt = {"ok": False, "reason": "persistence_error"}
                     self.emit({"type": "turn_error", "message": "本轮过程记录保存失败；请检查存储空间和权限。", "result": {"ok": False, "reason": "persistence_error"}})
+            self.output({"type": "turn_trace", "trace": copy.deepcopy(self.recorder.record)})
+            self.output(finished)
             self.recorder = None
         return receipt or {"ok": False, "reason": "cancelled" if self.stop_requested else "error"}
 
     async def dispatch(self, method, params):
+        if method == "runtime.info":
+            import socket
+            from xuloom import __version__
+            return {"protocol": 1, "version": __version__, "hostname": socket.gethostname(),
+                "platform": sys.platform, "cwd": str(self.cwd), "transport": "ssh" if os.environ.get("XULOOM_REMOTE") == "1" else "stdio"}
+        if method.startswith("remote."):
+            from xuloom.remote import config as remote_config
+            if method == "remote.profiles": return {"connections": remote_config.profiles()}
+            if method == "remote.save": return remote_config.save(params)
+            if method == "remote.remove":
+                remote_config.remove(params.get("id")); return {"removed": True}
+            if method == "remote.check":
+                from xuloom.remote.ssh import SSHClient
+                client = SSHClient(remote_config.resolve(params.get("id")))
+                try: return await client.start()
+                finally: await client.aclose()
+            raise ValueError("Unknown SSH configuration operation")
+        if method == "sessions.list":
+            return self.sessions()
+        if method == "sessions.create":
+            from xuloom.core.session import SessionManager
+            identity = str(uuid.uuid4())
+            with SessionManager(cwd=self.cwd) as manager:
+                manager.acquire_writer(identity)
+                if not manager.save_session_state(identity, [], {}):
+                    raise OSError("Could not save the new conversation")
+            return {"sessionId": identity, "project": str(self.cwd)}
+        if method == "session.status":
+            from xuloom.core.session import SessionManager
+            from xuloom.core.session_lock import SessionLock, SessionBusyError
+            identity = params.get("sessionId")
+            if not isinstance(identity, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", identity):
+                raise ValueError("Invalid session ID")
+            path = session_directory(self.cwd) / (identity + ".json")
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            owned = self.engine is not None and self.engine.session_id == identity and self.engine.session_manager.owns_writer(identity)
+            writer = "current" if owned else "available"
+            if not owned:
+                with SessionManager(cwd=self.cwd) as manager:
+                    probe = SessionLock(manager.lock_directory, identity)
+                    try: probe.acquire()
+                    except SessionBusyError: writer = "elsewhere"
+                    finally: probe.close()
+            metadata = raw.get("metadata", {}) if isinstance(raw, dict) else {}
+            return {"sessionId": identity, "writer": writer, "busy": self.busy() if owned else None,
+                "lastResult": metadata.get("last_run_result"), "revision": raw.get("revision") if isinstance(raw, dict) else None}
         if method == "browser.capture_result":
             future = self.capture_pending.get(params.get("requestId"))
             if future is None or future.done():
@@ -682,6 +740,9 @@ class DesktopBridge:
                 from xuloom.desktop.prompt_edit import replace_latest_turn
                 replace_latest_turn(engine, params["replaceMessageId"])
                 self.emit({"type": "turn_restarted", "history": self.history(engine.messages, engine.turn_traces), "text": text, "attachments": prepared_attachments[1]})
+            await self.ensure_engine(write=True)
+            if self.busy():
+                raise ValueError("A turn is already running")
             self.stop_requested = False
             self.turn_task = asyncio.create_task(self.turn(text, params.get("skills", []), params.get("mode", "normal"), attachment_ids, (selections, prepared_attachments)))
             return {"started": True}
@@ -702,15 +763,19 @@ class DesktopBridge:
                 future.cancel()
             for future in list(self.capture_pending.values()):
                 future.cancel()
+            cleanup = []
             if self.engine:
-                results = await asyncio.gather(self.engine.request_abort(), return_exceptions=True)
-                results.extend(await asyncio.gather(self.engine.tool_context["command_sessions"].close(), return_exceptions=True))
+                cleanup.append(asyncio.create_task(self.engine.request_abort()))
+                cleanup.append(asyncio.create_task(self.engine.tool_context["command_sessions"].close()))
+            # Stop the parent immediately as well as its owned resources.
+            # Waiting for resource cleanup first can leave an interactive
+            # tool waiting for a parent turn that hasn't been cancelled yet.
             if self.busy():
                 self.turn_task.cancel()
-                await asyncio.gather(self.turn_task, return_exceptions=True)
-            if self.engine:
-                for result in results:
-                    if isinstance(result, BaseException): raise result
+                cleanup.append(self.turn_task)
+            results = await asyncio.gather(*cleanup, return_exceptions=True)
+            for result in results:
+                if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError): raise result
             return True
         if method in {"agents.cancel", "agents.resume_queue"}:
             if not self.engine:
@@ -812,7 +877,10 @@ async def serve():
             result = await bridge.dispatch(request["method"], request.get("params") or {})
             response = {"id": request["id"], "result": result}
         except Exception as exc:
-            response = {"id": request.get("id"), "error": str(exc)}
+            from xuloom.core.session_lock import SessionBusyError, SessionConflictError
+            from xuloom.core.run_result import PersistenceError
+            code = "session_busy" if isinstance(exc, SessionBusyError) else "session_conflict" if isinstance(exc, SessionConflictError) else "persistence_error" if isinstance(exc, PersistenceError) else "invalid_request" if isinstance(exc, ValueError) else "error"
+            response = {"id": request.get("id"), "error": str(exc), "errorCode": code}
         wire.write(json.dumps(response, ensure_ascii=False, default=str) + "\n")
         wire.flush()
     try:
