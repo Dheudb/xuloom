@@ -96,6 +96,9 @@ class PermissionManager:
         self.pending_request = None
         # Live restrictive ancestry, never an inherited approval memory.
         self.restriction_parent = None
+        # Optional cross-process authority. Every locally permissible call must
+        # pass it, including read-only and Full Access auto-approvals.
+        self.delegated_authorizer = None
 
     def set_prompt_handler(self, prompt_handler: Optional[Callable[[PermissionRequest], Any]]):
         self.prompt_handler = prompt_handler
@@ -138,6 +141,8 @@ class PermissionManager:
         input_payload: Dict[str, Any],
         context: Optional[Dict[str, Any]] = None,
     ) -> PermissionDecision:
+        if (context or {}).get("delegated_authority_required") and self.delegated_authorizer is None:
+            return PermissionDecision("deny", "This delegated execution requires its original controller; no operation was authorized.", source="delegation_unavailable")
         if self._approval_revision != self.approval_policy.revision:
             self.always_allow_tools.clear()
             self._approval_revision = self.approval_policy.revision
@@ -214,20 +219,35 @@ class PermissionManager:
                 metadata={"denial_count": self.consecutive_denials.get(tool_name, 0)},
             ), request)
 
+        automatic = None
         if not forced_prompt_reasons:
             if self.approval_policy.mode == "full":
-                return self._finalize_permission_decision(tool_name, PermissionDecision(
-                    "allow", "Full access selected for this conversation.", source="full_access"), request)
-            for decision in (rule_decision, tool_check_decision, classifier_decision, plan_decision):
-                if decision and decision.behavior == "allow":
-                    return self._finalize_permission_decision(tool_name, decision, request)
+                automatic = PermissionDecision("allow", "Full access selected for this conversation.", source="full_access")
+            else:
+                automatic = next((decision for decision in (rule_decision, tool_check_decision, classifier_decision, plan_decision)
+                    if decision and decision.behavior == "allow"), None)
+            if automatic is None and is_read_only:
+                automatic = PermissionDecision("allow", "Read-only tool auto-approved.", source="read_only")
 
-        if is_read_only and not forced_prompt_reasons:
-            return self._finalize_permission_decision(tool_name, PermissionDecision(
-                "allow",
-                "Read-only tool auto-approved.",
-                source="read_only",
-            ), request)
+        if self.delegated_authorizer is not None:
+            if forced_prompt_reasons:
+                request.classifier_input["forced_prompt_reasons"] = forced_prompt_reasons
+            delegated_automatic = automatic
+            if automatic is not None and automatic.source == "full_access":
+                delegated_automatic = next((decision for decision in (rule_decision, tool_check_decision, plan_decision)
+                    if decision and decision.behavior == "allow"), automatic)
+            try:
+                decision = self.delegated_authorizer(request, delegated_automatic, copy.deepcopy(getattr(tool, "permission_aliases", {})))
+                if inspect.isawaitable(decision):
+                    decision = await decision
+                if not isinstance(decision, PermissionDecision) or decision.behavior not in {"allow", "deny"}:
+                    raise ValueError("Delegating authority did not return a final decision")
+            except Exception:
+                decision = PermissionDecision("deny", "Delegating authority is unavailable; no operation was authorized.", source="delegation_unavailable")
+            return self._finalize_permission_decision(tool_name, decision, request)
+
+        if automatic is not None:
+            return self._finalize_permission_decision(tool_name, automatic, request)
 
         if self.prompt_handler is None:
             return self._finalize_permission_decision(tool_name, PermissionDecision(

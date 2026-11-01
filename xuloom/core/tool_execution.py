@@ -175,6 +175,7 @@ async def execute_tool(self, tool_block, sys_print_callback=print, *, turn: int 
                     "agent_id": self.agent_id,
                     "agent_role": self.agent_role,
                     "recovery_uncertain": bool(uncertain_operations),
+                    "delegated_authority_required": bool(self.tool_context.get("delegation", {}).get("authority_required")),
                 },
             )
             if permission.behavior != "allow":

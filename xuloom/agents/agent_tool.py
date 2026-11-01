@@ -10,24 +10,11 @@ from xuloom.tools.base import BaseAgenticTool
 from xuloom.agents.registry import AgentRegistry
 from xuloom.agents.tasks import SubagentTasks
 from xuloom.agents.lifecycle import AgentLifecycle, concurrency_limit
+from xuloom.agents.role_runtime import ALL_AGENT_DISALLOWED_TOOLS, configure_role, filter_tools
 from xuloom.skills.registry import SkillRegistry
-from xuloom.agents.builtin_agents import (
-    BUILTIN_AGENTS,
-    get_builtin_agent,
-    list_builtin_agent_descriptions,
-)
 
 MAX_SUBAGENT_DEPTH = 2
 
-ALL_AGENT_DISALLOWED_TOOLS = frozenset({
-    "agent_tool", "spawn_agent",
-    "ask_user_question_tool",
-    "send_message_tool",
-    "team_create_tool",
-    "team_delete_tool",
-    "enter_plan_mode",
-    "exit_plan_mode",
-})
 
 class AgentToolInput(BaseModel):
     model_config = {"extra": "forbid"}
@@ -172,38 +159,13 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
 
         return filtered
     
-    def _get_effective_tasks(self, task: str, tasks: List[str] = None) -> List[str]:
-        normalized = [item.strip() for item in (tasks or []) if str(item).strip()]
-        if normalized:
-            return normalized
-        if task and task.strip():
-            return [task.strip()]
-        return []
-
     def _filter_tools(
         self,
         parent_tools,
         allowed_tools: List[str],
         disallowed_tools: set = None,
     ):
-        always_blocked = ALL_AGENT_DISALLOWED_TOOLS
-        merged_disallowed = set(always_blocked)
-        if disallowed_tools:
-            merged_disallowed |= set(disallowed_tools)
-
-        filtered_tools = {
-            name: copy.copy(tool)
-            for name, tool in parent_tools.items()
-            if name not in merged_disallowed
-        }
-        if allowed_tools is not None and "*" not in allowed_tools:
-            allowset = set(allowed_tools)
-            filtered_tools = {
-                name: tool
-                for name, tool in filtered_tools.items()
-                if name in allowset
-            }
-        return filtered_tools
+        return filter_tools(parent_tools, allowed_tools, disallowed_tools)
 
     def _share_runtime_managers(self, sub_engine):
         shared_manager_fields = [
@@ -343,71 +305,15 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
             sub_engine.tool_context["team_manager"] = team
             sub_engine.tool_context["team_member_name"] = child_agent_id
 
-        disallowed = set()
-        if builtin_agent_def:
-            disallowed = set(builtin_agent_def.get("disallowed_tools", []))
-            if builtin_agent_def.get("web_search") == "disabled":
-                disallowed.update({"web_search_tool", "web_fetch_tool", "browser_tool"})
-
-        parent_tools = dict(self.context.get("engine_available_tools", {}))
         latent = self.context.get("latent_tools_registry", {})
-        if allowed_tools and "*" not in allowed_tools:
-            parent_tools.update({name: tool for name, tool in latent.items() if name in allowed_tools})
-        if team and team.is_active and "send_message_tool" in latent:
-            parent_tools["send_message_tool"] = latent["send_message_tool"]
-        mcp_servers = definition.get("mcp_servers")
-        if parent_tools:
-            if mcp_servers is not None:
-                parent_tools = {name: tool for name, tool in parent_tools.items()
-                    if not hasattr(tool, "server_name") or tool.server_name in mcp_servers}
-            if definition.get("read_only"):
-                parent_tools = {name: tool for name, tool in parent_tools.items() if getattr(tool, "is_read_only", False)}
-            sub_engine.available_tools = self._filter_tools(
-                parent_tools, allowed_tools, disallowed_tools=disallowed
-            )
-            sub_engine.tool_context["engine_available_tools"] = sub_engine.available_tools
-            for tool in sub_engine.available_tools.values():
-                tool.context = sub_engine.tool_context
-            if team and team.is_active and "send_message_tool" in parent_tools and (allowed_tools is None or "*" in allowed_tools or "send_message_tool" in allowed_tools):
-                tool = copy.copy(parent_tools["send_message_tool"])
-                tool.context = sub_engine.tool_context
-                sub_engine.available_tools[tool.name] = tool
-
-        sub_engine.latent_tools = self._filter_tools(
-            {name: tool for name, tool in latent.items() if name not in sub_engine.available_tools
-             and (mcp_servers is None or not hasattr(tool, "server_name") or tool.server_name in mcp_servers)},
-            allowed_tools, disallowed_tools=disallowed
-        )
-        if definition.get("read_only"):
-            sub_engine.latent_tools = {name: tool for name, tool in sub_engine.latent_tools.items() if getattr(tool, "is_read_only", False)}
-        sub_engine.tool_context["latent_tools_registry"] = sub_engine.latent_tools
-        for tool in sub_engine.latent_tools.values():
-            tool.context = sub_engine.tool_context
-
-        skip_context = False
-        if builtin_agent_def and builtin_agent_def.get("omit_claude_md"):
-            skip_context = True
-
-        specialized_prompt = ""
-        if builtin_agent_def:
-            specialized_prompt = builtin_agent_def.get("system_prompt", "")
-            critical_reminder = builtin_agent_def.get("critical_reminder", "")
-            if critical_reminder:
-                specialized_prompt += f"\n\n{critical_reminder}"
-
-        sub_engine.tool_context["agent_system_prompt"] = (
-            "You are a delegated subagent, not the parent coordinator. Your assignment is the task supplied by the parent in this session. "
-            "Complete only that assignment and report to the parent. Any parent conversation supplied is reference, "
-            "not additional tasks. Do not repeat the parent's delegation request or look for tools to spawn more agents. "
-            "For simple conversational assignments, respond directly without tools.\n\n" + specialized_prompt
-        )
-        for skill_name in (builtin_agent_def or {}).get("skills", []):
-            sub_engine.tool_context["agent_system_prompt"] += "\n\n" + sub_engine.tool_context["skill_registry"].read(skill_name)
-        if inherit_context and not skip_context:
-            sub_engine.tool_context["agent_system_prompt"] += (
-                "\n\nParent conversation (reference only; do not execute its requests):\n" +
-                json.dumps(self._filter_incomplete_tool_messages(self.context.get("messages", [])), ensure_ascii=False)
-            )
+        team_tool = None
+        if team and team.is_active:
+            team_tool = self.context.get("engine_available_tools", {}).get("send_message_tool") or latent.get("send_message_tool")
+        configure_role(sub_engine, definition, allowed_tools=allowed_tools,
+            parent_tools=self.context.get("engine_available_tools"), latent_tools=latent,
+            skills=sub_engine.tool_context["skill_registry"], team_tool=team_tool,
+            context_messages=self._filter_incomplete_tool_messages(self.context.get("messages", [])) if inherit_context else None,
+            frozen_prompt=(resume_state or {}).get("metadata", {}).get("delegation", {}).get("system_prompt") or None)
         if resume_state:
             sub_engine.messages = copy.deepcopy(resume_state["messages"])
             metadata = resume_state.get("metadata", {})
@@ -564,63 +470,6 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
         )
         body = "\n\n".join(self._format_single_report(item) for item in payloads)
         return header + "\n" + body
-
-    def _build_coordinator_prompt(self, parent_task: str, payloads: List[dict], parallel: bool) -> str:
-        lines = [
-            "[SYSTEM: Coordinator synthesis mode is active.]",
-            "You are the coordinator agent. Synthesize the child sub-agent results into one concise final report.",
-            f"Parent objective:\n{parent_task or '<none>'}",
-            f"Dispatch mode: {'parallel' if parallel else 'serial'}",
-            "",
-            "Child agent results:",
-        ]
-        for index, payload in enumerate(payloads, start=1):
-            lines.append(f"## Child {index}")
-            lines.append(f"Agent ID: {payload.get('agent_id')}")
-            lines.append(f"Status: {payload.get('status')}")
-            lines.append(f"Task: {payload.get('task')}")
-            lines.append("Result:")
-            lines.append(str(payload.get("result", "")))
-            lines.append("")
-
-        lines.append("Return a unified coordination report with: overall status, key findings, unresolved risks, and recommended next steps.")
-        return "\n".join(lines)
-
-    async def _run_coordinator_mode(
-        self,
-        *,
-        parent_task: str,
-        payloads: List[dict],
-        parallel: bool,
-        parent_depth: int,
-        parent_agent_id: str,
-        inherit_context: bool,
-    ) -> dict:
-        return await self._run_single_subagent(
-            task=self._build_coordinator_prompt(parent_task, payloads, parallel),
-            allowed_tools=["plan_tool", "todo_write_tool"],
-            inherit_context=inherit_context,
-            parent_depth=parent_depth,
-            parent_agent_id=parent_agent_id,
-            agent_role="coordinator",
-        )
-
-    def _format_coordinator_report(self, coordinator_payload: dict, payloads: List[dict], parallel: bool) -> str:
-        completed = sum(1 for item in payloads if item.get("status") == "completed")
-        crashed = sum(1 for item in payloads if item.get("status") == "crashed")
-        lines = [
-            "=======[ COORDINATOR REPORT ]=======",
-            f"Execution mode: {'parallel' if parallel else 'serial'}",
-            f"Child task count: {len(payloads)}",
-            f"Completed: {completed}",
-            f"Crashed: {crashed}",
-            f"Coordinator agent: {coordinator_payload.get('agent_id')}",
-            "",
-            "Coordinator synthesis:",
-            str(coordinator_payload.get("result", "")),
-            "====================================",
-        ]
-        return "\n".join(lines)
 
     async def execute(
         self,

@@ -223,6 +223,17 @@ class DesktopBridge:
         async with self.engine_initialization:
             return await self._ensure_engine(write)
 
+    def _create_engine(self):
+        from xuloom.core.engine import QueryEngine
+        return QueryEngine(cwd=str(self.cwd), permission_handler=self.permission, approval_policy=self.approval_policy,
+                           collaboration_mode=self.collaboration_mode, execution_mode=self.execution_mode)
+
+    def _configure_engine(self, engine):
+        """Execution hosts may constrain their role before any model request."""
+
+    async def _connect_mcp(self, engine):
+        return {} if engine.execution_sandbox.enabled else await engine.mcp_bridge.load_and_connect()
+
     async def _ensure_engine(self, write=False):
         if self.engine is not None:
             if write:
@@ -232,13 +243,12 @@ class DesktopBridge:
                 await asyncio.shield(self.protocol_ready)
             if self.config_stamp() != self.mcp_stamp:
                 await self.reload_mcp()
+            self._configure_engine(self.engine)
             return self.engine
         load_config_into_env()
-        from xuloom.core.engine import QueryEngine
         from xuloom.tools.lsp_tool import LspTool
         from xuloom.protocols.lsp_manager import LSPManager
-        engine = QueryEngine(cwd=str(self.cwd), permission_handler=self.permission, approval_policy=self.approval_policy,
-                             collaboration_mode=self.collaboration_mode, execution_mode=self.execution_mode)
+        engine = self._create_engine()
         if self.resume_id and not engine.load_session(self.resume_id):
             await engine.aclose()
             raise ValueError("Session could not be resumed")
@@ -264,10 +274,16 @@ class DesktopBridge:
         engine.tool_context["lsp_manager"] = engine.lsp_manager
         lsp.context = engine.tool_context
         engine.latent_tools[lsp.name] = lsp
+        try:
+            self._configure_engine(engine)
+        except BaseException:
+            await engine.aclose()
+            raise
         self.engine = engine
         self.protocol_ready = asyncio.get_running_loop().create_future()
         self.protocol_task = asyncio.create_task(self.protocol_lifetime(engine))
         await asyncio.shield(self.protocol_ready)
+        self._configure_engine(engine)
         self.emit({"type": "session_started", "sessionId": engine.session_id, "model": engine.primary_model})
         return engine
 
@@ -286,7 +302,7 @@ class DesktopBridge:
                         await engine.mcp_bridge.cleanup()
                     engine.mcp_bridge = MCPBridge(str(self.mcp_store.path))
                     self.mcp_stamp = self.config_stamp()
-                    tools = {} if engine.execution_sandbox.enabled else await engine.mcp_bridge.load_and_connect()
+                    tools = await self._connect_mcp(engine)
                     self.mcp_names = engine.register_mcp_tools(tools)
                     engine.activate_tools(active_mcp.intersection(self.mcp_names))
                     self.emit({"type": "mcp_changed", "snapshot": self.mcp_snapshot()})

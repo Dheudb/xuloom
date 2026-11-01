@@ -2593,6 +2593,11 @@ class QueryEngine:
             self.session_manager.release_writer(self.session_id)
         state = self.session_manager.load_session_state(sid)
         msgs = state.get("messages", [])
+        delegated = state.get("metadata", {}).get("delegation", {})
+        if not isinstance(delegated, dict):
+            raise ValueError("Invalid saved delegation metadata")
+        if "authority_required" in delegated and delegated["authority_required"] is not True:
+            raise ValueError("Invalid saved delegated execution authority")
         if msgs or state.get("_valid"):
             self.session_id = sid
             self.tool_context["command_sessions"] = self._new_command_sessions(sid)
@@ -2602,6 +2607,12 @@ class QueryEngine:
             self.messages = msgs
             self._sync_message_context()
             metadata = state.get("metadata", {})
+            if self.agent_depth == 0:
+                previous_delegation = self.tool_context.pop("delegation", {})
+                if previous_delegation.get("authority_required"):
+                    self.permission_manager.delegated_authorizer = None
+            if "authority_required" in delegated:
+                self.tool_context["delegation"] = copy.deepcopy(delegated)
             self.tool_context["workflow_completion"].restore(metadata.get("workflow_completion"))
             execution_mode = metadata.get("execution_mode", "host")
             if execution_mode not in {"host", "workspace"}:
@@ -3880,6 +3891,9 @@ class QueryEngine:
         3. If tool calls -> Execute in parallel via asyncio & Append results to loop.
         4. If stop -> Return final textual output.
         """
+        if self.tool_context.get("delegation", {}).get("authority_required") and self.permission_manager.delegated_authorizer is None:
+            return RunResult("This is an owned delegated execution. Resume it through its original controller, or fork an independent conversation.",
+                "delegation_unavailable", session_id=self.session_id, agent_id=self.agent_id)
         try:
             self.require_writer()
         except (SessionBusyError, SessionConflictError) as error:
@@ -4393,12 +4407,15 @@ class QueryEngine:
                         turn=turn_count,
                         event_callback=event_callback,
                     )
-                    estimated_tokens = self.compactor.estimate_tokens(self.messages)
-                    await self.session_memory_manager.maybe_extract(
-                        self.messages, estimated_tokens,
-                    )
-                    self.memory_extractor.record_turn()
-                    await self.memory_extractor.maybe_extract(self.messages)
+                    # Delegated runs own their transcript, not project-wide
+                    # durable memories or untracked post-completion model jobs.
+                    if not self.tool_context.get("delegation"):
+                        estimated_tokens = self.compactor.estimate_tokens(self.messages)
+                        await self.session_memory_manager.maybe_extract(
+                            self.messages, estimated_tokens,
+                        )
+                        self.memory_extractor.record_turn()
+                        await self.memory_extractor.maybe_extract(self.messages)
                     self.persist_session_state()
                     return finish_run(self, (final_answer), 'completed')
                     
