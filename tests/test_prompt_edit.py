@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 from xuloom.context.context import ContextBuilder
 from xuloom.core.engine import QueryEngine
 from xuloom.desktop.prompt_edit import replace_latest_turn
+from xuloom.features.artifact_tracker import ArtifactTracker
 
 
 class PromptEditTests(unittest.TestCase):
@@ -22,6 +23,7 @@ class PromptEditTests(unittest.TestCase):
                         {"role": "assistant", "content": [{"type": "tool_use", "id": "write"}]},
                         {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "write", "content": "written"}]}]
             engine = SimpleNamespace(messages=messages, turn_traces=[{"userMessageId": "u1"}, {"userMessageId": "u2"}],
+                                     artifact_tracker=ArtifactTracker(),
                                      session_cwd=directory, session_id="s1", _sync_message_context=Mock(),
                                      persist_session_state=Mock(), require_writer=Mock(), session_manager=SimpleNamespace(last_save_ok=True))
             for invalid in ["u1", "", "../invalid"]:

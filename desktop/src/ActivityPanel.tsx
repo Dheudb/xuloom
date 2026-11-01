@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Activity, ChevronDown } from "lucide-react";
 import type { SessionView, ToolActivity } from "./types";
 import { toolPresentation } from "./tool-presentation";
@@ -11,9 +11,10 @@ const pending = (tool: ToolActivity) => ["running", "queued", "waiting"].include
 const clip = (value: string) => value.length > 16000 ? value.slice(0, 16000) + "\n…内容较长，展示前 16000 个字符。" : value;
 const resultPreview = (value: string) => value.includes("\nContent:\n") ? value.slice(value.indexOf("\nContent:\n") + 10) : value;
 
-export default function ActivityPanel({ session }: { session: SessionView }) {
-  const [query, setQuery] = useState("");
+export default function ActivityPanel({ session, initialQuery = "" }: { session: SessionView; initialQuery?: string }) {
+  const [query, setQuery] = useState(initialQuery);
   const [scope, setScope] = useState("all");
+  useEffect(() => { setQuery(initialQuery); setScope("all"); }, [initialQuery]);
   const tools = session.tools.filter((tool) =>
     (scope === "all" || (scope === "main" ? !tool.agentId : !!tool.agentId)) &&
     JSON.stringify([tool.name, tool.input, tool.result, tool.agentRole, statusText[tool.status]]).toLowerCase().includes(query.toLowerCase()));

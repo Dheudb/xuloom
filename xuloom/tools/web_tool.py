@@ -27,11 +27,12 @@ def network_error(error, metadata):
 
 def extract_page(text, html):
     if not html:
-        return text
+        return text, ""
     soup = BeautifulSoup(text, 'lxml')
+    title = soup.title.get_text(" ", strip=True)[:300] if soup.title else ""
     for element in soup(["script", "style", "nav", "footer", "meta", "noscript"]):
         element.decompose()
-    return re.sub(r'\s+', ' ', soup.get_text(separator=' ', strip=True))
+    return re.sub(r'\s+', ' ', soup.get_text(separator=' ', strip=True)), title
 
 class WebSearchInput(BaseModel):
     query: str = Field(..., description="The search query to look up on the web.")
@@ -72,7 +73,8 @@ IMPORTANT - Use the correct year in search queries:
             out = f"Web Search Results for: '{query}'\n" + "="*40 + "\n"
             for r in results:
                 out += f"Title: {str(r.get('title', ''))[:500]}\nURL: {r.get('href')}\nSnippet: {str(r.get('body', ''))[:2500]}\n\n"
-            return build_tool_result(ok=True, content=out, metadata={"backend": "ddgs", "query": query, "result_count": len(results)})
+            return build_tool_result(ok=True, content=out, metadata={"backend": "ddgs", "query": query, "result_count": len(results),
+                "sources_in_content": True, "sources": [{"url": r["href"], "title": str(r.get("title", "")), "kind": "search"} for r in results]})
         except Exception as e:
             return build_tool_result(ok=False, is_error=True, content=f"Built-in web search service failed ({type(e).__name__}). Check network access, retry, or use a configured search MCP. This is a search-provider failure, not a missing tool.", metadata=network_error(e, {"backend": "ddgs", "query": query}))
 
@@ -118,13 +120,14 @@ Usage notes:
                             return build_tool_result(ok=False, is_error=True, content="Webpage exceeds the 5 MB response limit; no partial page was returned as complete.", metadata={"code": "response_too_large", "retryable": False})
                         body.extend(chunk)
                     source = bytes(body).decode(resp.encoding or "utf-8", errors="replace")
-            text = await asyncio.to_thread(extract_page, source, media_type in {"text/html", "application/xhtml+xml"})
+            text, title = await asyncio.to_thread(extract_page, source, media_type in {"text/html", "application/xhtml+xml"})
 
             result = f"Content from {resp.url}:\n\n{text}"
             if prompt:
                 result += f"\n\n---\nExtraction prompt: {prompt}"
             return build_tool_result(ok=True, content=result, metadata={"url": str(resp.url), "source_bytes": len(body),
-                "content_chars": len(text), "media_type": media_type, "truncated": False})
+                "content_chars": len(text), "media_type": media_type, "truncated": False,
+                "sources_in_content": True, "sources": [{"url": str(resp.url), "title": title or str(resp.url), "kind": "page"}]})
 
         except Exception as e:
             return build_tool_result(ok=False, is_error=True, content=f"Webpage request failed ({type(e).__name__}). Check the URL and network, or try another source.", metadata=network_error(e, {"url": url}))

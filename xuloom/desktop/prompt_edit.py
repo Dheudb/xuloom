@@ -17,8 +17,11 @@ def replace_latest_turn(engine, message_id):
     index, _ = humans[-1]
     # Keep an immutable recovery copy in central history before replacing any messages.
     backup = history_root(engine.session_cwd) / "tool-results" / engine.session_id / "revisions" / (str(uuid.uuid4()) + ".json")
-    atomic_json(backup, {"messages": engine.messages, "turn_traces": engine.turn_traces})
+    atomic_json(backup, {"messages": engine.messages, "turn_traces": engine.turn_traces,
+        "artifacts": engine.artifact_tracker.export_state()})
     messages, traces = engine.messages, engine.turn_traces
+    references = copy.deepcopy(engine.artifact_tracker.references)
+    engine.artifact_tracker.references.pop(message_id, None)
     engine.messages = copy.deepcopy(messages[:index])
     engine.turn_traces = [trace for trace in traces if trace.get("userMessageId") != message_id]
     engine._sync_message_context()
@@ -28,5 +31,6 @@ def replace_latest_turn(engine, message_id):
             raise OSError("Could not save the edited conversation")
     except Exception:
         engine.messages, engine.turn_traces = messages, traces
+        engine.artifact_tracker.references = references
         engine._sync_message_context()
         raise

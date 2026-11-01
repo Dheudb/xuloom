@@ -269,6 +269,7 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
         description: str = "",
         resume_state: dict = None,
         connection_binding: dict = None,
+        owner_turn_id: str = None,
     ) -> dict:
         from xuloom.core.engine import QueryEngine
 
@@ -313,7 +314,7 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
         sub_engine._thinking_config_explicit = same_model and self.context.get("thinking_config_explicit", False)
         sub_engine.tool_context["thinking_config_explicit"] = sub_engine._thinking_config_explicit
         definition = copy.deepcopy(builtin_agent_def or {})
-        sub_engine.tool_context["delegation"] = {"owner_session_id": self.context.get("session_id"), "role_definition": definition,
+        sub_engine.tool_context["delegation"] = {"owner_session_id": self.context.get("session_id"), "owner_turn_id": owner_turn_id, "role_definition": definition,
             "connection_binding": copy.deepcopy(connection_binding)}
         sub_engine.tool_context["delegated_mailbox"] = lambda: self._mailbox(child_agent_id)
         sub_engine.tool_context["ack_delegated_mailbox"] = lambda ids: self._ack_mailbox(child_agent_id, ids)
@@ -322,6 +323,10 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
             sub_engine.plan_manager.set_mode(self.context["plan_manager"].get_mode())
 
         self._share_runtime_managers(sub_engine)
+        if resume_state:
+            from xuloom.features.session_summary import merge_references
+            merge_references(sub_engine.artifact_tracker.references,
+                resume_state.get("metadata", {}).get("artifacts", {}).get("references", {}), agent_id=child_agent_id)
         if self.context.get("goal_budget"):
             sub_engine.tool_context["goal_budget"] = self.context["goal_budget"]
         sub_engine.tool_context["skill_registry"] = self.context.get("skill_registry") or SkillRegistry(self.context.get("session_cwd"))
@@ -722,9 +727,12 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
         tasks.check_capacity(count)
         from xuloom.agents.collaboration import admit
         admit(self.context, count)
+        from xuloom.features.session_summary import human_turn
+        owner_turn_id = (self.context.get("delegation") or {}).get("owner_turn_id") or human_turn(self.context.get("messages", []))
         records = [{
             "agent_id": "subagent-" + str(uuid.uuid4()),
             "parent_agent_id": parent_agent_id,
+            "owner_turn_id": owner_turn_id,
             "agent_depth": parent_depth + 1,
             "agent_role": builtin_def.get("agent_role", "subagent"),
             "agent_type": builtin_def.get("agent_type", subagent_type or "general-purpose"),
@@ -796,7 +804,7 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
             from xuloom.agents.collaboration import DELEGATION_BUDGET
             token = DELEGATION_BUDGET.set(self.context.get("collaboration_run"))
             try:
-                payload = await self._run_single_subagent(**kwargs)
+                payload = await self._run_single_subagent(**kwargs, owner_turn_id=record.get("owner_turn_id"))
             finally:
                 DELEGATION_BUDGET.reset(token)
         except asyncio.CancelledError:

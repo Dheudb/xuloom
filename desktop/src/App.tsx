@@ -41,6 +41,7 @@ import SchedulePanel from "./SchedulePanel";
 import GoalEditor from "./GoalEditor";
 import GoalStrip from "./GoalStrip";
 import GitStatus from "./GitStatus";
+import SessionSummary from "./SessionSummary";
 import RemoteReferences from "./RemoteReferences";
 import McpDialog from "./McpDialog";
 import SessionSidebar from "./SessionSidebar";
@@ -74,6 +75,7 @@ export default function App() {
   const [mcpOpen, setMcpOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelTab, setPanelTab] = useState("skills");
+  const [activityQuery, setActivityQuery] = useState("");
   const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH);
   const [filePanelWidth, setFilePanelWidth] = useState(700);
   const [reviewTreeWidth, setReviewTreeWidth] = useState(220);
@@ -184,6 +186,7 @@ export default function App() {
     if (activeId) window.xuloom.invoke("session.activate", { session: activeId }).catch(onError);
     setGoalDialog(null);
     setExecutionDialog(false);
+    setActivityQuery("");
     if (activeId) window.xuloom.invoke("goal.get", { session: activeId }).then((goal) => update({ goal }, activeId)).catch(onError);
   }, [activeId]);
   useEffect(() => {
@@ -547,6 +550,8 @@ export default function App() {
             <span>{active ? title.slice(0, 35) : "开始"}</span>
           </div>
           <div className="topbar-actions">
+            {active && <SessionSummary key={active.id} sessionId={active.id} busy={active.busy} openFile={openFile}
+              openActivity={tool => { setActivityQuery(tool || ""); setFilePreview(undefined); setPanelTab("activity"); setPanelOpen(true); }} />}
             {active && <GitStatus key={active.id + active.project} sessionId={active.id} project={active.project} busy={active.busy} />}
             <span className="local-tag">
               <span />
@@ -559,7 +564,7 @@ export default function App() {
               ].map(({ id, label, icon: Icon }) => (
                 <button key={id} className="icon-button" title={label} aria-label={"打开" + label + "面板"}
                   aria-pressed={panelOpen && !filePreview && panelTab === id}
-                  onClick={() => { setFilePreview(undefined); setPanelTab(id); setPanelOpen(true); }}>
+                  onClick={() => { setActivityQuery(""); setFilePreview(undefined); setPanelTab(id); setPanelOpen(true); }}>
                   <Icon size={17} />
                 </button>
               ))}
@@ -918,6 +923,7 @@ export default function App() {
             onOpenFile={openFile}
           key={activeId || "empty"}
           session={active}
+          activityQuery={activityQuery}
           tab={panelTab}
           setTab={setPanelTab}
           invoke={invoke}

@@ -97,8 +97,11 @@ class MCPToolWrapper:
         try:
             result = await self.session.call_tool(self.mcp_tool_name, arguments=kwargs)
             blocks = []
+            sources = []
             visual = False
             for block in result.content:
+                if getattr(block, "type", "") == "resource_link":
+                    sources.append({"url": str(block.uri), "title": str(getattr(block, "title", None) or block.name), "kind": "resource"})
                 if getattr(block, "type", "") == "text":
                     blocks.append({"type": "text", "text": block.text})
                 elif getattr(block, "type", "") == "image":
@@ -112,7 +115,7 @@ class MCPToolWrapper:
                 blocks.append({"type": "text", "text": "Structured content:\n" + json.dumps(structured, ensure_ascii=False)})
             error = bool(getattr(result, "isError", False))
             return build_tool_result(ok=not error, is_error=error, content=blocks if visual else "\n".join(block["text"] for block in blocks),
-                metadata={"server": self.server_name, "tool": self.mcp_tool_name, "content_blocks": len(result.content)})
+                metadata={"server": self.server_name, "tool": self.mcp_tool_name, "content_blocks": len(result.content), "sources_in_content": True, "sources": sources})
         except Exception as exc:
             return build_tool_result(ok=False, is_error=True, content=connection_error(exc), metadata={"server": self.server_name})
 

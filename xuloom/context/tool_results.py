@@ -59,6 +59,10 @@ def serialize_tool_result(
     if isinstance(payload, dict) and {"ok", "content", "metadata", "is_error"}.issubset(payload.keys()):
         content = str(payload.get("content", ""))
         metadata = dict(payload.get("metadata", {}) or {})
+        # Producers can mark links already present in their content. Other
+        # tools may supply sources only as metadata; that evidence stays visible.
+        if metadata.pop("sources_in_content", False) is True:
+            metadata.pop("sources", None)
         is_error = bool(payload.get("is_error", False))
         ok = bool(payload.get("ok", False))
 

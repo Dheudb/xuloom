@@ -36,4 +36,7 @@ def branch_snapshot(raw, point, source_id):
     kept = {key: copy.deepcopy(metadata[key]) for key in ("thinking", "collaboration_mode") if key in metadata}
     kept.update(turn_traces=traces, file_changes=list(files.values()),
                 forked_from={"session_id": source_id, "through_turn": through, "user_message_id": chosen.get("_userId")})
+    references = metadata.get("artifacts", {}).get("references", {})
+    ids = {item.get("_userId") for item in replies[:through]}
+    kept["artifacts"] = {"references": {key: copy.deepcopy(value) for key, value in references.items() if key in ids}}
     return copy.deepcopy(messages[:chosen["_messageEnd"]]), kept

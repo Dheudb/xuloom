@@ -6,6 +6,8 @@
 
 聊天链接：`xuloom chat-link --cwd <目录> --session <ID>` 生成，`xuloom --chat "xuloom://chat/v1/…/…"` 在终端打开；交互模式输入 `/link`。详情见 [聊天深链接](chat-links.md)。
 
+输出与来源：`xuloom summary --cwd <目录> --session <ID> --json`，加 `--all` 查看整个会话；交互模式 `/summary [all]`。SSH 使用 `xuloom remote summary <连接 ID> --session <ID> --json`，查询不调用模型，见 [输出与来源](session-summary.md)。
+
 ## 安装与启动
 
 基础 CLI 需要 Python 3.9+。建议使用 Python 3.12 的虚拟环境，便于同时使用 MCP。

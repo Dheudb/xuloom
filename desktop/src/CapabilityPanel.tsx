@@ -30,6 +30,7 @@ export default function CapabilityPanel({
   update,
   onError,
   onOpenFile,
+  activityQuery,
 }: {
   session?: SessionView;
   tab: string;
@@ -39,6 +40,7 @@ export default function CapabilityPanel({
   update: (patch: Partial<SessionView>) => void;
   onError: (e: unknown) => void;
   onOpenFile: (path: string, change?: FileChange) => void;
+  activityQuery?: string;
 }) {
   const [preview, setPreview] = useState<{ name: string; text: string; kind?: "agent" } | null>(
     null,
@@ -343,7 +345,7 @@ export default function CapabilityPanel({
             </>
           )}
           {tab === "activity" && (
-            <ActivityPanel session={session} />
+            <ActivityPanel session={session} initialQuery={activityQuery} />
           )}
           {tab === "changes" && <ChangesPanel key={session.id} session={session} invoke={invoke} onOpen={onOpenFile} />}
           {tab === "files" && <WorkspaceTree sessionId={session.id} project={session.project} changes={session.fileChanges} onOpen={onOpenFile} />}

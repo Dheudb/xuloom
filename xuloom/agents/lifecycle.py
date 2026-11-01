@@ -159,6 +159,8 @@ class AgentLifecycle:
         admit(self.context, 1)
         record = {**row, "status": "running", "phase": "starting", "finished_at": None,
                   "turn": row.get("turn", 1) + 1, "background": run_in_background}
+        from xuloom.features.session_summary import human_turn
+        record["owner_turn_id"] = (self.context.get("delegation") or {}).get("owner_turn_id") or human_turn(self.context.get("messages", []))
         record.update(status="queued", phase="queued", queued_at=int(time.time() * 1000), started_at=None,
             admission_run_id=self.context["collaboration_run"]["id"],
             dispatch={"task": prompt, "allowed_tools": definition.get("allowed_tools"), "inherit_context": False,

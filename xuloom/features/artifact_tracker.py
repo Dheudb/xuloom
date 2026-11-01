@@ -9,6 +9,7 @@ class ArtifactTracker:
         self.prefetch_history = []
         self.file_history = {}
         self.commit_history = []
+        self.references = {}
 
     def _trim(self):
         self.attachments = self.attachments[:20]
@@ -146,6 +147,7 @@ class ArtifactTracker:
             "prefetch_history": copy.deepcopy(self.prefetch_history),
             "file_history": copy.deepcopy(self.file_history),
             "commit_history": copy.deepcopy(self.commit_history),
+            "references": copy.deepcopy(self.references),
         }
 
     def load_state(self, payload):
@@ -154,6 +156,9 @@ class ArtifactTracker:
         self.prefetch_history = list(payload.get("prefetch_history", []) or [])
         self.file_history = dict(payload.get("file_history", {}) or {})
         self.commit_history = list(payload.get("commit_history", []) or [])
+        self.references = {}
+        from xuloom.features.session_summary import merge_references
+        merge_references(self.references, payload.get("references", {}))
         self._trim()
 
     def render_summary(self) -> str:

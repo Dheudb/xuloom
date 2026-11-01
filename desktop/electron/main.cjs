@@ -69,6 +69,7 @@ const engineMethods = new Set([
   "files.undo",
   "files.list",
   "git.status",
+  "session.summary",
   "files.gitDiff",
   "capabilities.list",
   "capabilities.toggle",

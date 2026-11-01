@@ -3,7 +3,7 @@ import type { ToolActivity } from "./types";
 export type ToolKind = "image" | "edit" | "terminal" | "search" | "file" | "web" | "agent" | "skill" | "tool";
 const basename = (value: unknown) => String(value || "").split(/[\\/]/).pop() || "";
 const imagePath = /\.(png|jpe?g|webp|gif|bmp)(?:$|[?#])/i;
-export function toolPresentation(tool: ToolActivity): { kind: ToolKind; title: string; brief: string } {
+export function toolPresentation(tool: Pick<ToolActivity, "name" | "status" | "input" | "media">): { kind: ToolKind; title: string; brief: string } {
   const input = tool.input || {}, name = tool.name;
   const done = tool.status === "completed", failed = ["error", "crashed", "interrupted"].includes(tool.status);
   let kind: ToolKind = "tool", action = "调用工具", brief = String(input.description || input.action || name);

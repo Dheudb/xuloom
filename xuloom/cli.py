@@ -26,6 +26,13 @@ def parser():
     status = sub.add_parser("git-status", help="Read repository/branch without a model request")
     status.add_argument("--cwd", default=os.getcwd())
     status.add_argument("--json", action="store_true")
+    summary = sub.add_parser("summary", help="Read saved output files, sources and tool counts without calling a model")
+    summary.add_argument("--cwd", default=os.getcwd())
+    summary.add_argument("--session", required=True)
+    summary.add_argument("--json", action="store_true")
+    selection = summary.add_mutually_exclusive_group()
+    selection.add_argument("--turn", help="Human message UUID identifying one turn")
+    selection.add_argument("--all", action="store_true", help="All saved turns in this conversation")
     link = sub.add_parser("chat-link", help="Create or resolve a local/known SSH chat address without calling a model")
     link.add_argument("--cwd", default=os.getcwd())
     mode = link.add_mutually_exclusive_group(required=True)
@@ -123,6 +130,9 @@ async def open_engine(args, emit):
 
 
 async def dispatch(args, emit):
+    if args.command == "summary":
+        from xuloom.features.session_summary import read_summary
+        return {"ok": True, "reason": "completed", "summary": read_summary(args.cwd, args.session, turn_id=args.turn, all_turns=args.all)}
     if args.command == "remote":
         from xuloom.remote.cli import dispatch as remote_dispatch
         return await remote_dispatch(args, emit)

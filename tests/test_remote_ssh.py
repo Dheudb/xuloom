@@ -300,6 +300,19 @@ class SSHWireTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse((self.root/"local-data/history").exists())
         self.assertTrue(any((self.root/"remote-data/history").rglob(first["session_id"]+".json")))
 
+    async def test_summary_cli_reads_remote_receipts_without_another_model_call_or_local_history(self):
+        self.hold_model(write=True)
+        code, events, error = await self.run_cli("exec", "test", "Write the remote fixture", "--permission", "full")
+        self.assertEqual(code, 0, error + json.dumps(events))
+        identity = events[-1]["result"]["session_id"]
+        before = len(self.local.records)
+        code, events, error = await self.run_cli("summary", "test", "--session", identity, "--all")
+        self.assertEqual(code, 0, error + json.dumps(events))
+        summary = events[-1]["result"]["summary"]
+        self.assertEqual(summary["files"][0]["path"], str(self.remote / "must-not-exist.txt"))
+        self.assertEqual(len(self.local.records), before)
+        self.assertFalse((self.root / "local-data/history").exists())
+
     async def test_host_key_failure_does_not_start_remote_bridge_or_trust_new_key(self):
         self.server.known_hosts.write_text("", encoding="utf-8")
         with self.assertRaises(RemoteDisconnected): await self.connect()

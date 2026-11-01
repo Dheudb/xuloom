@@ -374,8 +374,11 @@ def _plan(spec, identities):
         payload = rebase({"messages": raw, "metadata": {}} if isinstance(raw, list) else raw, root / "tool-results", destination_root / "tool-results")
         if scope == "standalone": payload = rebase(payload, project, target)
         metadata = payload.setdefault("metadata", {})
+        references = metadata.get("artifacts", {}).get("references", {})
         for field in ("sandbox", "browser", "shell_tasks", "permissions", "memory_files", "file_state_cache", "artifacts", "incremental_write_queue", "auto_commit", "content_replacements", "security_classifier", "vcr", "team", "ultraplan", "memory_extractor", "hooks"):
             metadata.pop(field, None)
+        if references:
+            metadata["artifacts"] = {"references": references}
         metadata.setdefault("workspace_moves", []).append({"from": project, "to": target, "at": int(time.time() * 1000)})
         payload["revision"] = payload.get("revision", 0) + 1
         children = _safe(root / "sessions/subagents")

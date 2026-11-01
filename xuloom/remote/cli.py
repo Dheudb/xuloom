@@ -9,7 +9,7 @@ from xuloom.remote.ssh import SSHClient, RemoteDisconnected, RemoteRequestError
 def add_parser(sub):
     parent = sub.add_parser("remote", help="Manage keyless SSH profiles and execute on another Xuloom installation")
     actions = parent.add_subparsers(dest="action", required=True)
-    for action in ("list", "add", "remove", "check", "sessions", "inspect", "exec", "chat", "files", "read", "git-status", "references", "forget"):
+    for action in ("list", "add", "remove", "check", "sessions", "inspect", "summary", "exec", "chat", "files", "read", "git-status", "references", "forget"):
         item = actions.add_parser(action)
         item.add_argument("--json", action="store_true", help="UTF-8 JSON events and final receipt")
         if action not in {"list", "references"}: item.add_argument("id", help="Local reference token" if action == "forget" else "Saved SSH connection ID")
@@ -21,7 +21,11 @@ def add_parser(sub):
             item.add_argument("--python", default="python3", help="Remote Python with Xuloom installed")
             item.add_argument("--platform", choices=("posix", "windows"), default="posix")
             item.add_argument("--port", type=int, help="Override the SSH alias's configured port"); item.add_argument("--ssh-config", default="")
-        if action in {"exec", "inspect", "chat"}: item.add_argument("--session")
+        if action in {"exec", "inspect", "summary", "chat"}: item.add_argument("--session")
+        if action == "summary":
+            choice = item.add_mutually_exclusive_group()
+            choice.add_argument("--turn")
+            choice.add_argument("--all", action="store_true")
         if action in {"exec", "chat"}:
             item.add_argument("--permission", choices=("ask", "full"), default="ask")
             item.add_argument("--collaboration", choices=("solo", "auto", "ultra"))
@@ -44,7 +48,7 @@ async def dispatch(args, emit):
         return {"ok": True, "reason": "completed", "connection": value}
     if args.action == "remove":
         config.remove(args.id); return {"ok": True, "reason": "completed", "removed": args.id}
-    if args.action == "inspect" and not args.session: raise ValueError("--session is required")
+    if args.action in {"inspect", "summary"} and not args.session: raise ValueError("--session is required")
     if args.action == "exec":
         if args.resume and not args.session: raise ValueError("--resume requires --session")
         if args.resume and args.prompt: raise ValueError("--resume cannot replace the saved prompt")
@@ -63,6 +67,9 @@ async def dispatch(args, emit):
         elif args.action in {"files", "read"}:
             value = await client.request("files.list" if args.action == "files" else "files.read", {"path": args.path})
             result = {"ok": True, "reason": "completed", "file": value}
+        elif args.action == "summary":
+            await client.request("initialize", {"sessionId": session_id})
+            result = {"ok": True, "reason": "completed", "summary": await client.request("session.summary", {"turnId": args.turn, "all": args.all})}
         elif args.action == "inspect":
             initial = await client.request("initialize", {"sessionId": session_id})
             status = await client.request("session.status", {"sessionId": session_id})

@@ -635,6 +635,13 @@ class DesktopBridge:
             return {"project": str(self.cwd), "persistedId": sid, "executionMode": self.execution_mode, "collaborationMode": self.collaboration_mode, "permissionMode": self.approval_policy.mode, "config": self.config(), "capabilities": self.capabilities(), "sessions": self.sessions(), "history": self.history(messages, traces), "activity": activity, "workers": workers, "fileChanges": self.file_changes}
         if method == "files.read":
             return preview_file(self.cwd, params.get("path"), self.file_changes)
+        if method == "session.summary":
+            from xuloom.features.session_summary import read_summary
+            sid = self.engine.session_id if self.engine else self.resume_id
+            if not sid:
+                return {"version": 1, "scope": "turn", "turnId": None, "files": [], "sources": [], "tools": [], "warnings": [], "legacySourcesUnavailable": False}
+            return await asyncio.to_thread(read_summary, self.cwd, sid,
+                turn_id=params.get("turnId"), all_turns=params.get("all") is True)
         if method == "files.image":
             return await asyncio.to_thread(preview_image_file, self.cwd, params.get("path"), self.file_changes, params.get("basePath"))
         if method == "media.read":

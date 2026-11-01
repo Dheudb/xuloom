@@ -14,6 +14,7 @@
 | [持续目标与功能验收](product-roadmap.md) | SSH、异构代理、聊天导航、多媒体生成与双端 UI 的追加范围 |
 | [仓库与分支状态](git-status.md) | 桌面分支标识、CLI 查询及只读边界 |
 | [聊天深链接](chat-links.md) | 右键复制、桌面/CLI 打开、移动与归档边界 |
+| [输出与来源](session-summary.md) | 本轮/会话的真实输出文件、来源链接、工具入口及 App/CLI/SSH 查询 |
 | [实例连接绑定](runtime-connections.md) | 多供应商客户端、压缩器与子代理的连接归属、切换及恢复 |
 | [媒体接口核对与计划](media-adapters-plan.md) | 官方协议现状、后续生成工具的边界与验收；尚非已实现功能 |
 | [外部 Agent 后端计划](external-agents-plan.md) | Codex 等后端的协议、权限和生命周期接入约束；尚待实现 |

@@ -172,14 +172,14 @@ async def interactive_chat(identity, *, session_id=None, binding=None, machine=N
                 command, _, argument = text.partition(" ")
                 if command in {"/quit", "/q", "/exit"}: break
                 if command == "/help":
-                    console.print("/link /status /git /files [path] /read <path> /skills /agents /model list|status|use N\n/permission ask|full /collaboration solo|auto|ultra /thinking enabled|disabled /effort LEVEL\n/sandbox host|workspace /plan on|off /continue /quit", markup=False); continue
+                    console.print("/link /status /git /summary [all] /files [path] /read <path> /skills /agents /model list|status|use N\n/permission ask|full /collaboration solo|auto|ultra /thinking enabled|disabled /effort LEVEL\n/sandbox host|workspace /plan on|off /continue /quit", markup=False); continue
                 if command == "/link":
                     from xuloom.features.chat_links import remote_chat_link
                     console.print(remote_chat_link(connection["profile"], session_id), markup=False, soft_wrap=True); continue
                 if command == "/plan":
                     if argument not in {"on", "off"}: raise ValueError("Use /plan on|off")
                     plan = argument == "on"; continue
-                methods = {"/status": ("session.status", {"sessionId": session_id}), "/git": ("git.status", {}),
+                methods = {"/summary": ("session.summary", {"all": argument == "all"}), "/status": ("session.status", {"sessionId": session_id}), "/git": ("git.status", {}),
                     "/files": ("files.list", {"path": argument}), "/read": ("files.read", {"path": argument}),
                     "/agents": ("agents.list", {}), "/skills": ("capabilities.list", {}),
                     "/permission": ("permissions.set", {"mode": argument}), "/collaboration": ("collaboration.set", {"mode": argument}),

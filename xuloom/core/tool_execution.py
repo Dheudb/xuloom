@@ -296,6 +296,11 @@ async def execute_tool(self, tool_block, sys_print_callback=print, *, turn: int 
     current = [row for row in self.recent_tool_activity if row.get("user_turn_id") == user_turn_id]
     older = [row for row in self.recent_tool_activity if row.get("user_turn_id") != user_turn_id]
     self.recent_tool_activity = current + older[:12]
+    from xuloom.features.session_summary import record_receipt
+    record_receipt(self.artifact_tracker.references,
+        turn_id=(self.tool_context.get("delegation") or {}).get("owner_turn_id") or user_turn_id,
+        agent_id=self.agent_id, tool_name=tool_name, tool_use_id=tool_id,
+        result=raw_result, status=status)
     self.session_memory_manager.record_tool_call()
     self._sync_message_context()
     if not self.persist_session_state():
