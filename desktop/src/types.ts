@@ -138,6 +138,7 @@ export type Worker = {
   backend?: "native" | "claude" | "pi";
   executor?: string;
   outcome_unknown?: boolean;
+  external_recovery?: { resumable: boolean; reason: string } | null;
   pending_message_count?: number;
   remote_reference?: { url: string; host: string; cwd: string; machine: string; session_id: string; connection_id: string };
   agent_id: string;

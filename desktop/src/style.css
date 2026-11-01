@@ -1126,6 +1126,9 @@ body.panel-resizing iframe { pointer-events: none; }
   border-radius: 3px;
   padding: 0 4px;
 }
+.worker-meta { align-items: center; }
+.worker-model { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.worker-status { flex-shrink: 0; white-space: nowrap; }
 .switch {
   width: 25px;
   min-width: 25px;

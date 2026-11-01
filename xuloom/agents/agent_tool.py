@@ -356,6 +356,7 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
         sub_engine.tool_context["delegation"]["system_prompt"] = sub_engine.tool_context["agent_system_prompt"]
         user_input_text = task
         completed = False
+        from xuloom.agents.external.runtime import recovery_status
         registry_record = {"agent_id": child_agent_id}
         sub_engine.tool_context["checkpoint_model_budget"] = lambda: self._write_subagent_registry_record(registry_record)
 
@@ -419,12 +420,14 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
                 if not saved:
                     receipt.update(status="crashed", ok=False, persisted=False, reason="persistence_error")
             payload = {"task": task, "agent_id": child_agent_id, "agent_role": effective_role,
-                       "status": receipt["status"], "phase": receipt["status"], "result": res.text, "receipt": receipt}
+                       "status": receipt["status"], "phase": receipt["status"], "result": res.text, "receipt": receipt,
+                       "external_recovery": recovery_status(sub_engine.tool_context.get("external_agent")) if not receipt["ok"] else None}
             await self._write_subagent_registry_record({**registry_record, **payload, "finished_at": int(time.time() * 1000)})
             completed = receipt["ok"]
             return payload
         except asyncio.CancelledError:
-            await self._write_subagent_registry_record({"agent_id": child_agent_id, "status": "cancelled", "finished_at": int(time.time() * 1000)})
+            await self._write_subagent_registry_record({"agent_id": child_agent_id, "status": "cancelled", "finished_at": int(time.time() * 1000),
+                "external_recovery": recovery_status(sub_engine.tool_context.get("external_agent"))})
             raise
         except Exception as e:
             receipt = {"status": "crashed", "ok": False, "persisted": False, "reason": "persistence_error" if isinstance(e, OSError) else "execution_error"}
@@ -448,6 +451,7 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
                 "status": "crashed",
                 "receipt": receipt,
                 "result": str(e),
+                "external_recovery": recovery_status(sub_engine.tool_context.get("external_agent")),
                 "finished_at": int(time.time() * 1000),
             })
             return {

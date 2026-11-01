@@ -148,7 +148,9 @@ class AgentLifecycle:
             current = self._worker(agent_id)
             if current.get("status") not in {"cancelled", "completed", "crashed", "closed"} and not current.get("outcome_unknown"):
                 await self._write_subagent_registry_record({"agent_id": agent_id, "status": "cancelled", "finished_at": int(time.time() * 1000)})
-            return encode({"agent_id": agent_id, "status": self._worker(agent_id)["status"], "executing": False})
+            current = self._worker(agent_id)
+            return encode({"agent_id": agent_id, "status": current["status"], "executing": False,
+                **({"external_recovery": current["external_recovery"]} if current.get("external_recovery") else {})})
         if action == "close":
             if running:
                 raise ValueError("Cannot close a running worker; cancel or wait first")
@@ -200,7 +202,7 @@ class AgentLifecycle:
         from xuloom.agents.collaboration import admit
         admit(self.context, 1)
         record = {**row, "status": "running", "phase": "starting", "finished_at": None,
-                  "turn": row.get("turn", 1) + 1, "background": run_in_background}
+                  "turn": row.get("turn", 1) + 1, "background": run_in_background, "external_recovery": None}
         from xuloom.features.session_summary import human_turn
         record["owner_turn_id"] = (self.context.get("delegation") or {}).get("owner_turn_id") or human_turn(self.context.get("messages", []))
         record.update(status="queued", phase="queued", queued_at=int(time.time() * 1000), started_at=None,

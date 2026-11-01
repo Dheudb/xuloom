@@ -1,6 +1,8 @@
 """Shared external worker binding and checkpoints, using the native execution record."""
 import asyncio
 import copy
+import hashlib
+import json
 from types import SimpleNamespace
 import uuid
 
@@ -13,6 +15,25 @@ class ExternalExecutionError(RuntimeError):
     def __init__(self, reason, message):
         super().__init__(message)
         self.reason = reason
+
+
+def tool_result_digest(content, is_error):
+    """Match owned MCP receipts to external history without storing a second result."""
+    normalized = []
+    for block in content:
+        if block.get("type") == "text":
+            normalized.append({"type": "text", "text": block["text"]})
+        elif block.get("type") == "image":
+            normalized.append({"type": "image", "data": block["data"], "mimeType": block["mimeType"]})
+        else:
+            raise ValueError("External history contains unsupported tool content")
+    return hashlib.sha256(json.dumps([normalized, bool(is_error)], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def recovery_status(state):
+    if not state: return None
+    confirmed = state.get("phase") == "idle" and state.get("has_session") is True
+    return {"resumable": confirmed, "reason": "confirmed_checkpoint" if confirmed else state.get("stop_error", "external_outcome_unknown")}
 
 
 def configure(engine, definition):
@@ -45,6 +66,10 @@ def restore(engine, metadata):
             raise ValueError("Invalid external session identity")
         if type(state.get("message_cursor")) is not int or state["message_cursor"] < 0:
             raise ValueError("Invalid external message checkpoint")
+        if any(key in state for key in ("history_sha256", "history_offset", "entry_cursor")):
+            digest = state.get("history_sha256", "")
+            if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest) or type(state.get("history_offset")) is not int or state["history_offset"] <= 0 or not isinstance(state.get("entry_cursor"), str) or not state["entry_cursor"]:
+                raise ValueError("Invalid external history checkpoint")
         engine.tool_context["external_agent"] = state
     else:
         engine.tool_context.pop("external_agent", None)
@@ -89,6 +114,8 @@ async def prepare(engine, *, system_prompt, api_messages, model_name):
     home.mkdir(parents=True, exist_ok=True)
     atomic_text(home / "instructions.txt", system_prompt)
     state.pop("result", None)
+    state.pop("stop_checkpoint", None)
+    state.pop("stop_error", None)
     state.update(phase="running", message_cursor=len(engine.messages))
     return {"state": state, "home": home, "content": content}
 

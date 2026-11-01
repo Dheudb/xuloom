@@ -13,7 +13,7 @@ import unittest
 from unittest.mock import patch
 
 import httpx
-from xuloom.agents.external.runtime import configure, restore
+from xuloom.agents.external.runtime import restore
 from xuloom.agents.external.host import LocalHost, SOURCE_ID
 from xuloom.agents.external.program import environment, resolve
 from xuloom.core.engine import QueryEngine
@@ -32,6 +32,7 @@ class ExternalFixture(unittest.IsolatedAsyncioTestCase):
         self.root = Path(self.temp.name)
         self.env = patch.dict(os.environ, {"HOME": str(self.root), "USERPROFILE": str(self.root),
             "XULOOM_CONFIG_DIR": str(self.root / "config"), "XULOOM_DATA_DIR": str(self.root / "data"),
+            "XULOOM_SKILLS_PATHS": "",
             "HTTP_PROXY": "", "HTTPS_PROXY": "", "ALL_PROXY": "", "NO_PROXY": "*"})
         self.env.start()
         self.config = patch("xuloom.core.config.CONFIG_FILE", self.root / "config.json"); self.config.start()
@@ -44,6 +45,8 @@ class ExternalFixture(unittest.IsolatedAsyncioTestCase):
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 fixture.records.append({"body": body, "headers": {k.lower(): v for k, v in self.headers.items()}})
+                custom = getattr(fixture, "parent_handler", None)
+                if custom is not None and custom(self, body): return
                 if fixture.mode == "hold": fixture.release.wait(20)
                 if self.path.endswith("/chat/completions"):
                     finished = any(message.get("role") == "tool" for message in body["messages"])
@@ -73,9 +76,13 @@ class ExternalFixture(unittest.IsolatedAsyncioTestCase):
                     except OSError: pass
                     return
                 finished = any(isinstance(m.get("content"), list) and any(b.get("type") == "tool_result" for b in m["content"]) for m in body["messages"])
+                writing = fixture.mode == "hold_after_write"
+                if fixture.mode in {"hold_after_tool", "hold_after_write"} and finished: fixture.release.wait(20)
                 block = {"type": "text", "text": ""} if finished else {"type": "tool_use", "id": "toolu_contract", "name": "mcp__xuloom__file_read_tool", "input": {}}
+                if writing and not finished: block["name"] = "mcp__xuloom__file_write_tool"
                 if fixture.mode == "builtin": block["name"] = "Bash"
                 delta = {"type": "text_delta", "text": "CONTROLLED_RESULT"} if finished else {"type": "input_json_delta", "partial_json": json.dumps({"file_path": "evidence.png" if fixture.mode == "image" else "evidence.txt"})}
+                if writing and not finished: delta["partial_json"] = json.dumps({"file_path": "created-once.txt", "content": "CREATED_ONCE"})
                 start = {"id": "msg_contract", "type": "message", "role": "assistant", "model": MODEL, "content": [], "stop_reason": None, "stop_sequence": None, "usage": {"input_tokens": 12, "output_tokens": 0}}
                 events = [{"type": "message_start", "message": start}, {"type": "content_block_start", "index": 0, "content_block": block},
                     {"type": "content_block_delta", "index": 0, "delta": delta}, {"type": "content_block_stop", "index": 0},
@@ -184,6 +191,68 @@ class OpenAIHostTests(ExternalFixture):
 
 @unittest.skipUnless(MCP, "optional MCP runtime not installed")
 class ExternalHostTests(ExternalFixture):
+    async def test_exit_closes_model_and_mcp_admission_before_vendor_handshake(self):
+        from mcp.client.streamable_http import streamable_http_client
+        from mcp import ClientSession
+        engine = self.engine(); state = self.state(engine)
+        host = await LocalHost(engine, state).__aenter__()
+        entered, release = asyncio.Event(), asyncio.Event()
+        async def handshake():
+            entered.set(); await release.wait()
+        host.on_interrupt = handshake
+        await host.grant_tool({"name": "mcp__xuloom__file_read_tool", "id": "exit_guard", "input": {"file_path": "evidence.txt"}})
+        closing = asyncio.create_task(host.__aexit__(asyncio.CancelledError, asyncio.CancelledError(), None))
+        try:
+            await asyncio.wait_for(entered.wait(), 5)
+            async with httpx.AsyncClient(trust_env=False) as http:
+                result = await http.post(host.url + "/v1/messages", json=self.request(), headers={"x-api-key": host.token})
+                self.assertEqual(result.status_code, 409)
+            async with httpx.AsyncClient(headers={"Authorization": "Bearer " + host.token}, trust_env=False) as transport, streamable_http_client(host.url + "/mcp", http_client=transport) as (read, write, _):
+                async with ClientSession(read, write) as client:
+                    await client.initialize()
+                    result = await client.call_tool("file_read_tool", {"file_path": "evidence.txt", SOURCE_ID: "exit_guard"})
+                    self.assertTrue(result.isError)
+            self.assertFalse(self.records)
+            self.assertFalse(engine.recent_tool_activity)
+        finally:
+            release.set(); await closing
+
+    async def test_stop_closes_admission_for_a_mutation_already_waiting_at_native_gate(self):
+        from mcp.client.streamable_http import streamable_http_client
+        from mcp import ClientSession
+        engine = self.engine(); write = engine.available_tools["file_write_tool"]; state = self.state(engine)
+        engine.available_tools["file_write_tool"] = write
+        execute, release, queued = write.execute, asyncio.Event(), asyncio.Event()
+        async def held(**values):
+            await release.wait()
+            return await execute(**values)
+        write.execute = held
+        async with LocalHost(engine, state) as host:
+            values = [{"file_path": str(self.root / name), "content": name} for name in ("one.txt", "two.txt")]
+            for i, arguments in enumerate(values):
+                await host.grant_tool({"name": "mcp__xuloom__file_write_tool", "id": "stop_" + str(i), "input": arguments})
+            acquire, entered = asyncio.Lock.acquire, 0
+            async def observed(lock):
+                nonlocal entered
+                if lock is host.execution_lock:
+                    entered += 1
+                    if entered == 2: queued.set()
+                return await acquire(lock)
+            async with httpx.AsyncClient(headers={"Authorization": "Bearer " + host.token}, trust_env=False) as transport, streamable_http_client(host.url + "/mcp", http_client=transport) as (read, stream, _):
+                async with ClientSession(read, stream) as client:
+                    await client.initialize()
+                    with patch.object(asyncio.Lock, "acquire", observed):
+                        first = asyncio.create_task(client.call_tool("file_write_tool", {**values[0], SOURCE_ID: "stop_0"}))
+                        second = asyncio.create_task(client.call_tool("file_write_tool", {**values[1], SOURCE_ID: "stop_1"}))
+                        await asyncio.wait_for(queued.wait(), 5)
+                        host.stopping = True; release.set()
+                        results = await asyncio.gather(first, second)
+            self.assertFalse(results[0].isError)
+            self.assertTrue(results[1].isError)
+            self.assertTrue((self.root / "one.txt").is_file())
+            self.assertFalse((self.root / "two.txt").exists())
+            self.assertEqual(host.started_calls, {"stop_0"})
+
     async def test_concurrent_external_mutations_use_the_same_serial_native_boundary(self):
         from mcp.client.streamable_http import streamable_http_client
         from mcp import ClientSession

@@ -24,6 +24,8 @@ class LocalHost:
         self.token = uuid.uuid4().hex + uuid.uuid4().hex
         self.tasks, self.calls = set(), {}
         self.execution_lock = asyncio.Lock()
+        self.stopping, self.on_interrupt = False, None
+        self.started_calls, self.receipts = set(), {}
         self.failure = None
         self.failed = asyncio.Event()
         self.usage = {name: 0 for name in ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")}
@@ -86,14 +88,17 @@ class LocalHost:
             expected = self.calls.get(identity)
             if expected is None or expected != (name, values) or name not in self.tools():
                 raise ValueError("This tool invocation has no matching owned model call")
-            if self.engine.abort_event.is_set():
+            if self.stopping or self.engine.abort_event.is_set():
                 raise ValueError("The owning execution has stopped")
             # External MCP calls do not pass through the native batch partitioner.
             # Serialize this boundary so mutations and duplicate transports cannot race.
             async with self.execution_lock:
+                if self.stopping or self.engine.abort_event.is_set():
+                    raise ValueError("The owning execution has stopped")
                 before = set(self.tools())
                 try:
                     with self.budgets():
+                        self.started_calls.add(identity)
                         result = await self.engine._execute_tool_wrapper({"id": "external-" + identity,
                             "name": name, "input": values}, lambda _: None, turn=self.turn, event_callback=self.callback)
                 except PersistenceError:
@@ -109,6 +114,8 @@ class LocalHost:
                     raise ValueError("External tool content is not supported; the operation was not replayed")
             if before != set(self.tools()):
                 await self.mcp.request_context.session.send_tool_list_changed()
+            from .runtime import tool_result_digest
+            self.receipts[identity] = (name, tool_result_digest([item.model_dump() for item in content], result.get("is_error", False)))
             return types.CallToolResult(content=content, isError=result.get("is_error", False))
 
         manager = StreamableHTTPSessionManager(self.mcp, json_response=False, stateless=False,
@@ -149,7 +156,16 @@ class LocalHost:
         await self.__aexit__(None, None, None)
         raise RuntimeError("External tool host startup timed out")
 
-    async def __aexit__(self, *_):
+    async def __aexit__(self, exception_type, exception, traceback):
+        self.stopping = True
+        storage_error = None
+        if isinstance(exception, asyncio.CancelledError) and self.on_interrupt is not None:
+            try:
+                await asyncio.wait_for(self.on_interrupt(), 10)
+            except PersistenceError as error:
+                storage_error = error
+            except (Exception, asyncio.CancelledError):
+                pass  # No confirmed checkpoint: the sampler retains outcome_unknown.
         tasks = list(self.tasks)
         for task in tasks: task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -161,6 +177,7 @@ class LocalHost:
             raise RuntimeError("External tool host cleanup could not be confirmed")
         finally:
             self.socket.close()
+        if storage_error is not None: raise storage_error
 
     async def payload(self, request, protocol="anthropic"):
         data = bytearray()
@@ -210,7 +227,7 @@ class LocalHost:
 
     async def count_tokens(self, request):
         try:
-            if self.engine.model_provider != "anthropic" or self.failure or self.engine.abort_event.is_set():
+            if self.engine.model_provider != "anthropic" or self.failure or self.stopping or self.engine.abort_event.is_set():
                 raise ValueError("Token counting is unavailable for this owned execution")
             value = await self.payload(request)
             model, messages = value.pop("model"), value.pop("messages")
@@ -228,7 +245,7 @@ class LocalHost:
 
     async def relay(self, request, protocol):
         from starlette.responses import StreamingResponse
-        if self.failure or self.engine.abort_event.is_set():
+        if self.failure or self.stopping or self.engine.abort_event.is_set():
             return self.failure_response(409, "The owning execution has stopped; no new model request was permitted")
         try:
             if self.engine.model_provider != protocol: raise ValueError("Changed provider protocol")

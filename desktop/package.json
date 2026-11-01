@@ -1,6 +1,6 @@
 {
   "name": "xuloom-desktop",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "private": true,
   "type": "module",
   "description": "Xuloom desktop workbench",
@@ -26,6 +26,7 @@
     "test:models": "node tests/models.e2e.cjs",
     "test:permissions": "node tests/permissions.e2e.cjs",
     "test:subagents": "node tests/subagents.e2e.cjs",
+    "test:external-recovery": "node tests/external-recovery.e2e.cjs",
     "test:framework": "node tests/framework.e2e.cjs",
     "test:summary": "node tests/summary.e2e.cjs",
     "test:media": "node tests/media.e2e.cjs",

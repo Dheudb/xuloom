@@ -7,8 +7,9 @@ import uuid
 from xuloom.core.run_result import PersistenceError
 from xuloom.core.storage import atomic_text, IOPath, logical_path
 from .host import LocalHost, LIMIT
-from .program import environment
+from .program import environment, _hash
 from .runtime import ExternalExecutionError, prepare, cleanup, response
+from .pi_history import current_messages, verify_file, verify_receipts
 
 
 async def sample(engine, *, system_prompt, api_messages, turn_count, model_name, max_tokens,
@@ -20,6 +21,13 @@ async def sample(engine, *, system_prompt, api_messages, turn_count, model_name,
     binding = engine.tool_context["external_backend"]
     models_path, mcp_path = home / "config/models.json", home / "config/mcp.json"
     process, tasks, pending, settled = None, [], {}, asyncio.Queue()
+    def owned_history(value):
+        if not isinstance(value, str) or not value:
+            raise ExternalExecutionError("external_session_missing", "The external session history reference is missing")
+        path = logical_path(IOPath(value).resolve())
+        if not path.is_relative_to(logical_path(IOPath(home / "sessions").resolve())):
+            raise ExternalExecutionError("external_history_changed", "External history points outside its owned session directory; it was not read")
+        return path
     try:
         async with LocalHost(engine, state, event_callback=event_callback, turn=turn_count) as host:
             host.maximum = max_tokens
@@ -42,12 +50,19 @@ async def sample(engine, *, system_prompt, api_messages, turn_count, model_name,
                     "maxTokens": max_tokens, "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}}]}}}))
             atomic_text(mcp_path, json.dumps({"autoEnableCodemode": False, "mcpServers": {"xuloom": {"url": host.url + "/mcp",
                 "headers": {"Authorization": "Bearer " + host.token}, "exposure": "direct"}}}))
-            if state["has_session"] and (not state.get("session_file") or not IOPath(state["session_file"]).is_file()):
-                raise ExternalExecutionError("external_session_missing", "The external session checkpoint is missing; a blank conversation was not created")
+            if state["has_session"]:
+                saved_file = owned_history(state.get("session_file"))
+                if not IOPath(saved_file).is_file():
+                    raise ExternalExecutionError("external_session_missing", "The external session checkpoint is missing; a blank conversation was not created")
+                if state.get("history_sha256") and _hash(IOPath(saved_file)) != state["history_sha256"]:
+                    raise ExternalExecutionError("external_history_changed", "External history changed after its confirmed checkpoint; the task was not replayed")
             env = environment(home)
             env.update(HTTP_PROXY=host.url, HTTPS_PROXY=host.url, NO_PROXY="127.0.0.1,localhost,::1")
+            # Resume the verified file explicitly. Pi's project-ID lookup can miss
+            # the same Windows directory when a new CLI uses its long-path form.
+            session_args = ["--session", str(saved_file)] if state["has_session"] else ["--session-id", state["session_id"]]
             args = [binding["runtime"], binding["program"], "--mode", "rpc", "--provider", "xuloom", "--model", model_name,
-                "--session-id", state["session_id"], "--session-dir", str(home / "sessions"), "--no-extensions", "-e", "builtin:mcp",
+                *session_args, "--session-dir", str(home / "sessions"), "--no-extensions", "-e", "builtin:mcp",
                 "--no-builtin-tools", "--tools", "mcp__xuloom__*", "--no-approve", "--no-context-files", "--no-skills", "--no-prompt-templates", "--no-themes",
                 "--offline", "--system-prompt", str(home / "instructions.txt")]
             args.extend(["--thinking", thinking])
@@ -78,7 +93,8 @@ async def sample(engine, *, system_prompt, api_messages, turn_count, model_name,
                     while chunk := await process.stderr.read(65536): transcript.write(chunk)
                     transcript.flush(); os.fsync(transcript.fileno())
             reader = asyncio.create_task(read_output())
-            tasks.extend([reader, asyncio.create_task(read_error())])
+            error_reader = asyncio.create_task(read_error())
+            tasks.extend([reader, error_reader])
             async def rpc(kind, **values):
                 identity = uuid.uuid4().hex; future = asyncio.get_running_loop().create_future(); pending[identity] = future
                 try:
@@ -94,13 +110,14 @@ async def sample(engine, *, system_prompt, api_messages, turn_count, model_name,
                     raise ExternalExecutionError("protocol_error", "External RPC changed its frozen session/model")
                 if snapshot.get("isStreaming") or snapshot.get("isCompacting") or snapshot.get("pendingMessageCount") != 0:
                     raise ExternalExecutionError("protocol_error", "External session is not idle")
-                path = logical_path(IOPath(snapshot.get("sessionFile", "")).resolve())
-                if not path.is_relative_to((home / "sessions").resolve()):
-                    raise ExternalExecutionError("protocol_error", "External RPC changed its owned history directory")
-                return str(path)
+                return str(owned_history(snapshot.get("sessionFile")))
             initial = await rpc("get_state"); session_file = validate(initial)
-            if state["has_session"] and (state["session_file"] != session_file or initial.get("messageCount", 0) < state.get("message_count", 0)):
+            if state["has_session"] and (saved_file != owned_history(session_file) or initial.get("messageCount", 0) != state.get("message_count", 0)):
                 raise ExternalExecutionError("external_session_missing", "External history was replaced or lost; the task was not replayed")
+            base_cursor = state.get("entry_cursor")
+            cursor_args = {"since": base_cursor} if base_cursor else {}
+            initial_export = await rpc("get_entries", **cursor_args)
+            initial_leaf = initial_export["leafId"]
             if not settled.empty(): raise ExternalExecutionError("protocol_error", "External run settled without an owned prompt")
             texts, images = [], []
             for block in content:
@@ -113,24 +130,70 @@ async def sample(engine, *, system_prompt, api_messages, turn_count, model_name,
                 raise ExternalExecutionError("protocol_error", "External task did not start in its owned idle session")
             waiting = asyncio.create_task(settled.get()); stopped = asyncio.create_task(engine.abort_event.wait()); failed = asyncio.create_task(host.failed.wait())
             tasks.extend([waiting, stopped, failed])
+
+            async def checkpoint_history(interrupted=False):
+                after = await rpc("get_state"); session_file = validate(after)
+                exported = await rpc("get_entries", **cursor_args)
+                messages = current_messages(exported, initial_leaf, base_cursor)
+                if not any(message.get("role") == "user" for message in messages):
+                    raise ExternalExecutionError("external_outcome_unknown", "External history did not retain its owned prompt")
+                verify_receipts(host, messages)
+                if host.failure: raise ExternalExecutionError(host.failure, "External execution has an unresolved provider or tool failure")
+                last = messages[-1]
+                if not interrupted and (last.get("role") != "assistant" or last.get("stopReason") != "stop"):
+                    raise ExternalExecutionError("external_execution_error", "External agent settled without a successful final assistant message")
+                text = "\n".join(block["text"] for block in last.get("content", []) if block.get("type") == "text") if not interrupted else ""
+                # The stopped RPC process can no longer append after this fingerprint.
+                if process.returncode is None: process.kill()
+                await process.wait()
+                await asyncio.wait_for(asyncio.gather(reader, error_reader), 5)
+                proof = verify_file(session_file, state, exported)
+                state.update(**proof, phase="idle", has_session=True, session_file=session_file, message_count=after["messageCount"])
+                if interrupted:
+                    state["stop_checkpoint"] = {"confirmed": True, "reason": "owner_cancelled", "tool_ids": sorted(host.receipts)}
+                else: state["result"] = text
+                try:
+                    await host.checkpoint()
+                except BaseException:
+                    state["phase"] = "interrupted"
+                    state.pop("stop_checkpoint", None)
+                    raise
+                return text
+
+            async def confirm_stop():
+                if state["phase"] != "running": return
+                host.stopping = True
+                try:
+                    cleared = await rpc("clear_queue")
+                    if not isinstance(cleared, dict) or cleared.get("steering") != [] or cleared.get("followUp") != []:
+                        raise ExternalExecutionError("external_outcome_unknown", "External queued messages were not owned by this run")
+                    await rpc("abort")
+                    await asyncio.shield(waiting)
+                    # Settle outstanding provider reservations and drain the native tool gate.
+                    active = list(host.tasks)
+                    for task in active: task.cancel()
+                    await asyncio.gather(*active, return_exceptions=True)
+                    async with host.execution_lock:
+                        await checkpoint_history(interrupted=True)
+                except BaseException as error:
+                    state["stop_error"] = getattr(error, "reason", "stop_checkpoint_unconfirmed")
+                    state["phase"] = "interrupted"
+                    state.pop("stop_checkpoint", None)
+                    raise
+
+            host.on_interrupt = confirm_stop
             done, _ = await asyncio.wait({waiting, reader, stopped, failed}, return_when=asyncio.FIRST_COMPLETED)
             if stopped in done:
-                await rpc("clear_queue"); await rpc("abort")
+                await asyncio.wait_for(confirm_stop(), 10)
                 raise AbortRequestedError("External execution was stopped by its owner")
             if failed in done: raise ExternalExecutionError(host.failure, "External execution stopped: " + host.failure)
             if waiting not in done:
                 await reader
                 raise ExternalExecutionError("external_process_exited", "External RPC exited before final idle")
             final = waiting.result()
-            after = await rpc("get_state"); session_file = validate(after)
-            messages = (await rpc("get_messages"))["messages"]
-            last = messages[-1] if messages else {}
-            if final.get("aborted") is not False or last.get("role") != "assistant" or last.get("stopReason") != "stop":
+            if final.get("aborted") is not False:
                 raise ExternalExecutionError("external_execution_error", "External agent settled without a successful final assistant message")
-            text = "\n".join(block["text"] for block in last.get("content", []) if block.get("type") == "text")
-            if host.failure: raise ExternalExecutionError(host.failure, "External provider/tool execution failed")
-            state.update(phase="idle", has_session=True, result=text, session_file=session_file, message_count=after["messageCount"])
-            await host.checkpoint()
+            text = await checkpoint_history()
             return response(text, host.usage), [], False
     except (asyncio.CancelledError, AbortRequestedError, PersistenceError, ExternalExecutionError):
         raise

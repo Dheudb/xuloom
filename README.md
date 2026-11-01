@@ -35,7 +35,7 @@ Xuloom 支持 **OpenAI 兼容 Chat Completions** 和 **Anthropic Messages**。�
 
 **原生分布式子代理：** 在 **设置 → Subagents → 新建** 选择执行位置（本机或已配置 SSH 主机）、对应主机的模型连接及模型。角色仍由现有队列派发，支持跟进、消息、结果和拥有者确认的取消；无后台命令的已完成 worker 会释放 SSH 连接。远端历史和文件可以从代理卡片打开，受控历史不能绕过主会话执行。App 与 CLI 共用角色文件，执行主机需安装兼容的 v0.1.6 worker 协议；不会复制本机模型凭据或 Skill 文件。详见 [分布式子代理](docs/distributed-workers-plan.md)。
 
-可选的 [Claude Code / Pi 后端](docs/external-agents.md) 可使用用户已安装 CLI，继续走 Xuloom 的原生队列、工具授权和中央历史。Claude 使用 Anthropic Messages；Pi 支持 Anthropic Messages 和 OpenAI Chat。Codex、DSH 外部后端及外部 CLI 经 SSH 的组合仍在 [持续目标](docs/product-roadmap.md) 中，不能把原生 SSH worker 当成所有后端已验收。
+可选的 [Claude Code / Pi 后端](docs/external-agents.md) 可使用用户已安装 CLI，继续走 Xuloom 的原生队列、工具授权和中央历史。Claude 使用 Anthropic Messages；Pi 支持 Anthropic Messages 和 OpenAI Chat。Pi 主动停止在回执与历史确认后可通过同一 worker 明确续聊，未知结果不会自动重放，见 [停止与恢复边界](docs/external-agents.md#续聊停止与边界)。Codex、DSH 外部后端及外部 CLI 经 SSH 的组合仍在 [持续目标](docs/product-roadmap.md) 中，不能把原生 SSH worker 当成所有后端已验收。
 
 ## 图片、视频、语音与音乐
 

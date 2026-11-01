@@ -248,9 +248,9 @@ export default function CapabilityPanel({
                           <span className={"status-dot " + worker.status} />
                         </div>
                         <p>{worker.task}</p>
-                        <div className="card-meta">
-                          <span>{worker.agent_type || "子代理"}{worker.backend === "claude" ? " · Claude Code" : worker.backend === "pi" ? " · Pi" : ""} · {worker.model || (worker.executor?.startsWith("ssh:") ? "执行主机默认模型" : "继承主模型")}</span>
-                          <span>
+                        <div className="card-meta worker-meta">
+                          <span className="worker-model" title={worker.model}>{worker.agent_type || "子代理"}{worker.backend === "claude" ? " · Claude Code" : worker.backend === "pi" ? " · Pi" : ""} · {worker.model || (worker.executor?.startsWith("ssh:") ? "执行主机默认模型" : "继承主模型")}</span>
+                          <span className="worker-status">
                             {worker.outcome_unknown ? "结果待确认" : worker.status === "queued" ? worker.phase === "awaiting_resume" ? "等待恢复队列" : "排队中" : worker.status === "running"
                               ? worker.phase === "starting" ? "启动中" : "执行中"
                               : worker.status === "completed"
@@ -262,6 +262,7 @@ export default function CapabilityPanel({
                         </div>
                         {worker.started_at && <div className="card-meta"><span>启动 {new Date(worker.started_at).toLocaleTimeString("zh-CN", { hour12: false })}</span></div>}
                         {!!worker.pending_message_count && <p className="fine-print">{worker.pending_message_count} 条消息待处理{worker.status !== "running" && " · 请在主会话继续此代理"}</p>}
+                        {worker.external_recovery && <p className="fine-print">{worker.external_recovery.resumable ? "停止已确认，可在主会话继续此代理。" : "停止结果尚未确认，请先核对已有产物，不会自动重放。"}</p>}
                         {worker.remote_reference && <div className="card-meta" title={worker.remote_reference.cwd}><span>SSH · {worker.remote_reference.machine || worker.remote_reference.host}</span><button className="text-button" onClick={() => onNavigateChat(worker.remote_reference!.url)}>查看远端历史与文件</button></div>}
                         {worker.status === "queued" && worker.phase === "awaiting_resume" && <button className="text-button" disabled={session.busy}
                           onClick={() => invoke("agents.resume_queue", { agentIds: [worker.agent_id] }).then(refresh).catch(onError)}>恢复排队</button>}
