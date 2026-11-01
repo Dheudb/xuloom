@@ -141,3 +141,5 @@ Git 分支/状态的桌面与 CLI 共用只读查询，包含空仓库、detache
 原安装构建 **20261101-161929** 的摘要与完整 SSH 工作台通过；包内 Python/CLI/MCP **34 项通过，109.466 秒**。显式验证导入来自安装目录，CLI 子进程在非源码目录运行且不带源码 PYTHONPATH。138 个公开 Python/技能文件、16 个 Electron 文件、62 个前端文件与源码逐字节一致。仅一个 `xuloom-0.1.4.dist-info`、九项公开内置 Skill，未加入 Paramiko、媒体 SDK 或新 EXE；原 EXE SHA256 保持 `2529b494f4123f152bce346051f7bd855ef95006424a561953cf17c49a3d1ba8`。
 
 私人 Taiyi 未读取、修改或打包。本轮不增加默认提示词与运行依赖；分布式派发、外部 CLI 后端、媒体生成及跨平台原生检查继续保留，当前不宣称全部目标完成。发布前证据与下载说明见 [v0.1.4](releases/v0.1.4.md)，实际公开状态须在上传核对后记录。
+
+2026-11-01 已发布 [v0.1.4](https://github.com/Dheudb/xuloom/releases/tag/v0.1.4)，源码/标签 `37274c22d91d9f24bf05d2c9c9c2b9dd2a4e67c9`。Windows ZIP 233,469,803 字节，SHA256 `538235bdd5f40594da4255cbed17dc84cf258a1abc464f492ea276fc95cae76d`；校验文件亦已上传。已通过匿名 GitHub API 核对 latest、非草稿/非预发布及资产摘要。上传前一次读取草稿发生 TLS EOF，重试只读取已有草稿并上传缺失资产，没有重复创建版本。旧 Release 保留，后续文档提交不改变本版来源绑定。
