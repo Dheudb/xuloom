@@ -54,8 +54,8 @@ async function checkLayout() {
   assert(result.scrollWidth <= result.viewport, "App must not overflow horizontally");
   assert(result.input.left >= result.main.left && result.input.right <= result.main.right, "Composer must stay within conversation");
   if (result.panel) {
-    assert.equal(result.tabs.length, 6);
-    assert(result.tabs.every((tab) => tab.left >= result.panel.left && tab.right <= result.panel.right), "All six panel tabs must fit");
+    assert.deepEqual(await page.locator('.panel-tabs button').allTextContents(), ['Skills', '代理', '活动', '变更', '文件']);
+    assert(result.tabs.every((tab) => tab.left >= result.panel.left && tab.right <= result.panel.right), "All panel tabs must fit");
     const overflow = await page.locator(".panel-tabs").evaluate(element => element.scrollWidth > element.clientWidth);
     assert.equal(overflow, false, "Tab labels must stay on a single row without clipping");
   }
@@ -100,7 +100,11 @@ async function checkLayout() {
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1100, 850));
     await checkLayout();
     await capture("appearance-chat-compact");
-    for (const [label, id] of [["文件", "files"], ["活动", "activity"], ["目标", "goals"]]) {
+    assert.equal(await page.getByRole('button', {name:'打开目标面板', exact:true}).count(), 0);
+    await page.getByRole('button', {name:'添加工具与模式', exact:true}).click();
+    await page.getByRole('menuitem', {name:/目标/}).waitFor();
+    await page.keyboard.press('Escape');
+    for (const label of ["文件", "活动"]) {
       await page.getByRole("button", { name: "打开" + label + "面板", exact: true }).click();
       assert.equal(await page.locator(".panel-tabs button.active").innerText(), label);
       assert.equal(await page.getByRole("button", { name: "打开" + label + "面板", exact: true }).getAttribute("aria-pressed"), "true");
@@ -120,6 +124,6 @@ async function checkLayout() {
     await page.getByRole("heading", { name: "开始一个新会话。", exact: true }).waitFor();
     await capture("appearance-welcome");
     assert.deepEqual(errors, []);
-    console.log("Appearance E2E passed: focused default, cool palette and consistent icon weight, 1440/1100 layouts, six single-row panel tabs, direct tools, Skill picker, three settings pages and welcome; screenshots saved");
+    console.log("Appearance E2E passed: focused default, cool palette and consistent icon weight, 1440/1100 layouts, five single-row panel tabs, composer goal entry without legacy side panel, direct tools, Skill picker, three settings pages and welcome; screenshots saved");
   } finally { if (app) await app.close().catch(() => {}); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

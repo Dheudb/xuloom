@@ -11,10 +11,11 @@ the agent cross-session continuity.
 """
 
 import asyncio
+import copy
 import hashlib
 import json
 import os
-from xuloom.core.storage import data_directory, migrate_user_file
+from xuloom.core.storage import atomic_text, data_directory, migrate_user_file
 import time
 from pathlib import Path
 from typing import Optional
@@ -54,13 +55,16 @@ class MemoryExtractor:
     Memory directory:  ~/.xuloom/projects/<project_hash>/memory/
     """
 
-    def __init__(self, compactor=None, project_dir: str = None):
+    def __init__(self, compactor=None, project_dir: str = None, on_update=None):
         self.compactor = compactor
+        self.on_update = on_update
         self.project_dir = project_dir or os.getcwd()
         self._last_extracted_msg_uuid: Optional[str] = None
         self._turns_since_last_extraction = 0
-        self._extraction_in_progress = False
-        self._extraction_lock = asyncio.Lock()
+        self._task = None
+        self._closed = False
+        self._generation = 0
+        self.last_error = None
         self._min_turns_between_extractions = 1
         self._memory_dir: Optional[str] = None
 
@@ -84,46 +88,58 @@ class MemoryExtractor:
         return self._turns_since_last_extraction >= self._min_turns_between_extractions
 
     async def maybe_extract(self, messages: list):
-        """Fire-and-forget extraction at turn end."""
-        if not self.should_extract():
+        """Schedule one owned extraction over a stable conversation snapshot."""
+        if self._closed or not self.should_extract():
             return
 
-        if self._extraction_in_progress:
+        if self._task is not None and not self._task.done():
             return
 
-        asyncio.ensure_future(self._run_extraction(messages))
+        self._task = asyncio.create_task(self._run_extraction(copy.deepcopy(messages),
+            self._turns_since_last_extraction, self._generation))
 
-    async def _run_extraction(self, messages: list):
-        if self._extraction_lock.locked():
-            return
+    def cancel_pending(self):
+        self._generation += 1
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
+            return self._task
 
-        async with self._extraction_lock:
-            self._extraction_in_progress = True
-            try:
-                new_messages = self._get_new_messages(messages)
-                if not new_messages:
-                    return
+    async def aclose(self):
+        self._closed = True
+        task = self.cancel_pending()
+        if task is not None:
+            await asyncio.gather(task, return_exceptions=True)
 
-                conversation = self._build_conversation_context(new_messages)
-                existing_manifest = self._scan_existing_memories()
-
-                memories = await self._call_llm_for_extraction(
-                    conversation, existing_manifest,
-                )
-
-                if memories:
-                    self._write_memories(memories)
-
-                self._turns_since_last_extraction = 0
-                if messages:
-                    last = messages[-1]
-                    if isinstance(last, dict) and last.get("_uuid"):
-                        self._last_extracted_msg_uuid = last["_uuid"]
-
-            except Exception:
-                pass
-            finally:
-                self._extraction_in_progress = False
+    async def _run_extraction(self, messages: list, turns: int, generation: int):
+        try:
+            new_messages = self._get_new_messages(messages)
+            if not new_messages:
+                return
+            conversation = self._build_conversation_context(new_messages)
+            existing_manifest = self._scan_existing_memories()
+            memories = await self._call_llm_for_extraction(conversation, existing_manifest)
+            if self._closed or generation != self._generation:
+                return
+            if memories is None:
+                self.last_error = "request_failed"
+                return
+            if memories:
+                self._write_memories(memories)
+            previous = self._turns_since_last_extraction, self._last_extracted_msg_uuid
+            self._turns_since_last_extraction = max(0, self._turns_since_last_extraction - turns)
+            if messages and isinstance(messages[-1], dict) and messages[-1].get("_uuid"):
+                self._last_extracted_msg_uuid = messages[-1]["_uuid"]
+            self.last_error = None
+            if self.on_update is not None:
+                try:
+                    saved = self.on_update()
+                except Exception:
+                    saved = False
+                if saved is False:
+                    self._turns_since_last_extraction, self._last_extracted_msg_uuid = previous
+                    self.last_error = "checkpoint_failed"
+        except Exception:
+            self.last_error = "extraction_failed"
 
     def _get_new_messages(self, messages: list) -> list:
         if self._last_extracted_msg_uuid is None:
@@ -198,9 +214,9 @@ class MemoryExtractor:
 
     async def _call_llm_for_extraction(
         self, conversation: str, existing_manifest: str,
-    ) -> list:
+    ) -> Optional[list]:
         if self.compactor is None or self.compactor.client is None:
-            return []
+            return None
 
         existing_section = ""
         if existing_manifest:
@@ -225,7 +241,7 @@ class MemoryExtractor:
             )).strip()
 
             if not raw:
-                return []
+                return None
 
             if raw.startswith("```"):
                 lines = raw.split("\n")
@@ -233,22 +249,23 @@ class MemoryExtractor:
 
             parsed = json.loads(raw)
             if not isinstance(parsed, list):
-                return []
+                return None
 
             valid = []
             for item in parsed:
-                if isinstance(item, dict) and item.get("title") and item.get("content"):
-                    valid.append(item)
+                if not isinstance(item, dict) or not isinstance(item.get("title"), str) or not item["title"].strip() or not isinstance(item.get("content"), str) or not item["content"].strip():
+                    return None
+                valid.append(item)
             return valid
 
         except Exception:
-            return []
+            return None
 
     def _write_memories(self, memories: list):
         os.makedirs(self.memory_dir, exist_ok=True)
 
         for mem in memories:
-            title = str(mem.get("title", "untitled"))
+            title = " ".join(str(mem.get("title", "untitled")).splitlines())
             content = str(mem.get("content", ""))
             mem_type = str(mem.get("type", "general"))
 
@@ -272,11 +289,7 @@ class MemoryExtractor:
                 f"{content}\n"
             )
 
-            try:
-                with open(filepath, "w", encoding="utf-8") as f:
-                    f.write(md_content)
-            except Exception:
-                pass
+            atomic_text(filepath, md_content)
 
         self._update_index()
 
@@ -284,12 +297,12 @@ class MemoryExtractor:
         """Check if an existing file matches the title (update in place)."""
         try:
             with open(filepath, "r", encoding="utf-8") as f:
-                for line in f:
+                for number, line in enumerate(f):
                     line = line.strip()
                     if line.startswith("title:"):
                         existing_title = line[6:].strip()
                         return existing_title.lower() == title.lower()
-                    if line == "---" and f.tell() > 5:
+                    if line == "---" and number > 0:
                         break
         except Exception:
             pass
@@ -320,13 +333,7 @@ class MemoryExtractor:
             return
 
         index_path = os.path.join(self.memory_dir, "MEMORY.md")
-        try:
-            with open(index_path, "w", encoding="utf-8") as f:
-                f.write("# Persistent Memories\n\n")
-                f.write("\n".join(entries))
-                f.write("\n")
-        except Exception:
-            pass
+        atomic_text(index_path, "# Persistent Memories\n\n" + "\n".join(entries) + "\n")
 
     @staticmethod
     def _slugify(text: str) -> str:
@@ -341,10 +348,12 @@ class MemoryExtractor:
             "last_extracted_msg_uuid": self._last_extracted_msg_uuid,
             "turns_since_last_extraction": self._turns_since_last_extraction,
             "memory_dir": self.memory_dir,
+            "last_error": self.last_error,
         }
 
     def load_state(self, state: dict):
-        if not state:
-            return
+        self.cancel_pending()
+        state = state or {}
         self._last_extracted_msg_uuid = state.get("last_extracted_msg_uuid")
         self._turns_since_last_extraction = state.get("turns_since_last_extraction", 0)
+        self.last_error = state.get("last_error") if state.get("last_error") in {"request_failed", "extraction_failed", "checkpoint_failed"} else None

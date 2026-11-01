@@ -207,7 +207,7 @@ export function SettingsDialog({
             } catch (e) { setError(String(e)); } finally { setDiscovering(false); }
           }}>{discovering ? "正在获取…" : "从 API 获取模型"}</button>
           {discoveryStatus && <span role="status">{discoveryStatus}</span>}</div>
-          <p className="fine-print">同一 API 的这些模型共用地址和 Key。当前模型会自动加入列表；可用列表和免费额度由提供方决定。</p>
+          <p className="fine-print">这些模型共用同一 API 地址和 Key，当前模型会自动加入列表。</p>
           <label>
             模型 ID
             <input

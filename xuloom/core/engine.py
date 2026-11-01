@@ -253,10 +253,12 @@ class QueryEngine:
         self.session_memory_manager = SessionMemoryManager(
             session_id=self.session_id,
             compactor=self.compactor,
+            on_update=lambda: self.persist_session_state(),
         )
         self.memory_extractor = MemoryExtractor(
             compactor=self.compactor,
             project_dir=self.session_cwd,
+            on_update=lambda: self.persist_session_state(),
         )
         self.file_state_cache = FileStateCache()
         self.artifact_tracker = ArtifactTracker()
@@ -451,6 +453,8 @@ class QueryEngine:
         self.reasoning_profile = next_profile
         self.reasoning_effort = None  # Per-model controls must not leak from the previous model.
         self._thinking_config_explicit = False
+        for manager in (self.session_memory_manager, self.memory_extractor):
+            manager.cancel_pending()
         self.client, self.compactor = next_client, next_compactor
         self._sync_model_runtime_context()
         if persist:
@@ -859,6 +863,8 @@ class QueryEngine:
 
     async def request_abort(self) -> bool:
         self.abort_event.set()
+        memory_jobs = [manager.cancel_pending() for manager in (self.session_memory_manager, self.memory_extractor)]
+        await asyncio.gather(*(task for task in memory_jobs if task is not None), return_exceptions=True)
         workers = self.tool_context.get("subagent_tasks")
         had_workers = bool(workers and any(not task.done() for task in workers.tasks.values()))
         if workers:
@@ -2590,6 +2596,8 @@ class QueryEngine:
     def load_session(self, sid: str) -> bool:
         if self.has_active_turn() or any(not task.done() for task in self.tool_context["subagent_tasks"].tasks.values()):
             raise SessionBusyError("Stop or finish owned work before loading another session")
+        for manager in (self.session_memory_manager, self.memory_extractor):
+            manager.cancel_pending()
         if self.agent_depth == 0 and sid != self.session_id:
             self.session_manager.release_writer(self.session_id)
         state = self.session_manager.load_session_state(sid)
@@ -2724,11 +2732,7 @@ class QueryEngine:
             })
             self.tool_context["token_usage_history"] = self.token_usage_history
             self.tool_context["session_token_usage"] = self.session_token_usage
-            self.session_memory_manager = SessionMemoryManager(
-                session_id=self.session_id,
-                compactor=self.compactor,
-            )
-            self.session_memory_manager.load_state(metadata.get("session_memory", {}))
+            self.session_memory_manager.bind_session(self.session_id, metadata.get("session_memory", {}))
             self.memory_extractor.load_state(metadata.get("memory_extractor", {}))
             self._update_compact_boundary()
             self._sync_message_context()
@@ -2863,6 +2867,7 @@ class QueryEngine:
             goal_task.cancel()
             await asyncio.gather(goal_task, return_exceptions=True)
         failures = await asyncio.gather(self.request_abort(), return_exceptions=True)
+        failures.extend(await asyncio.gather(self.session_memory_manager.aclose(), self.memory_extractor.aclose(), return_exceptions=True))
         stop = [self.tool_context["command_sessions"].close(owner=self.agent_id if self.agent_depth else None)]
         failures.extend(await asyncio.gather(*stop, return_exceptions=True))
         if self.agent_depth == 0 and self.session_manager.owns_writer(self.session_id) and not any(isinstance(item, BaseException) for item in failures):
@@ -4422,6 +4427,8 @@ class QueryEngine:
                         turn=turn_count,
                         event_callback=event_callback,
                     )
+                    if self.abort_event.is_set():
+                        raise AbortRequestedError("Abort requested before turn finalization.")
                     # Delegated runs own their transcript, not project-wide
                     # durable memories or untracked post-completion model jobs.
                     if not self.tool_context.get("delegation"):

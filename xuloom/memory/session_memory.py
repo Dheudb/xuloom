@@ -7,10 +7,11 @@ then used during context compaction to preserve important session state.
 """
 
 import asyncio
+import copy
 import hashlib
 import json
 import os
-from xuloom.core.storage import data_directory, migrate_user_file
+from xuloom.core.storage import atomic_text, data_directory, migrate_user_file
 import time
 from pathlib import Path
 from typing import Optional
@@ -101,16 +102,20 @@ class SessionMemoryManager:
         session_id: str,
         compactor=None,
         config: SessionMemoryConfig = None,
+        on_update=None,
     ):
         self.session_id = session_id
         self.compactor = compactor
+        self.on_update = on_update
         self.config = config or SessionMemoryConfig()
         self._initialized = False
         self._tokens_at_last_extraction = 0
         self._tool_calls_since_update = 0
         self._last_summarised_msg_uuid: Optional[str] = None
-        self._extraction_in_progress = False
-        self._extraction_lock = asyncio.Lock()
+        self._task = None
+        self._closed = False
+        self._generation = 0
+        self.last_error = None
         self._memory_path: Optional[str] = None
 
     @property
@@ -144,59 +149,67 @@ class SessionMemoryManager:
     ):
         """
         Check thresholds and, if met, run a background extraction.
-        Fire-and-forget; errors are silently caught.
+        The engine owns cancellation and closure of this task.
         """
-        if not self.should_extract(estimated_tokens):
+        if self._closed or not self.should_extract(estimated_tokens):
             return
 
-        if self._extraction_in_progress:
+        if self._task is not None and not self._task.done():
             return
 
-        asyncio.ensure_future(self._run_extraction(messages, estimated_tokens))
+        self._task = asyncio.create_task(self._run_extraction(copy.deepcopy(messages), estimated_tokens,
+            self._tool_calls_since_update, self._generation))
 
-    async def _run_extraction(self, messages: list, estimated_tokens: int):
-        if self._extraction_lock.locked():
-            return
+    def cancel_pending(self):
+        self._generation += 1
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
+            return self._task
 
-        async with self._extraction_lock:
-            self._extraction_in_progress = True
-            try:
-                current_notes = self._read_current_notes()
-                conversation_context = self._build_conversation_context(messages)
+    async def aclose(self):
+        self._closed = True
+        task = self.cancel_pending()
+        if task is not None:
+            await asyncio.gather(task, return_exceptions=True)
 
-                updated_notes = await self._call_llm_for_update(
-                    conversation_context, current_notes,
-                )
-
-                if updated_notes and updated_notes.strip():
-                    truncated = self._truncate_if_needed(updated_notes)
-                    self._write_notes(truncated)
-
-                self._tokens_at_last_extraction = estimated_tokens
-                self._tool_calls_since_update = 0
-
-                if messages:
-                    last = messages[-1]
-                    if isinstance(last, dict) and last.get("_uuid"):
-                        self._last_summarised_msg_uuid = last["_uuid"]
-            except Exception:
-                pass
-            finally:
-                self._extraction_in_progress = False
+    async def _run_extraction(self, messages: list, estimated_tokens: int, tool_calls: int, generation: int):
+        try:
+            current_notes = self._read_current_notes()
+            conversation_context = self._build_conversation_context(messages)
+            updated_notes = await self._call_llm_for_update(conversation_context, current_notes)
+            if self._closed or generation != self._generation:
+                return
+            if not updated_notes or not updated_notes.strip():
+                self.last_error = "request_failed"
+                return
+            self._write_notes(self._truncate_if_needed(updated_notes))
+            previous = self._tokens_at_last_extraction, self._tool_calls_since_update, self._last_summarised_msg_uuid
+            self._tokens_at_last_extraction = estimated_tokens
+            self._tool_calls_since_update = max(0, self._tool_calls_since_update - tool_calls)
+            if messages and isinstance(messages[-1], dict) and messages[-1].get("_uuid"):
+                self._last_summarised_msg_uuid = messages[-1]["_uuid"]
+            self.last_error = None
+            if self.on_update is not None:
+                try:
+                    saved = self.on_update()
+                except Exception:
+                    saved = False
+                if saved is False:
+                    self._tokens_at_last_extraction, self._tool_calls_since_update, self._last_summarised_msg_uuid = previous
+                    self.last_error = "checkpoint_failed"
+        except Exception:
+            self.last_error = "extraction_failed"
 
     def _read_current_notes(self) -> str:
-        if os.path.exists(self.memory_path):
-            try:
-                with open(self.memory_path, "r", encoding="utf-8") as f:
-                    return f.read()
-            except Exception:
-                pass
-        return DEFAULT_SESSION_MEMORY_TEMPLATE
+        try:
+            with open(self.memory_path, "r", encoding="utf-8") as f:
+                return f.read()
+        except FileNotFoundError:
+            return DEFAULT_SESSION_MEMORY_TEMPLATE
 
     def _write_notes(self, content: str):
         os.makedirs(os.path.dirname(self.memory_path), exist_ok=True)
-        with open(self.memory_path, "w", encoding="utf-8") as f:
-            f.write(content)
+        atomic_text(self.memory_path, content)
 
     def get_memory_content(self) -> Optional[str]:
         """Read the current session memory for use in compaction."""
@@ -317,12 +330,19 @@ class SessionMemoryManager:
             "tool_calls_since_update": self._tool_calls_since_update,
             "last_summarised_msg_uuid": self._last_summarised_msg_uuid,
             "memory_path": self.memory_path,
+            "last_error": self.last_error,
         }
 
+    def bind_session(self, session_id, state):
+        self.session_id = session_id
+        self._memory_path = None
+        self.load_state(state)
+
     def load_state(self, state: dict):
-        if not state:
-            return
+        self.cancel_pending()
+        state = state or {}
         self._initialized = state.get("initialized", False)
         self._tokens_at_last_extraction = state.get("tokens_at_last_extraction", 0)
         self._tool_calls_since_update = state.get("tool_calls_since_update", 0)
         self._last_summarised_msg_uuid = state.get("last_summarised_msg_uuid")
+        self.last_error = state.get("last_error") if state.get("last_error") in {"request_failed", "extraction_failed", "checkpoint_failed"} else None
