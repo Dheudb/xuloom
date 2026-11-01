@@ -19,6 +19,21 @@ def tool_identity(engine, tool_name, tool_inputs):
     return turn_id, digest
 
 
+def restore_tool_catalog(engine, metadata):
+    names = metadata.get("activated_tools", [])
+    if not isinstance(names, list) or any(not isinstance(name, str) for name in names):
+        raise ValueError("Invalid activated tool checkpoint")
+    for name in engine.activated_tools:
+        tool = engine.available_tools.pop(name, None)
+        if tool is not None:
+            engine.latent_tools[name] = tool
+    engine.activated_tools.clear()
+    # Only the current role/host's eligible catalog can be activated. Stored
+    # names are visibility, never authority or arbitrary import instructions.
+    engine.activated_tools.update(name for name in names if name not in engine.available_tools)
+    engine.activate_tools(names)
+
+
 def restore_tool_activity(engine, metadata):
     activity = metadata.get("tool_activity", {})
     engine.in_progress_tools = copy.deepcopy(activity.get("in_progress", {}))

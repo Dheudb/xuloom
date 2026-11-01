@@ -44,7 +44,7 @@ from xuloom.features.plans import PlanManager, is_session_plan_file
 from xuloom.security.permissions import PermissionManager
 from xuloom.utils.shell_tasks import ShellTaskManager
 from xuloom.context.tool_results import build_tool_result
-from xuloom.core.tool_execution import execute_tool, execute_tool_batches, restore_tool_activity
+from xuloom.core.tool_execution import execute_tool, execute_tool_batches, restore_tool_activity, restore_tool_catalog
 from xuloom.protocols.dsml import ToolTextFilter, ToolProtocolError, decode_tool_text, parse_tool_arguments
 from xuloom.features.todos import TodoManager
 from xuloom.tools.goal_tool import GoalReportTool
@@ -326,6 +326,7 @@ class QueryEngine:
         self.latent_tools = {
             name: tool for name, tool in all_tools.items() if name in latent_tool_names
         }
+        self.activated_tools = set()
         
         # Share state across instances for locks and cross-tool persistence
         self.tool_context = {
@@ -897,6 +898,10 @@ class QueryEngine:
     def activate_tools(self, tool_names):
         activated = []
         for name in tool_names or []:
+            accept = self.tool_context.get("activate_tool_filter")
+            if accept and not accept(name, self.latent_tools.get(name)):
+                self.activated_tools.discard(name)
+                continue
             if self.execution_sandbox.enabled:
                 from xuloom.security.execution import FILE_TOOLS, CONTROL_TOOLS, PROCESS_TOOLS
                 if name not in FILE_TOOLS | CONTROL_TOOLS | PROCESS_TOOLS:
@@ -906,6 +911,7 @@ class QueryEngine:
                 continue
             tool.context = self.tool_context
             self.available_tools[name] = tool
+            self.activated_tools.add(name)
             activated.append(name)
 
         self.tool_context["engine_available_tools"] = self.available_tools
@@ -913,11 +919,17 @@ class QueryEngine:
         return activated
 
     def register_mcp_tools(self, tools):
+        accept = self.tool_context.get("activate_tool_filter")
+        if accept:
+            eligible = {name: tool for name, tool in tools.items() if accept(name, tool)}
+            self.activated_tools.difference_update(tools.keys() - eligible.keys())
+            tools = eligible
         if set(tools).intersection(self.available_tools.keys() | self.latent_tools.keys()):
             raise ValueError("MCP tool conflicts with an existing tool")
         for name, tool in tools.items():
             tool.context = self.tool_context
             self.latent_tools[name] = tool
+        self.activate_tools(self.activated_tools.intersection(tools))
         return set(tools)
 
 
@@ -2646,6 +2658,7 @@ class QueryEngine:
             self.goal = recover(metadata.get("goal"))
             self.scheduled_deliveries = copy.deepcopy(metadata.get("scheduled_deliveries", {}))
             restore_tool_activity(self, metadata)
+            restore_tool_catalog(self, metadata)
             self.agent_id = metadata.get("agent", {}).get("agent_id") or self.agent_id
             self.tool_context["agent_id"] = self.agent_id
             self.tool_context["file_changes"] = metadata.get("file_changes", [])
@@ -2757,6 +2770,7 @@ class QueryEngine:
             "scheduled_deliveries": self.scheduled_deliveries,
             "file_changes": self.tool_context.get("file_changes", []),
             "tool_activity": {"in_progress": self.in_progress_tools, "recent": self.recent_tool_activity},
+            "activated_tools": sorted(self.activated_tools),
             "workspace_moves": self.tool_context.get("workspace_moves", []),
             "todos": self.todo_manager.export(),
             "plan": self.plan_manager.export(),

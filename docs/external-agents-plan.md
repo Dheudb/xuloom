@@ -37,3 +37,11 @@ App 和 CLI 共享角色配置、连接与回执；缺少程序、错误协议�
 官方 [Hooks 说明](https://learn.chatgpt.com/docs/hooks) 明确：前置工具 Hook 能阻止多数本地函数调用，但托管网页搜索及部分特殊路径不在相同覆盖范围；部分不支持的返回字段会使 Hook 失败并继续调用。仅增加一个前置 Hook，不能证明父框架权限已被完整实施。
 
 因此 Codex 实际适配仍要验证工具覆盖、Hook/控制端失联、未知请求与配置漂移。原生 Xuloom 的强制委派入口不能被一个外部审批弹窗替代；不能表达当前限制时应在执行前报不支持，而不是自动放宽。此 Codex 核对是接入设计证据，不是 Codex 后端已经实现。
+
+## App Server 接入前置核对（2026-11-02）
+
+再次读取官方 [App Server 文档](https://learn.chatgpt.com/docs/app-server)：`dynamicTools` 与 `item/tool/call` 仍标为实验接口。安装版本 `0.156.1` 的只读 Schema 包含工具参数、真实 `threadId`、`turnId` 与 `callId`，可用于关联原生执行回执；不能仅用最终文字或退出码作为工具成功依据。
+
+官方 [配置说明](https://learn.chatgpt.com/docs/config-file/config-basic)列出 `features.shell_tool`、Hooks、Apps 和子代理等独立开关。下一步需实际验证禁用配置后的全部工具请求，尤其文件、内置命令、托管工具与外部工具的边界；关掉一项不代表其他路径也受控。采用独立配置目录，不读取个人登录或启动项目扩展。响应转发也要单独实现 Responses 契约，不能把现有 Chat Completions／Messages 转发器换个地址就称为支持 Codex。
+
+这一步只核对文档与已有只读 Schema，未启动模型回合，未新增运行依赖；Codex 后端仍未作为可用选项发布。

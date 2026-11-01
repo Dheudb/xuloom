@@ -10,7 +10,7 @@ Download the Windows x64 ZIP from Releases, extract the whole directory, and run
 
 Open **Settings → Model connections**, enter your API endpoint, protocol, model ID and key. A connection can list multiple models; multiple providers are supported. OpenAI-compatible Chat Completions and Anthropic Messages are supported. Local model servers must expose a supported interface. Text completion alone does not establish compatibility with tools or images.
 
-Choose **New conversation** to get an independent working directory, or open an existing folder. A Git repository is not required. Source version: **v0.1.7**; see Releases for currently published binaries and checksums. macOS/Linux desktop distributions are not available.
+Choose **New conversation** to get an independent working directory, or open an existing folder. A Git repository is not required. Source version: **v0.1.11**; see Releases for currently published binaries and checksums. macOS/Linux desktop distributions are not available.
 
 Execution traces use compact rows with icons for images, edits, terminal commands and searches. Expand a row for its inputs and output; completed turns collapse automatically. Image reads show clickable thumbnails backed by session snapshots, so previews survive changes or deletion of the original file. Previewing does not call a model; model image understanding requires an endpoint supporting image input.
 
@@ -61,7 +61,9 @@ Check the assigned claims. Report supported, unsupported and contradictory
 statements with sources. Do not modify files.
 ```
 
-Install the referenced skill first. `model: inherit` uses the current model; another model ID must belong to the same API connection. Omit `tools` to inherit available tools, or use `tools: []` in a manual definition to provide none. Tool aliases include Read, Write, Edit, Exec, Grep, Glob and Skill.
+Install the referenced skill first. `model: inherit` uses the current model. By default another model ID uses the current connection; set `connection: <saved connection ID>` to select another configured provider. Omit `tools` to inherit available tools, or use `tools: []` in a manual definition to provide none. Tool aliases include Read, Write, Edit, Exec, Grep, Glob and Skill.
+
+Optional [Claude Code / Pi backends](docs/external-agents.md) use your installed CLI, native worker lifecycle and authorized tools. Discovered tool visibility survives session restoration within the current role's scope; cached MCP definitions do not grant execution rights. See the [discovery and recovery checks](docs/tool-discovery-validation-2026-11-02.md). Codex/DSH backends, external CLI over SSH, and native cross-platform releases remain part of the [ongoing scope](docs/product-roadmap.md).
 
 Assign tasks through the Agents panel or name the role in your request. Creating a definition does not launch it. Workers have independent contexts but share workspace files and remain subject to permissions and budgets. Solo disables delegation; Auto delegates when useful; Ultra actively looks for useful parallel work. Auto and Ultra differ only in delegation initiative, with no default concurrency, total-worker or shared-output quota. Explicit host limits apply equally to both; accepted work queues automatically when a finite concurrency is configured.
 

@@ -338,8 +338,9 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
                 await sub_engine.aclose()
                 raise
             sub_engine.permission_manager.load_state({**metadata.get("permissions", {}), "always_allow_tools": [], "pending_request": None})
-            from xuloom.core.tool_execution import restore_tool_activity
+            from xuloom.core.tool_execution import restore_tool_activity, restore_tool_catalog
             restore_tool_activity(sub_engine, metadata)
+            restore_tool_catalog(sub_engine, metadata)
             sub_engine.tool_context["file_changes"] = metadata.get("file_changes", [])
             sub_engine.turn_traces = metadata.get("turn_traces", [])
             sub_engine.todo_manager.load(metadata.get("todos", []))

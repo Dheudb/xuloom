@@ -32,7 +32,10 @@ def configure_role(engine, definition, *, allowed_tools, parent_tools=None, late
     """None selects the host's tools; an explicit empty mapping means no tools."""
     active = dict(engine.available_tools if parent_tools is None else parent_tools)
     latent = dict(engine.latent_tools if latent_tools is None else latent_tools)
+    previous_catalog = active.keys() | latent.keys()
+    activated = set(getattr(engine, "activated_tools", ()))
     if allowed_tools and "*" not in allowed_tools:
+        activated.difference_update(allowed_tools)
         active.update({name: tool for name, tool in latent.items() if name in allowed_tools})
     blocked = set(definition.get("disallowed_tools", ()))
     if definition.get("web_search") == "disabled":
@@ -46,9 +49,15 @@ def configure_role(engine, definition, *, allowed_tools, parent_tools=None, late
         engine.available_tools["send_message_tool"] = copy.copy(team_tool)
     engine.latent_tools = filter_tools({name: tool for name, tool in latent.items()
         if name not in engine.available_tools and eligible(tool)}, allowed_tools, blocked)
+    engine.activated_tools = {name for name in activated if name in engine.available_tools or name not in previous_catalog}
+    scope_blocked = ALL_AGENT_DISALLOWED_TOOLS | blocked
+    engine.tool_context["activate_tool_filter"] = lambda name, tool: name not in scope_blocked and (
+        allowed_tools is None or "*" in allowed_tools or name in allowed_tools) and (tool is None or eligible(tool))
     engine.tool_context.update(engine_available_tools=engine.available_tools, latent_tools_registry=engine.latent_tools)
     for tool in (*engine.available_tools.values(), *engine.latent_tools.values()):
         tool.context = engine.tool_context
+    if engine.activated_tools:
+        engine.activate_tools(list(engine.activated_tools))
     if frozen_prompt is not None and not isinstance(frozen_prompt, str):
         raise ValueError("Frozen delegated instructions must be text")
     engine.tool_context["agent_system_prompt"] = frozen_prompt if frozen_prompt is not None else role_prompt(

@@ -1,6 +1,6 @@
 {
   "name": "xuloom-desktop",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "private": true,
   "type": "module",
   "description": "Xuloom desktop workbench",
@@ -55,7 +55,8 @@
     "test:native-ssh-workers": "node tests/native-ssh-workers.e2e.cjs",
     "test:html": "node tests/html.e2e.cjs",
     "test:mcp": "node tests/mcp.e2e.cjs",
-    "pack": "npm run build && node scripts/pack.cjs"
+    "pack": "npm run build && node scripts/pack.cjs",
+    "test:external-discovery": "node tests/external-discovery.e2e.cjs"
   },
   "dependencies": {
     "katex": "^0.19.1",

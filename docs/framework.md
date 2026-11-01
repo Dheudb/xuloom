@@ -209,3 +209,7 @@ UTF-8 多字节字符跨页保留；只有读到 `eof=true` 且命令成功结�
 `tests/test_agent_lifecycle.py` 与 `tests/test_command_sessions.py` 覆盖生命周期、权限和命令输入输出。
 `npm run test:framework` 通过隔离的模型接口驱动真实桌面引擎，验证跨回合/重启继续、消息投递、
 模型与推理参数、并发查询、UTF-8 输入以及命令历史输出。
+
+### 工具可见性的恢复
+
+`metadata.activated_tools` 是原生发现状态，保存 App、CLI 和子代理本次已激活的名称；它不是权限表。恢复及晚注册 MCP 仅在当前角色与执行环境允许时激活，不根据历史名称导入代码或自动执行。外部 CLI 缓存角色允许的定义，转发到模型的仍是已激活集合，详见[工具发现验证](tool-discovery-validation-2026-11-02.md)。

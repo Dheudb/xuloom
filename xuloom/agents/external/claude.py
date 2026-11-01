@@ -30,7 +30,8 @@ async def sample(engine, *, system_prompt, api_messages, turn_count, model_name,
             atomic_text(config_path, json.dumps(config))
             env = environment(home)
             env.update(ANTHROPIC_BASE_URL=host.url, ANTHROPIC_API_KEY=host.token,
-                HTTP_PROXY=host.url, HTTPS_PROXY=host.url, NO_PROXY="127.0.0.1,localhost,::1")
+                HTTP_PROXY=host.url, HTTPS_PROXY=host.url, NO_PROXY="127.0.0.1,localhost,::1",
+                ENABLE_TOOL_SEARCH="false")  # Native discovery controls model visibility.
             args = [binding["program"], "--print", "--input-format", "stream-json", "--output-format", "stream-json",
                 "--verbose", "--include-partial-messages", "--bare", "--restricted", "--tools", "",
                 "--strict-mcp-config", "--mcp-config", str(config_path), "--setting-sources", "", "--model", model_name,

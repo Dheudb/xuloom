@@ -46,6 +46,12 @@ class LocalHost:
     def tools(self):
         return self.engine.available_tools
 
+    def catalog(self):
+        # Cache eligible definitions in the CLI before activation. MCP's change
+        # notification has no acknowledgement and can race its next model turn.
+        # The relay still exposes only native active tools; execution uses tools().
+        return {**self.engine.latent_tools, **self.tools()}
+
     def fail(self, reason):
         self.failure = self.failure or reason
         self.failed.set()
@@ -74,7 +80,7 @@ class LocalHost:
         @self.mcp.list_tools()
         async def listing():
             rows = []
-            for name, tool in self.tools().items():
+            for name, tool in self.catalog().items():
                 schema = copy.deepcopy(tool.input_schema.model_json_schema())
                 schema.setdefault("properties", {})[SOURCE_ID] = {"type": "string"}
                 rows.append(types.Tool(name=name, description=tool.description, inputSchema=schema,
@@ -95,7 +101,7 @@ class LocalHost:
             async with self.execution_lock:
                 if self.stopping or self.engine.abort_event.is_set():
                     raise ValueError("The owning execution has stopped")
-                before = set(self.tools())
+                before = set(self.catalog())
                 try:
                     with self.budgets():
                         self.started_calls.add(identity)
@@ -112,7 +118,7 @@ class LocalHost:
                     content.append(types.ImageContent(type="image", data=source["data"], mimeType=source["media_type"]))
                 else:
                     raise ValueError("External tool content is not supported; the operation was not replayed")
-            if before != set(self.tools()):
+            if before != set(self.catalog()):
                 await self.mcp.request_context.session.send_tool_list_changed()
             from .runtime import tool_result_digest
             self.receipts[identity] = (name, tool_result_digest([item.model_dump() for item in content], result.get("is_error", False)))
@@ -192,7 +198,9 @@ class LocalHost:
             raise ValueError("External request has invalid tools or messages")
         if value.get("mcp_servers") or any(key in value for key in ("functions", "function_call", "web_search_options", "audio", "modalities")):
             raise ValueError("Provider-hosted MCP is outside the owned tool boundary")
-        for tool in tools:
+        visible, catalog, active = [], self.catalog(), self.tools()
+        for entry in tools:
+            tool = entry
             if protocol == "openai":
                 if not isinstance(tool, dict) or tool.get("type") != "function" or not isinstance(tool.get("function"), dict):
                     raise ValueError("Provider-hosted tools are outside the owned tool boundary")
@@ -202,8 +210,11 @@ class LocalHost:
             if tool.get("type", "custom") != "custom":
                 raise ValueError("Provider-hosted tools are outside the owned tool boundary")
             name = tool.get("name", "")
-            if name not in SAFE_INTERNAL and (not name.startswith(PREFIX) or name[len(PREFIX):] not in self.tools()):
+            if name not in SAFE_INTERNAL and (not name.startswith(PREFIX) or name[len(PREFIX):] not in catalog):
                 raise ValueError("The external program exposed an uncontrolled tool")
+            if name in SAFE_INTERNAL or name[len(PREFIX):] in active:
+                visible.append(entry)
+        value["tools"] = visible
         for message in messages:
             roles = {"assistant", "user"} if protocol == "anthropic" else {"assistant", "user", "system", "developer", "tool"}
             if not isinstance(message, dict) or message.get("role") not in roles or (not isinstance(message.get("content"), (str, list)) and not (protocol == "openai" and message.get("role") == "assistant" and message.get("tool_calls"))):

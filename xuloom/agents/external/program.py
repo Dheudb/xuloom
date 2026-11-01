@@ -3,13 +3,14 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import tempfile
 
 REQUIRED = {"claude": ("--restricted", "--bare", "--tools", "--strict-mcp-config", "--input-format",
-            "--output-format", "--include-partial-messages", "--system-prompt", "--session-id"),
-    "pi": ("--mode", "--no-builtin-tools", "--no-extensions", "--no-approve", "--offline", "--no-context-files", "--session-id", "--session-dir")}
+            "--output-format", "--include-partial-messages", "--system-prompt", "--session-id", "--resume", "--permission-prompts", "--setting-sources"),
+    "pi": ("--mode", "--no-builtin-tools", "--no-extensions", "--no-approve", "--offline", "--no-context-files", "--session", "--session-id", "--session-dir")}
 _probes = {}
 
 
@@ -87,7 +88,8 @@ async def verify(binding, *, workspace=None):
     with tempfile.TemporaryDirectory(prefix="xuloom-program-probe-") as directory:
         args = [binding["program"], "--help"] if binding["backend"] == "claude" else [binding["runtime"], binding["program"], "--no-approve", "--no-extensions", "--no-context-files", "--offline", "--help"]
         process = await asyncio.create_subprocess_exec(*args, cwd=directory,
-            env=environment(Path(directory)), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            env=environment(Path(directory)), stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             **({"creationflags": 0x08000000} if os.name == "nt" else {}))
         try:
             stdout, _ = await asyncio.wait_for(process.communicate(), 10)
@@ -95,7 +97,11 @@ async def verify(binding, *, workspace=None):
             if process.returncode is None:
                 process.kill(); await process.wait()  # Only this owned help probe.
     text = stdout.decode("utf-8", errors="replace")
-    if process.returncode or any(flag not in text for flag in REQUIRED[binding["backend"]]):
+    if process.returncode or not supports(text, REQUIRED[binding["backend"]]):
         raise ValueError("This installed agent lacks the required controlled streaming interface")
     _probes[cache] = {"controlled_tools": True, "stream_json": binding["backend"] == "claude", "rpc": binding["backend"] == "pi"}
     return _probes[cache]
+
+
+def supports(help_text, flags):
+    return all(re.search(r"(?<![\w-])" + re.escape(flag) + r"(?![\w-])", help_text) for flag in flags)

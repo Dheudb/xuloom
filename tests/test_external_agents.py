@@ -191,6 +191,45 @@ class OpenAIHostTests(ExternalFixture):
 
 @unittest.skipUnless(MCP, "optional MCP runtime not installed")
 class ExternalHostTests(ExternalFixture):
+    async def test_mcp_catalog_does_not_grant_unactivated_or_forbidden_tools(self):
+        from mcp.client.streamable_http import streamable_http_client
+        from mcp import ClientSession
+        from xuloom.agents.role_runtime import configure_role
+        engine = self.engine()
+        configure_role(engine, {"disallowed_tools": ["browser_tool"]}, allowed_tools=None)
+        state = {"seen_tool_ids": []}
+        async with LocalHost(engine, state) as host:
+            async with httpx.AsyncClient(headers={"Authorization": "Bearer " + host.token}, trust_env=False) as transport, streamable_http_client(host.url + "/mcp", http_client=transport) as (read, write, _):
+                async with ClientSession(read, write) as client:
+                    await client.initialize()
+                    names = {tool.name for tool in (await client.list_tools()).tools}
+                    self.assertIn("task_list_tool", names)
+                    self.assertNotIn("browser_tool", names)
+                    with self.assertRaises(ValueError):
+                        await host.grant_tool({"name": "mcp__xuloom__task_list_tool", "id": "unactivated", "input": {}})
+                    host.calls["transport_probe"] = ("task_list_tool", {})
+                    result = await client.call_tool("task_list_tool", {SOURCE_ID: "transport_probe"})
+                    self.assertTrue(result.isError)
+        self.assertFalse(engine.recent_tool_activity)
+        self.assertFalse(self.records)
+
+    async def test_relay_filters_latent_definitions_in_both_protocols(self):
+        from starlette.requests import Request
+        engine = self.engine(); state = {"seen_tool_ids": []}
+        async def payload(protocol):
+            names = ["file_read_tool", "task_list_tool"]
+            tools = [{"name": "mcp__xuloom__" + name, "input_schema": {"type": "object"}} for name in names]
+            if protocol == "openai": tools = [{"type": "function", "function": {"name": tool["name"], "parameters": tool["input_schema"]}} for tool in tools]
+            data = json.dumps({"model": MODEL, "messages": [{"role": "user", "content": "owned"}], "tools": tools}).encode()
+            async def receive(): return {"type": "http.request", "body": data, "more_body": False}
+            value = await LocalHost(engine, state).payload(Request({"type": "http", "method": "POST", "headers": []}, receive), protocol)
+            return [tool["function"]["name"] if protocol == "openai" else tool["name"] for tool in value["tools"]]
+        for protocol in ("anthropic", "openai"):
+            self.assertEqual(await payload(protocol), ["mcp__xuloom__file_read_tool"])
+        engine.activate_tools(["task_list_tool"])
+        for protocol in ("anthropic", "openai"):
+            self.assertEqual(await payload(protocol), ["mcp__xuloom__file_read_tool", "mcp__xuloom__task_list_tool"])
+
     async def test_exit_closes_model_and_mcp_admission_before_vendor_handshake(self):
         from mcp.client.streamable_http import streamable_http_client
         from mcp import ClientSession

@@ -197,7 +197,7 @@ class MCPConnectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(desktop.engine)
         from xuloom.core.engine import QueryEngine
         from xuloom.security.execution import ExecutionSandbox
-        engine = SimpleNamespace(available_tools={}, latent_tools={}, tool_context={}, execution_sandbox=ExecutionSandbox(self.root))
+        engine = SimpleNamespace(available_tools={}, latent_tools={}, activated_tools=set(), tool_context={}, execution_sandbox=ExecutionSandbox(self.root))
         engine.register_mcp_tools = lambda tools: QueryEngine.register_mcp_tools(engine, tools)
         engine.activate_tools = lambda names: QueryEngine.activate_tools(engine, names)
         desktop.engine = engine

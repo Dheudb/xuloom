@@ -90,7 +90,8 @@ async def prepare(engine, *, system_prompt, api_messages, model_name):
     except asyncio.CancelledError:
         raise
     except Exception as error:
-        raise ExternalExecutionError("external_dependency_error", "The installed external program no longer satisfies its frozen contract; no model was started") from error
+        detail = str(error) if isinstance(error, ValueError) else type(error).__name__
+        raise ExternalExecutionError("external_dependency_error", "External dependency check failed: " + detail + "; no model was started") from error
     state = engine.tool_context.get("external_agent")
     if state is None:
         state = {"backend": binding["backend"], "binding": binding, "session_id": str(uuid.uuid4()), "phase": "idle",
