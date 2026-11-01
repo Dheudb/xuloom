@@ -221,6 +221,12 @@ class DesktopBridge:
 
     async def ensure_engine(self, write=False):
         async with self.engine_initialization:
+            if write and not getattr(self, "owned_worker_controller", False) and self.resume_id:
+                from xuloom.core.session import SessionManager
+                with SessionManager(cwd=str(self.cwd)) as manager:
+                    state = manager.load_session_state(self.resume_id)
+                if state.get("metadata", {}).get("delegation", {}).get("authority_required"):
+                    raise ValueError("此会话由原主代理控制，只能查看或创建独立分支；请返回主会话继续执行。")
             return await self._ensure_engine(write)
 
     def _create_engine(self):
@@ -407,6 +413,15 @@ class DesktopBridge:
                 client = SSHClient(remote_config.resolve(params.get("id")))
                 try: return await client.start()
                 finally: await client.aclose()
+            if method == "remote.models":
+                from xuloom.remote.ssh import SSHClient
+                client = SSHClient(remote_config.resolve(params.get("id")))
+                try:
+                    await client.start()
+                    config = await client.request("config.get")
+                    return {"connections": config["connections"]}
+                finally:
+                    await client.aclose()
             raise ValueError("Unknown SSH configuration operation")
         if method == "sessions.list":
             return self.sessions()
@@ -670,7 +685,9 @@ class DesktopBridge:
             traces = raw.get("metadata", {}).get("turn_traces", []) if isinstance(raw, dict) else []
             self.collaboration_mode = raw.get("metadata", {}).get("collaboration_mode", "auto") if isinstance(raw, dict) else "auto"
             self.execution_mode = raw.get("metadata", {}).get("execution_mode", "host") if isinstance(raw, dict) else "host"
-            return {"project": str(self.cwd), "persistedId": sid, "executionMode": self.execution_mode, "collaborationMode": self.collaboration_mode, "permissionMode": self.approval_policy.mode, "config": self.config(), "capabilities": self.capabilities(), "sessions": self.sessions(), "history": self.history(messages, traces), "activity": activity, "workers": workers, "fileChanges": self.file_changes}
+            controlled = bool(raw.get("metadata", {}).get("delegation", {}).get("authority_required")) if isinstance(raw, dict) else False
+            controlled_model = raw.get("metadata", {}).get("delegation", {}).get("remote_worker", {}).get("model_binding", {}).get("model") if controlled else None
+            return {"controlledExecution": controlled, "controlledModel": controlled_model, "project": str(self.cwd), "persistedId": sid, "executionMode": self.execution_mode, "collaborationMode": self.collaboration_mode, "permissionMode": self.approval_policy.mode, "config": self.config(), "capabilities": self.capabilities(), "sessions": self.sessions(), "history": self.history(messages, traces), "activity": activity, "workers": workers, "fileChanges": self.file_changes}
         if method == "files.read":
             return preview_file(self.cwd, params.get("path"), self.file_changes)
         if method in {"files.mediaInfo", "files.mediaChunk"}:

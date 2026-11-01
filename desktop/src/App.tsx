@@ -332,6 +332,7 @@ export default function App() {
     }
   }
   async function send() {
+    if (active?.controlledExecution) return;
     if (resumeAvailable) { await resume(); return; }
     if (opening || importing || modelChanging || permissionChanging || collaborationChanging || !active || active.busy || (!active.draft.trim() && !active.attachments.length)) return;
     if (active.goalMode) {
@@ -384,6 +385,7 @@ export default function App() {
     }
   }
   async function importFiles(files: File[]) {
+    if (active?.controlledExecution) { onError("此子代理只读；请回原主会话添加资料。"); return; }
     if (!files.length) return;
     if (importing || opening) { onError(importing ? "正在添加附件，请稍后再添加" : "会话正在打开，请稍后再添加附件"); return; }
     if (active?.busy) { onError("请先停止当前任务，再添加附件"); return; }
@@ -780,6 +782,7 @@ export default function App() {
           )}
           {!!runningCommands && !active?.busy && <button className="worker-strip" onClick={() => invoke("stop").catch(onError)}><Square size={13} />{runningCommands} 个后台命令正在运行 · 停止所有后台任务</button>}
           {active?.goal && <GoalStrip key={active.id} goal={active.goal} busy={active.busy} invoke={invoke} onError={onError} details={() => setGoalDialog("goal")} />}
+          {active?.controlledExecution && <p className="fine-print" role="status">此子代理由原主会话控制。可以查看历史和文件，或从消息创建独立分支；继续执行请返回主会话。</p>}
           <div className={"composer " + (!active ? "disabled" : "")} onPaste={(event) => { if (event.clipboardData.files.length) { event.preventDefault(); void importFiles(Array.from(event.clipboardData.files)); } }}>
             {active?.editingId && <div className="editing-prompt"><span>编辑上一条提示词 · 发送后重新执行，已修改的文件保留</span>
               <button aria-label="取消编辑提示词" disabled={active.busy} onClick={() => update({ editingId: undefined, draft: active.draftBeforeEdit || "", draftBeforeEdit: undefined, attachments: active.attachmentsBeforeEdit || [], attachmentsBeforeEdit: undefined })}><X size={13} /></button></div>}
@@ -798,15 +801,16 @@ export default function App() {
             )}
             <SkillInput key={activeId} sessionId={activeId} draft={active?.draft || ""}
               selected={active?.selected || []} capabilities={active?.capabilities}
-              disabled={opening || !active || active.busy} inputRef={input} update={update} send={send} editPrevious={editLastPrompt} />
+              placeholder={active?.controlledExecution ? "子代理历史 · 请返回主会话继续执行" : undefined}
+              disabled={opening || !active || active.busy || !!active.controlledExecution} inputRef={input} update={update} send={send} editPrevious={editLastPrompt} />
             </div>
             <div className="composer-toolbar">
               <div className="composer-options">
                 <input ref={fileInput} type="file" multiple hidden aria-label="选择附件文件" onChange={(event) => { const files = Array.from(event.target.files || []); event.target.value = ""; void importFiles(files); }} />
-                <ComposerMenu sessionId={activeId} disabled={opening || importing || !active || active.busy} plan={active?.mode === "plan"} action={composerAction} />
+                <ComposerMenu sessionId={activeId} disabled={opening || importing || !active || active.busy || !!active.controlledExecution} plan={active?.mode === "plan"} action={composerAction} />
                 <select className={"permission-picker " + (active?.permissionMode === "full" ? "full-access" : "")} aria-label="访问权限"
                   title={active?.permissionMode === "full" ? "默认自动执行；显式权限规则、Plan 限制和中断恢复确认仍然生效" : "文件修改、命令和需要审批的外部工具会请求批准"}
-                  disabled={opening || !active || permissionChanging} value={active?.permissionMode || "ask"}
+                  disabled={opening || !active || permissionChanging || !!active.controlledExecution} value={active?.permissionMode || "ask"}
                   onChange={(event) => void setPermissionMode(event.target.value as PermissionMode)}>
                   <option value="ask">请求批准</option><option value="full">完全访问</option>
                 </select>
@@ -816,12 +820,12 @@ export default function App() {
               <div className="send-options">
                 <select className="collaboration-picker" aria-label="协作档位"
                   title="Solo 独立完成；Auto 按需委派；Ultra 更积极寻找协作机会。两者不限制子代理数量，与模型思考强度、权限及宿主运行配置独立。"
-                  disabled={opening || !active || collaborationChanging || active.busy || !!runningWorkers || !!runningCommands}
+                  disabled={opening || !active || collaborationChanging || active.busy || !!runningWorkers || !!runningCommands || !!active.controlledExecution}
                   value={active?.collaborationMode || "auto"}
                   onChange={(event) => void setCollaborationMode(event.target.value as SessionView["collaborationMode"])}>
                   <option value="solo">Solo · 独立</option><option value="auto">Auto · 自动</option><option value="ultra">Ultra · 增强</option>
                 </select>
-                {selectedModel?.connections?.some((connection) => connection.models.length) ? <select
+                {active?.controlledExecution ? <span className="model-button">{active.controlledModel || "子代理历史"}</span> : selectedModel?.connections?.some((connection) => connection.models.length) ? <select
                   className="model-picker" aria-label="选择模型" title={`${selectedModel.connectionName || "API"} · ${selectedModel.model}`}
                   disabled={opening || modelChanging || active?.busy || !!runningWorkers || !!runningCommands}
                   value={JSON.stringify([selectedModel.connectionId, selectedModel.model])}
@@ -831,9 +835,9 @@ export default function App() {
                       {connection.models.map((model) => <option key={model} value={JSON.stringify([connection.connectionId, model])}>{model}</option>)}
                     </optgroup>)}
                 </select> : <button className="model-button" onClick={openSettings}>连接模型<ChevronRight size={12} /></button>}
-                <ReasoningControls profile={selectedModel?.modelReasoning?.[selectedModel.model]}
+                {!active?.controlledExecution && <ReasoningControls profile={selectedModel?.modelReasoning?.[selectedModel.model]}
                   disabled={opening || modelChanging || !!active?.busy || !!runningWorkers || !!runningCommands}
-                  change={value => void selectReasoning(value)} />
+                  change={value => void selectReasoning(value)} />}
                 {active?.loaded.length ? (
                   <span
                     className="loaded-indicator"
@@ -856,7 +860,7 @@ export default function App() {
                     className={"send-button" + (resumeAvailable ? " resume" : "")}
                     aria-label={resumeAvailable ? "继续执行" : "发送任务"}
                     title={resumeAvailable ? "继续原任务，不新增消息" : "发送任务"}
-                    disabled={opening || importing || modelChanging || permissionChanging || collaborationChanging || (!resumeAvailable && !active?.draft.trim() && !active?.attachments.length)}
+                    disabled={opening || importing || modelChanging || permissionChanging || collaborationChanging || !!active?.controlledExecution || (!resumeAvailable && !active?.draft.trim() && !active?.attachments.length)}
                     onClick={() => void send()}
                   >
                     {resumeAvailable ? <Play size={16} fill="currentColor" /> : <ArrowUp size={19} />}
@@ -930,6 +934,7 @@ export default function App() {
           refresh={refresh}
           update={update}
           onError={onError}
+          onNavigateChat={(url) => navigateChat.current(url)}
         />}
         </div>
       )}

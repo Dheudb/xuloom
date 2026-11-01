@@ -19,6 +19,13 @@ def concurrency_limit(context):
 
 
 class AgentLifecycle:
+    def _remote_handle(self, row):
+        from xuloom.agents.remote_worker import RemoteWorker
+        backends = self.context["subagent_tasks"].backends
+        handle = backends.setdefault(row["agent_id"], RemoteWorker(self, row["agent_id"]))
+        handle.run_id = row["dispatch"]["remote"]["run_id"]
+        return handle
+
     def _worker(self, identity):
         if not isinstance(identity, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", identity):
             raise ValueError("A valid agent_id is required")
@@ -41,7 +48,11 @@ class AgentLifecycle:
                 row["phase"] = "awaiting_resume"
             row["pending_message_count"] = len(row.pop("pending_messages", []))
             commands = self.context.get("command_sessions")
-            row["running_commands"] = sum(r["owner"] == row["agent_id"] and r["status"] == "running" for r in commands.records.values()) if commands else 0
+            if row.get("executor", "local") == "local":
+                row["running_commands"] = sum(r["owner"] == row["agent_id"] and r["status"] == "running" for r in commands.records.values()) if commands else 0
+                legacy = self.context.get("shell_task_manager")
+                if legacy:
+                    row["running_commands"] += sum(r.get("owner") == row["agent_id"] and r["status"] == "running" for r in legacy.list_tasks())
             row.pop("role_definition", None)
             row.pop("dispatch", None)
             row.pop("api_base_url", None)
@@ -52,6 +63,10 @@ class AgentLifecycle:
         return rows
 
     def _check_worker_connection(self, row):
+        if row.get("executor", "local") != "local":
+            from xuloom.agents.executors import profile
+            profile(row["executor"], self.context, frozen=row["dispatch"]["remote"]["profile"])
+            return None, None
         binding = row.get("connection_binding")
         if binding is not None:
             from xuloom.agents.connections import resolve_connection
@@ -65,6 +80,8 @@ class AgentLifecycle:
 
     def _resume_state(self, row):
         provider, base = self._check_worker_connection(row)
+        if row.get("executor", "local") != "local":
+            return {}  # The execution host validates and loads its own checkpoint.
         manager = self.context.get("session_manager")
         if manager is None:
             raise ValueError("Subagent transcript storage is unavailable")
@@ -111,14 +128,25 @@ class AgentLifecycle:
         active = tasks.tasks.get(agent_id)
         running = bool(active and not active.done())
         if action == "result":
+            if not running and row.get("executor", "local") != "local" and (row.get("status") != "completed" or row.get("outcome_unknown") or row.get("running_commands") != 0):
+                await self._remote_handle(row).refresh()
             return encode(next(r for r in self._inventory() if r["agent_id"] == agent_id))
         if action == "cancel":
             if running:
                 await tasks.cancel(agent_id)
+            elif row.get("executor", "local") != "local":
+                handle = self._remote_handle(row)
+                stopped = await handle.stop()
+                if stopped.get("worker"):
+                    await handle.finish(stopped["worker"], unknown=not stopped.get("stopped"))
+                elif not stopped.get("stopped"):
+                    await handle.finish(unknown=True)
             if self.context.get("command_sessions"):
                 await self.context["command_sessions"].close(owner=agent_id)
+            if self.context.get("shell_task_manager"):
+                await self.context["shell_task_manager"].close(owner=agent_id)
             current = self._worker(agent_id)
-            if current.get("status") not in {"cancelled", "completed", "crashed", "closed"}:
+            if current.get("status") not in {"cancelled", "completed", "crashed", "closed"} and not current.get("outcome_unknown"):
                 await self._write_subagent_registry_record({"agent_id": agent_id, "status": "cancelled", "finished_at": int(time.time() * 1000)})
             return encode({"agent_id": agent_id, "status": self._worker(agent_id)["status"], "executing": False})
         if action == "close":
@@ -126,6 +154,11 @@ class AgentLifecycle:
                 raise ValueError("Cannot close a running worker; cancel or wait first")
             if self.context.get("command_sessions"):
                 await self.context["command_sessions"].close(owner=agent_id)
+            if self.context.get("shell_task_manager"):
+                await self.context["shell_task_manager"].close(owner=agent_id)
+            if row.get("executor", "local") != "local":
+                await self._remote_handle(row).close()
+                tasks.backends.pop(agent_id, None)
             await self._write_subagent_registry_record({"agent_id": agent_id, "status": "closed"})
             return encode({"agent_id": agent_id, "status": "closed", "history_retained": True})
         if action == "send":
@@ -137,9 +170,18 @@ class AgentLifecycle:
             if len(pending) >= 100:
                 raise ValueError("Worker mailbox is full")
             message = {"id": str(uuid.uuid4()), "text": prompt, "at": int(time.time() * 1000)}
-            await self._write_subagent_registry_record({"agent_id": agent_id, "pending_messages": pending + [message]})
+            await self._write_subagent_registry_record({"agent_id": agent_id, "pending_messages": pending + [message], "pending_message_count": len(pending) + 1})
+            requires_followup = not running
+            delivery = "parent_inbox"
+            if agent_id in tasks.backends and tasks.backends[agent_id].opened and not tasks.backends[agent_id].client.closed:
+                try:
+                    delivered = await tasks.backends[agent_id].deliver()
+                    delivery = "host_inbox"
+                    requires_followup = requires_followup or bool(delivered and not delivered["running"] and tasks.backends[agent_id].submitted)
+                except (ConnectionError, OSError, ValueError):
+                    delivery, requires_followup = "unconfirmed", True
             return encode({"agent_id": agent_id, "message_id": message["id"], "queued": True,
-                           "executing": agent_id in tasks.running, "requires_followup": not running})
+                           "delivery": delivery, "executing": agent_id in tasks.running, "requires_followup": requires_followup})
         if action != "followup":
             raise ValueError("Unknown subagent action")
         if running:
@@ -167,6 +209,10 @@ class AgentLifecycle:
                 "parent_depth": row.get("agent_depth", 1) - 1, "parent_agent_id": row.get("parent_agent_id"),
                 "builtin_agent_def": definition, "model": row.get("model"), "background": run_in_background, "resume": True,
                 "connection_binding": copy.deepcopy(row.get("connection_binding"))})
+        if row.get("executor", "local") != "local":
+            record["dispatch"]["remote"] = copy.deepcopy(row["dispatch"]["remote"])
+            record["dispatch"]["remote"]["run_id"] = str(uuid.uuid4())
+            record["outcome_unknown"] = False
         await self._write_subagent_registry_record(record)
         work = self._run_registered_subagent(record, task=prompt, allowed_tools=definition.get("allowed_tools"),
             inherit_context=False, parent_depth=row.get("agent_depth", 1) - 1,
@@ -228,4 +274,6 @@ class AgentLifecycle:
         pending = [m for m in row.get("pending_messages", []) if m["id"] not in message_ids]
         writer = self.context.get("register_subagent_record")
         if writer:
-            writer({"agent_id": identity, "pending_messages": pending})
+            if writer({"agent_id": identity, "pending_messages": pending, "pending_message_count": len(pending)}) is False:
+                from xuloom.core.run_result import PersistenceError
+                raise PersistenceError("Could not persist native worker message acknowledgement")

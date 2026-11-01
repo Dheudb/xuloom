@@ -58,11 +58,13 @@ def main():
     for directory in ("dist", "electron"):
         shutil.copytree(DESKTOP / directory, app / directory)
     version = json.loads((DESKTOP / "package.json").read_text(encoding="utf-8"))["version"]
+    if metadata != "xuloom-" + version + ".dist-info":
+        raise SystemExit("Python distribution and application versions must match")
     (app / "package.json").write_text(json.dumps({"name": "xuloom-desktop", "productName": "Xuloom",
         "version": version, "main": "electron/main.cjs", "buildId": build_id}, indent=2), encoding="utf-8")
     subprocess.run([str(package / "resources/python/python.exe"), "-I", "-B", "-c",
-        "import sys;sys.path[:0]=[sys.argv[1],sys.argv[1]+'/dependencies'];import xuloom,xuloom.core.session_mutation,xuloom.core.engine,xuloom.skills.terminal;from xuloom.protocols.mcp_bridge import MCP_AVAILABLE;assert MCP_AVAILABLE;print('Staged engine and bundled dependencies verified')",
-        str(stage)], cwd=stage, check=True)
+        "import sys;sys.path[:0]=[sys.argv[1],sys.argv[1]+'/dependencies'];import xuloom,xuloom.core.session_mutation,xuloom.core.engine,xuloom.skills.terminal;from xuloom.protocols.mcp_bridge import MCP_AVAILABLE;assert MCP_AVAILABLE;assert xuloom.__version__==sys.argv[2];print('Staged engine, version and bundled dependencies verified')",
+        str(stage), version], cwd=stage, check=True)
     manifest = {"metadataDirectory": metadata, "buildId": build_id, "pythonPackages": [p.name for p in dependencies.iterdir() if p.name != "__pycache__"],
         "originalExeSha256": hashlib.sha256(executable.read_bytes()).hexdigest(), "bundledSkills": skills}
     (stage / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")

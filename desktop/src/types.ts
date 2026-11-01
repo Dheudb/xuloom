@@ -110,6 +110,8 @@ export type SessionCatalog = {
   view: { sort: "recent" | "oldest" | "name" | "created" };
 };
 export type InitialSession = {
+  controlledExecution?: boolean;
+  controlledModel?: string;
   remote?: RemoteLocation;
   executionMode?: "host" | "workspace";
   collaborationMode?: "solo" | "auto" | "ultra";
@@ -133,6 +135,10 @@ export type InitialSession = {
 export type RemoteLocation = { connectionId: string; host: string; name: string; key: string; hostname?: string };
 export type EngineEvent = { session: string; type: string; [key: string]: any };
 export type Worker = {
+  executor?: string;
+  outcome_unknown?: boolean;
+  pending_message_count?: number;
+  remote_reference?: { url: string; host: string; cwd: string; machine: string; session_id: string; connection_id: string };
   agent_id: string;
   agent_type?: string;
   description?: string;

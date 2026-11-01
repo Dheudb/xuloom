@@ -4,8 +4,9 @@ import { Check, Puzzle } from "lucide-react";
 import type { Capabilities, Skill } from "./types";
 import { removeSkillMention, skillMention, skillScope } from "./skill-mention";
 
-export default function SkillInput({ sessionId, draft, selected, capabilities, disabled, inputRef, update, send, editPrevious }: {
+export default function SkillInput({ sessionId, draft, selected, capabilities, disabled, placeholder, inputRef, update, send, editPrevious }: {
   sessionId: string; draft: string; selected: string[]; capabilities?: Capabilities; disabled: boolean;
+  placeholder?: string;
   inputRef: RefObject<HTMLTextAreaElement | null>;
   update: (patch: { draft?: string; selected?: string[]; capabilities?: Capabilities }) => void;
   send: () => void;
@@ -69,7 +70,7 @@ export default function SkillInput({ sessionId, draft, selected, capabilities, d
     </div>}
     <textarea ref={inputRef} aria-label="任务输入" aria-autocomplete="list" aria-controls={open ? "skill-options" : undefined}
       aria-expanded={open} aria-activedescendant={open && options.length ? "skill-option-" + index : undefined}
-      placeholder={selected.length ? "" : sessionId ? "和 Xuloom 一起工作，输入 $ 选择 Skill…" : "点击新建会话即可开始，也可以打开项目…"}
+      placeholder={placeholder ?? (selected.length ? "" : sessionId ? "和 Xuloom 一起工作，输入 $ 选择 Skill…" : "点击新建会话即可开始，也可以打开项目…")}
       disabled={disabled} value={draft}
       onFocus={() => { setFocused(true); setCaret(inputRef.current?.selectionStart || 0); }}
       onBlur={() => setFocused(false)} onSelect={(event) => setCaret(event.currentTarget.selectionStart)}

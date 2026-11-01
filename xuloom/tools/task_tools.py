@@ -33,6 +33,9 @@ class _BaseTaskTool(BaseAgenticTool):
     def _task_manager(self):
         return self.context.get("shell_task_manager")
 
+    def _owner(self):
+        return self.context.get("agent_id") if self.context.get("agent_depth") else None
+
 
 class TaskCreateTool(_BaseTaskTool):
     workspace_paths = {"cwd": True}
@@ -63,7 +66,7 @@ class TaskCreateTool(_BaseTaskTool):
                 metadata={"command": command, "cwd": cwd},
                 is_error=True,
             )
-        record = await task_manager.start_task(command, cwd=cwd)
+        record = await task_manager.start_task(command, cwd=cwd, owner=self.context.get("agent_id"))
         return build_tool_result(
             ok=True,
             content=f"Background task started: {record['task_id']}",
@@ -80,7 +83,7 @@ class TaskStatusTool(_BaseTaskTool):
 
     async def execute(self, task_id: str) -> dict:
         task_manager = self._task_manager()
-        record = task_manager.get_task(task_id) if task_manager else None
+        record = task_manager.get_task(task_id, owner=self._owner()) if task_manager else None
         if not record:
             return build_tool_result(
                 ok=False,
@@ -104,7 +107,7 @@ class TaskReadTool(_BaseTaskTool):
 
     async def execute(self, task_id: str, tail_chars: int = 4000) -> dict:
         task_manager = self._task_manager()
-        record = task_manager.read_output(task_id, tail_chars=tail_chars) if task_manager else None
+        record = task_manager.read_output(task_id, tail_chars=tail_chars, owner=self._owner()) if task_manager else None
         if not record:
             return build_tool_result(
                 ok=False,
@@ -132,7 +135,7 @@ class TaskKillTool(_BaseTaskTool):
 
     async def execute(self, task_id: str) -> dict:
         task_manager = self._task_manager()
-        record = await task_manager.terminate_task(task_id) if task_manager else None
+        record = await task_manager.terminate_task(task_id, owner=self._owner()) if task_manager else None
         if not record:
             return build_tool_result(
                 ok=False,
@@ -156,7 +159,7 @@ class TaskListTool(_BaseTaskTool):
 
     async def execute(self) -> dict:
         task_manager = self._task_manager()
-        tasks = task_manager.list_tasks() if task_manager else []
+        tasks = task_manager.list_tasks(owner=self._owner()) if task_manager else []
         return build_tool_result(
             ok=True,
             content="Background task list retrieved.",

@@ -50,18 +50,21 @@ class AgentRegistry:
                     if servers is not None and (not isinstance(servers, list) or not all(isinstance(v, str) for v in servers)):
                         raise ValueError("mcp_servers must be a list of server names; [] disables MCP")
                     readonly = metadata.get("read_only", False)
+                    from xuloom.agents.executors import executor
+                    location = executor(metadata.get("executor"))
                     if type(readonly) is not bool:
                         raise ValueError("read_only must be a boolean")
                     if "sandbox_mode" in metadata:
                         raise ValueError("sandbox_mode is not supported; use explicit tools and read_only (not an OS sandbox)")
                     entry.update(name=name, description=description, system_prompt=body, model=metadata.get("model"), allowed_tools=tool_list(metadata.get("tools")), skills=tool_list(metadata.get("skills", []), aliases=False), agent_type=name, agent_role="custom", disallowed_tools=set())
-                    entry.update(reasoning_effort=effort, web_search=web, mcp_servers=servers, read_only=readonly, connection=connection)
+                    entry.update(reasoning_effort=effort, web_search=web, mcp_servers=servers, read_only=readonly, connection=connection, executor=location)
                     if name in BUILTIN_AGENTS:
                         raise ValueError("Custom agent name conflicts with a built-in agent")
                     if any("(" in tool for tool in entry["allowed_tools"]):
                         raise ValueError("Per-command tool patterns are unsupported; use exact tool names")
-                    for skill_name in entry["skills"]:
-                        self.skills.resolve(skill_name)
+                    if location == "local":
+                        for skill_name in entry["skills"]:
+                            self.skills.resolve(skill_name)
                     entry["shadowed"] = name in names
                     names.add(name)
                 except (OSError, UnicodeError, ValueError, yaml.YAMLError) as exc:

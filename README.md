@@ -13,7 +13,7 @@
 
 Windows 下载包自带 Python 和 MCP SDK，无需安装 Python、选择解释器或安装 Node.js。第三方 MCP 程序可能另需 Node.js、uv 等环境，按服务说明准备。
 
-当前版本为 **v0.1.5**。现有可下载成品面向 Windows x64；Linux/macOS 可使用源码 CLI，尚无对应的桌面发行包。
+当前源码版本为 **v0.1.6**，可下载成品及校验和以 Releases 为准。成品面向 Windows x64；Linux/macOS 可使用源码 CLI，尚无对应的桌面发行包。
 
 执行过程按操作显示图标和简短说明：图片、编辑、终端、搜索等各有标识，点击过程行可展开参数与结果，完成后整轮过程自动折叠。读取图片会显示可点击放大的缩略图；会话保存图片快照，原文件被修改或删除后仍能回看。预览本身不会调用模型；模型理解图片还需所连接的接口支持图片输入。
 
@@ -33,7 +33,9 @@ Xuloom 支持 **OpenAI 兼容 Chat Completions** 和 **Anthropic Messages**。�
 
 右键会话可复制聊天深链接；CLI 可生成、解析或打开同一地址。SSH 链接选择本机已配置目标，不是跨账户的云分享链接。离线或损坏的本机引用可以在 SSH 设置里移除，不删除远端历史。详见 [SSH 远程](docs/remote.md)、[聊天链接](docs/chat-links.md) 与 [实例及角色模型绑定](docs/runtime-connections.md)。
 
-分布式子代理与外部 CLI 后端仍在 [持续目标](docs/product-roadmap.md) 中，不能由“支持 SSH”推断这些能力已接入。
+**原生分布式子代理：** 在 **设置 → Subagents → 新建** 选择执行位置（本机或已配置 SSH 主机）、对应主机的模型连接及模型。角色仍由现有队列派发，支持跟进、消息、结果和拥有者确认的取消；无后台命令的已完成 worker 会释放 SSH 连接。远端历史和文件可以从代理卡片打开，受控历史不能绕过主会话执行。App 与 CLI 共用角色文件，执行主机需安装兼容的 v0.1.6 worker 协议；不会复制本机模型凭据或 Skill 文件。详见 [分布式子代理](docs/distributed-workers-plan.md)。
+
+Codex、Claude Code、Pi、DSH 等外部 CLI 后端仍在 [持续目标](docs/product-roadmap.md) 中，不能把原生 SSH worker 当成这些后端已实现。
 
 ## 图片、视频、语音与音乐
 

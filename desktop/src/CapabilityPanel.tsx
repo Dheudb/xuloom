@@ -30,6 +30,7 @@ export default function CapabilityPanel({
   update,
   onError,
   onOpenFile,
+  onNavigateChat,
   activityQuery,
 }: {
   session?: SessionView;
@@ -40,6 +41,7 @@ export default function CapabilityPanel({
   update: (patch: Partial<SessionView>) => void;
   onError: (e: unknown) => void;
   onOpenFile: (path: string, change?: FileChange) => void;
+  onNavigateChat: (url: string) => void;
   activityQuery?: string;
 }) {
   const [preview, setPreview] = useState<{ name: string; text: string; kind?: "agent" } | null>(
@@ -247,9 +249,9 @@ export default function CapabilityPanel({
                         </div>
                         <p>{worker.task}</p>
                         <div className="card-meta">
-                          <span>{worker.agent_type || "子代理"} · {worker.model || "继承主模型"}</span>
+                          <span>{worker.agent_type || "子代理"} · {worker.model || (worker.executor?.startsWith("ssh:") ? "执行主机默认模型" : "继承主模型")}</span>
                           <span>
-                            {worker.status === "queued" ? worker.phase === "awaiting_resume" ? "等待恢复队列" : "排队中" : worker.status === "running"
+                            {worker.outcome_unknown ? "结果待确认" : worker.status === "queued" ? worker.phase === "awaiting_resume" ? "等待恢复队列" : "排队中" : worker.status === "running"
                               ? worker.phase === "starting" ? "启动中" : "执行中"
                               : worker.status === "completed"
                                 ? "已完成"
@@ -259,9 +261,11 @@ export default function CapabilityPanel({
                           </span>
                         </div>
                         {worker.started_at && <div className="card-meta"><span>启动 {new Date(worker.started_at).toLocaleTimeString("zh-CN", { hour12: false })}</span></div>}
+                        {!!worker.pending_message_count && <p className="fine-print">{worker.pending_message_count} 条消息待处理{worker.status !== "running" && " · 请在主会话继续此代理"}</p>}
+                        {worker.remote_reference && <div className="card-meta" title={worker.remote_reference.cwd}><span>SSH · {worker.remote_reference.machine || worker.remote_reference.host}</span><button className="text-button" onClick={() => onNavigateChat(worker.remote_reference!.url)}>查看远端历史与文件</button></div>}
                         {worker.status === "queued" && worker.phase === "awaiting_resume" && <button className="text-button" disabled={session.busy}
                           onClick={() => invoke("agents.resume_queue", { agentIds: [worker.agent_id] }).then(refresh).catch(onError)}>恢复排队</button>}
-                        {["queued", "running"].includes(worker.status) && (
+                        {(["queued", "running"].includes(worker.status) || worker.outcome_unknown) && (
                           <button
                             className="text-button"
                             onClick={() =>
@@ -326,6 +330,7 @@ export default function CapabilityPanel({
                       <button className="text-button" onClick={() => invoke("agents.read", { name: agent.name }).then((text) => setPreview({ name: agent.name, text, kind: "agent" })).catch(onError)}>查看代理定义</button>
                       <button
                         className="text-button"
+                        disabled={session.controlledExecution}
                         onClick={() =>
                           update({
                             draft:

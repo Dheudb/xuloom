@@ -22,17 +22,26 @@ def create_definition(registry, params):
         model = str(params.get("model") or "inherit").strip()
         if len(model) > 256: raise ValueError("模型 ID 过长")
         metadata["model"] = model
+        from xuloom.agents.executors import executor, profile
+        location = executor(params.get("executor"))
+        if location != "local":
+            profile(location)
+            metadata["executor"] = location
         connection = params.get("connection")
         if connection:
-            from xuloom.agents.connections import resolve_connection
-            resolve_connection(connection, None if model == "inherit" else model)
+            if not isinstance(connection, str) or not connection.strip() or len(connection) > 256:
+                raise ValueError("模型连接 ID 无效")
+            if location == "local":
+                from xuloom.agents.connections import resolve_connection
+                resolve_connection(connection, None if model == "inherit" else model)
             metadata["connection"] = connection
         if params.get("tools", "").strip():
             tools = tool_list(params["tools"])
             if any("(" in tool for tool in tools): raise ValueError("请使用工具名称，不支持命令模式")
             metadata["tools"] = tools
         skills = tool_list(params.get("skills", ""), aliases=False)
-        for skill in skills: registry.resolve(skill)
+        if location == "local":
+            for skill in skills: registry.resolve(skill)
         if skills: metadata["skills"] = skills
     base = registry.home if scope == "global" else registry.cwd
     root = base / ".xuloom" / kind

@@ -10,6 +10,7 @@ class SubagentTasks:
         self.queue_limit = queue_limit
         self.tasks = {}
         self.results = {}
+        self.backends = {}  # Optional transport handles; admission still uses this FIFO.
         self.delivered = set()
         self.running = set()
         self.pending = deque()
@@ -138,6 +139,15 @@ class SubagentTasks:
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+            failures = []
+            for identity, backend in list(self.backends.items()):
+                try:
+                    await backend.close()
+                    self.backends.pop(identity, None)
+                except Exception as error:
+                    failures.append(error)
+            if failures:
+                raise failures[0]
         finally:
             self._closing = False
 

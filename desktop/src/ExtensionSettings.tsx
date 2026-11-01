@@ -9,7 +9,8 @@ export default function ExtensionSettings({ kind, busy, invoke, changed }: {
   const [data, setData] = useState<Capabilities>(), [pending, setPending] = useState(false), [error, setError] = useState(""), [notice, setNotice] = useState("");
   const [creating, setCreating] = useState(false), [preview, setPreview] = useState("");
   const [connections, setConnections] = useState<ModelConnection[]>([]);
-  const [form, setForm] = useState({ name: "", description: "", prompt: "", scope: "global", connection: "", model: "inherit", tools: "", skills: "" });
+  const [hosts, setHosts] = useState<{ id: string; name: string; host: string }[]>([]), [loadingModels, setLoadingModels] = useState(false);
+  const [form, setForm] = useState({ name: "", description: "", prompt: "", scope: "global", executor: "local", connection: "", model: "inherit", tools: "", skills: "" });
   const label = kind === "skills" ? "Skill" : "Subagent";
   async function action(method: string, params = {}) {
     setPending(true); setError(""); setNotice("");
@@ -21,7 +22,14 @@ export default function ExtensionSettings({ kind, busy, invoke, changed }: {
     finally { setPending(false); }
   }
   useEffect(() => { void action("capabilities.list"); }, []);
-  useEffect(() => { if (kind === "agents") { let active = true; void invoke("config.get").then(value => { if (active) setConnections(value.connections || []); }).catch(e => { if (active) setError(String(e)); }); return () => { active = false; }; } }, [kind]);
+  useEffect(() => { if (kind === "agents") { let active = true; void invoke("remote.profiles").then(value => { if (active) setHosts(value.connections || []); }).catch(e => { if (active) setError(String(e)); }); return () => { active = false; }; } }, [kind]);
+  useEffect(() => { if (kind === "agents") {
+    let active = true; setLoadingModels(true); setConnections([]); setError("");
+    void invoke(form.executor === "local" ? "config.get" : "remote.models", form.executor === "local" ? {} : { id: form.executor.slice(4) })
+      .then(value => { if (active) setConnections(value.connections || []); })
+      .catch(e => { if (active) setError(String(e)); }).finally(() => { if (active) setLoadingModels(false); });
+    return () => { active = false; };
+  } }, [kind, form.executor]);
   const selectedConnection = connections.find(item => item.connectionId === form.connection);
   const entries = data?.[kind] || [];
   const root = data?.settings[kind === "skills" ? form.scope === "global" ? "globalSkillsRoot" : "projectSkillsRoot" : form.scope === "global" ? "globalAgentsRoot" : "projectAgentsRoot"];
@@ -36,9 +44,11 @@ export default function ExtensionSettings({ kind, busy, invoke, changed }: {
         <p className="extension-path">{root}</p>
         <label>名称<input aria-label="扩展名称" required maxLength={64} pattern="[a-z0-9]+(-[a-z0-9]+)*" placeholder="my-research" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></label>
         <label>描述与使用时机<input aria-label="扩展描述" required maxLength={1024} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></label>
-        {kind === "agents" && <><label>供应商连接<select aria-label="代理连接" value={form.connection} onChange={e => setForm({ ...form, connection: e.target.value, model: "inherit" })}><option value="">继承主代理连接</option>{connections.map(item => <option key={item.connectionId} value={item.connectionId}>{item.connectionName} · {item.provider}</option>)}</select></label>
+        {kind === "agents" && <><label>执行位置<select aria-label="代理执行位置" value={form.executor} onChange={e => setForm({ ...form, executor: e.target.value, connection: "", model: "inherit" })}><option value="local">本机 · 当前工作目录</option>{hosts.map(host => <option key={host.id} value={`ssh:${host.id}`}>SSH · {host.name} · {host.host}</option>)}</select></label>
+          <label>供应商连接<select aria-label="代理连接" disabled={loadingModels} value={form.connection} onChange={e => setForm({ ...form, connection: e.target.value, model: "inherit" })}><option value="">{form.executor === "local" ? "继承主代理连接" : "执行主机的默认连接"}</option>{connections.map(item => <option key={item.connectionId} value={item.connectionId}>{item.connectionName} · {item.provider}</option>)}</select></label>
+          {loadingModels && <p role="status" className="fine-print">正在读取执行主机的模型连接…</p>}
           <label>模型{selectedConnection ? <select aria-label="代理模型" value={form.model} onChange={e => setForm({ ...form, model: e.target.value })}><option value="inherit">连接的默认模型 · {selectedConnection.model}</option>{selectedConnection.models.map(model => <option key={model} value={model}>{model}</option>)}</select> : <input aria-label="代理模型" value={form.model} onChange={e => setForm({ ...form, model: e.target.value })} />}</label>
-          <p className="fine-print">连接与模型在任务入队时固定；后续可以轮换 Key，不能把已排队或已有历史的任务静默改派到另一地址。</p>
+          <p className="fine-print">{form.executor === "local" ? "连接与模型在任务入队时固定；后续可以轮换 Key，不能把已有任务静默改派到另一地址。" : "沿用已配置 SSH 主机的工作目录。模型、Skills 和 MCP 在执行主机解析；本机 Key 和技能文件不会上传。主机目标在入队时固定，模型在远端打开任务时固定。"}</p>
           <label>允许工具（逗号分隔；留空继承）<input aria-label="代理工具" placeholder="Read, Grep, Glob, Skill" value={form.tools} onChange={e => setForm({ ...form, tools: e.target.value })} /></label><label>挂载 Skills（逗号分隔）<input aria-label="代理技能" value={form.skills} onChange={e => setForm({ ...form, skills: e.target.value })} /></label></>}
         <label>执行指令<textarea aria-label="扩展指令" required rows={7} maxLength={100000} value={form.prompt} onChange={e => setForm({ ...form, prompt: e.target.value })} /></label>
         <small>保存在你的配置目录中，不打包进 EXE；不会覆盖已有同名文件。</small>

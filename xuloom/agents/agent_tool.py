@@ -106,11 +106,19 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
     ) -> str:
         preview = prompt[:240] + ("..." if len(prompt) > 240 else "") if prompt else "<empty>"
         agent_type_str = subagent_type or "general-purpose"
+        location = ""
+        if action == "spawn":
+            definition = self._roles().get(agent_type_str, {})
+            if definition.get("executor", "local") != "local":
+                from xuloom.agents.executors import profile
+                host = profile(definition["executor"], self.context)
+                location = f"execution_host: {host['host']}\nexecution_directory: {host['cwd']}\n"
         return (
             "Sub-agent delegation requested.\n"
             f"action: {action}\nagent_id: {agent_id or '<new>'}\n"
             f"description: {description}\n"
             f"subagent_type: {agent_type_str}\n"
+            f"{location}"
             f"model: {model or '<inherit>'}\n"
             f"run_in_background: {run_in_background}\n"
             f"parallel_agent_count: {count}\n"
@@ -442,17 +450,21 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
                 team.deactivate_member(child_agent_id)
             if not completed and sub_engine.tool_context.get("command_sessions"):
                 await sub_engine.tool_context["command_sessions"].close(owner=child_agent_id)
+            if not completed:
+                await sub_engine.shell_task_manager.close(owner=child_agent_id)
             await sub_engine.client.close()
             if getattr(sub_engine.compactor, "client", None):
                 await sub_engine.compactor.client.close()
 
     def _format_single_report(self, payload: dict) -> str:
+        uncertainty = "Remote execution or resource cleanup still requires confirmation.\n" if payload.get("outcome_unknown") else ""
         return (
             "=======[ SUB-AGENT COMPLETION REPORT ]=======\n"
             f"Agent ID: {payload.get('agent_id')}\n"
             f"Role: {payload.get('agent_role', 'subagent')}\n"
             f"Task Handled: {payload.get('task')}\n"
             f"Status: {payload.get('status')}\n\n"
+            f"{uncertainty}"
             f"Outcome / Findings:\n{payload.get('result')}\n"
             "==============================================="
         )
@@ -542,11 +554,17 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
         builtin_def = registry.resolve(subagent_type or "general-purpose")
         builtin_def = copy.deepcopy(builtin_def)
         builtin_def["disallowed_tools"] = list(builtin_def.get("disallowed_tools", []))
+        from xuloom.agents.executors import executor, profile as execution_profile
+        location = executor(builtin_def.get("executor"))
+        remote = location != "local"
+        if remote:
+            execution_profile(location, self.context)
+            builtin_def["model"] = model or builtin_def.get("model")
         binding = None
-        if builtin_def.get("connection"):
+        if not remote and builtin_def.get("connection"):
             from xuloom.agents.connections import resolve_connection
             binding, _ = resolve_connection(builtin_def["connection"], model or builtin_def.get("model"))
-        if binding is None and (model or builtin_def.get("model") or self.context.get("primary_model")) == self.context.get("primary_model"):
+        if not remote and binding is None and (model or builtin_def.get("model") or self.context.get("primary_model")) == self.context.get("primary_model"):
             builtin_def["reasoning_effort"] = builtin_def.get("reasoning_effort") or self.context.get("reasoning_effort")
         if reasoning_effort:
             from xuloom.core.reasoning import EFFORTS
@@ -554,8 +572,8 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
                 raise ValueError("Unsupported reasoning_effort")
             builtin_def["reasoning_effort"] = reasoning_effort
         from xuloom.core.reasoning import configured_profile, request_options
-        target_model = binding["model"] if binding else model or builtin_def.get("model") or self.context.get("primary_model")
-        target_profile = binding["contract"]["reasoning"] if binding else (self.context.get("reasoning_profile") if target_model == self.context.get("primary_model")
+        target_model = builtin_def.get("model") if remote else binding["model"] if binding else model or builtin_def.get("model") or self.context.get("primary_model")
+        target_profile = None if remote else binding["contract"]["reasoning"] if binding else (self.context.get("reasoning_profile") if target_model == self.context.get("primary_model")
             else configured_profile(self.context.get("model_provider"), target_model, self.context.get("api_base_url")))
         if target_profile is not None:
             request_options(target_profile, binding["provider"] if binding else self.context.get("model_provider"), effort_override=builtin_def.get("reasoning_effort"))
@@ -564,7 +582,7 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
         parent_agent_id = self.context.get("agent_id")
 
         allowed = builtin_def.get("allowed_tools")
-        if allowed and "*" not in allowed:
+        if not remote and allowed and "*" not in allowed:
             available = {**self.context.get("engine_available_tools", {}), **self.context.get("latent_tools_registry", {})}
             unknown = set(allowed) - set(available)
             if unknown:
@@ -590,6 +608,7 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
             "task": prompt[:240] + ("..." if len(prompt) > 240 else ""),
             "description": f"{description or '子代理'} {index + 1}/{count}" if count > 1 else description,
             "model": target_model,
+            "executor": location,
             "connection_binding": copy.deepcopy(binding),
             "background": run_in_background,
             "role_definition": copy.deepcopy(builtin_def),
@@ -601,9 +620,14 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
             "dispatch": {"task": prompt, "allowed_tools": allowed, "inherit_context": inherit_context,
                 "parent_depth": parent_depth, "parent_agent_id": parent_agent_id, "builtin_agent_def": copy.deepcopy(builtin_def),
                 "model": target_model, "background": run_in_background, "connection_binding": copy.deepcopy(binding)},
-            "provider": binding["provider"] if binding else self.context.get("model_provider"),
-            "api_base_url": binding["api_base_url"] if binding else self.context.get("api_base_url"),
+            "provider": None if remote else binding["provider"] if binding else self.context.get("model_provider"),
+            "api_base_url": None if remote else binding["api_base_url"] if binding else self.context.get("api_base_url"),
         } for index in range(count)]
+        if remote:
+            from xuloom.agents.remote_worker import prepare
+            reference = self._filter_incomplete_tool_messages(self.context.get("messages", [])) if inherit_context else None
+            for record in records:
+                record["dispatch"]["remote"] = prepare(self.context, builtin_def, record, reference)
         # Register every card before any child can make a model request.
         try:
             for record in records:
@@ -654,7 +678,13 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
             from xuloom.agents.collaboration import DELEGATION_BUDGET
             token = DELEGATION_BUDGET.set(self.context.get("collaboration_run"))
             try:
-                payload = await self._run_single_subagent(**kwargs, owner_turn_id=record.get("owner_turn_id"))
+                if record.get("executor", "local") != "local":
+                    from xuloom.agents.remote_worker import RemoteWorker
+                    controls = self.context["subagent_tasks"].backends
+                    handle = controls.setdefault(record["agent_id"], RemoteWorker(self, record["agent_id"]))
+                    payload = await handle.run()
+                else:
+                    payload = await self._run_single_subagent(**kwargs, owner_turn_id=record.get("owner_turn_id"))
             finally:
                 DELEGATION_BUDGET.reset(token)
         except asyncio.CancelledError:

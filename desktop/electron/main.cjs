@@ -58,6 +58,7 @@ const attachments = new Attachments(catalog, nativeImage);
 let workspaceQueue = Promise.resolve();
 let catalogRevision = 0;
 const engineMethods = new Set([
+  "remote.profiles", "remote.models",
   "collaboration.get", "collaboration.set", "agents.resume_queue", "execution.get", "execution.set",
   "goal.get", "goal.create", "goal.run", "goal.control", "goal.update",
   "schedule.list", "schedule.add", "schedule.control",
@@ -492,7 +493,7 @@ async function invoke(method, params) {
     if (method !== "media.connections" && [...sessions.values()].some(running)) throw new Error("请先停止运行中的任务，再修改媒体连接");
     return globalConfig().request(method, params);
   }
-  if (["remote.profiles", "remote.save", "remote.remove", "remote.check"].includes(method))
+  if (["remote.profiles", "remote.models", "remote.save", "remote.remove", "remote.check"].includes(method))
     return globalConfig().request(method, params);
   if (method === "config.models") return globalConfig().request(method, params);
   if (method === "config.delete") {

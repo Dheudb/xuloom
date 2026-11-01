@@ -2,6 +2,7 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import threading
@@ -34,6 +35,18 @@ def main():
             text = json.dumps(last.get("content", ""))
             has_tool = body["messages"][-1]["role"] == "tool"
             delta, finish = {"content": "REMOTE_REPLY_"+body["model"]}, "stop"
+            if "delegate remote fixture" in text and self.path.startswith("/local-models/"):
+                tools = [row for row in body["messages"] if row["role"] == "tool"]
+                if not any(row.get("tool_call_id") == "spawn-remote-ui" for row in tools):
+                    name, identity, arguments = "spawn_agent", "spawn-remote-ui", {"prompt": "Greet once from this execution host", "subagent_type": "remote-auditor"}
+                elif tools[-1].get("tool_call_id") == "spawn-remote-ui":
+                    child = re.search(r"subagent-[a-f0-9-]+", str(tools[-1]["content"])).group()
+                    name, identity, arguments = "agent_tool", "wait-remote-ui", {"action": "wait", "agent_ids": [child], "timeout_ms": 30000, "response_format": "json"}
+                else:
+                    name = None
+                    delta = {"content": "REMOTE_WORKER_VERIFIED" if "REMOTE_REPLY_remote-b" in str(tools) else "REMOTE_WORKER_NOT_READY"}
+                if name:
+                    delta, finish = {"tool_calls": [{"index": 0, "id": identity, "type": "function", "function": {"name": name, "arguments": json.dumps(arguments)}}]}, "tool_calls"
             if "write report" in text and not has_tool:
                 delta, finish = {"tool_calls": [{"index": 0, "id": "write-report", "type": "function", "function": {"name": "file_write_tool", "arguments": json.dumps({"file_path": str(remote/"generated.md"), "content": "# Created remotely\nREMOTE_WRITTEN_ARTIFACT"})}}]}, "tool_calls"
             if "choose" in text and not has_tool:

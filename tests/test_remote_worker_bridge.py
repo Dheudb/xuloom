@@ -38,7 +38,11 @@ class WorkerBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.value = assignment()
 
     def bridge(self):
-        bridge = WorkerBridge(self.events.append, self.work); self.bridges.append(bridge); return bridge
+        def emit(event):
+            self.events.append(event)
+            if event.get("type") == "worker_budget":
+                asyncio.create_task(bridge.dispatch("respond", {"requestId": event["requestId"], "answer": {"ok": True, "id": str(uuid.uuid4()), "maximum": event["maximum"]}}))
+        bridge = WorkerBridge(emit, self.work); self.bridges.append(bridge); return bridge
 
     async def asyncTearDown(self):
         for bridge in self.bridges:
@@ -110,6 +114,26 @@ class WorkerBridgeTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError): await self.bridge().dispatch("worker.open", self.value)
         self.assertEqual(path.read_text(), "{broken"); self.assertEqual(self.local.records, [])
 
+    async def test_deleted_owned_checkpoint_is_not_recreated_and_desktop_history_cannot_write(self):
+        bridge = self.bridge(); opened = await bridge.dispatch("worker.open", self.value)
+        from xuloom.desktop.bridge import DesktopBridge
+        from xuloom.core.session import SessionManager
+        reader = DesktopBridge(lambda _: None, self.work)
+        try:
+            initial = await reader.dispatch("initialize", {"sessionId": opened["session_id"]})
+            self.assertTrue(initial["controlledExecution"])
+            with self.assertRaisesRegex(ValueError, "原主代理控制"):
+                await reader.ensure_engine(write=True)
+            self.assertIsNone(reader.engine); self.assertEqual(self.local.records, [])
+        finally:
+            await reader.close()
+        with SessionManager(cwd=str(self.work)) as manager:
+            path = Path(manager.session_dir) / (opened["session_id"] + ".json")
+        path.unlink()
+        with self.assertRaisesRegex(PersistenceError, "checkpoint is missing"):
+            await self.bridge().dispatch("worker.open", self.value)
+        self.assertFalse(path.exists()); self.assertEqual(self.local.records, [])
+
     async def test_unrelated_host_history_is_not_exposed_and_changed_control_is_rejected(self):
         bridge = self.bridge(); opened = await bridge.dispatch("worker.open", self.value)
         from xuloom.core.session import SessionManager
@@ -139,9 +163,14 @@ class WorkerSSHTests(unittest.IsolatedAsyncioTestCase):
         await self.fixture.asyncTearDown()
 
     async def connect(self):
-        client = SSHClient(self.fixture.profile, self.events.append, worker=True)
+        def emit(event):
+            self.events.append(event)
+            if event.get("type") == "worker_budget":
+                asyncio.create_task(client.request("respond", {"requestId": event["requestId"], "answer": {"ok": True, "id": str(uuid.uuid4()), "maximum": event["maximum"]}}))
+        client = SSHClient(self.fixture.profile, emit, worker=True)
         self.fixture.clients.append(client)
-        info = await client.start(); self.assertEqual(info["worker_protocol"], 1)
+        from xuloom.remote.worker_protocol import VERSION
+        info = await client.start(); self.assertEqual(info["worker_protocol"], VERSION)
         return client
 
     async def wait_event(self, kind):
@@ -189,6 +218,26 @@ class WorkerSSHTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await reader.request("worker.status"))["phase"], "cancelled")
         self.assertTrue((await reader.request("worker.start", params))["reused"])
         self.assertEqual(len(self.fixture.local.records), before)
+
+    async def test_cross_channel_cancel_waits_for_the_actual_owner_cleanup_receipt(self):
+        started = self.fixture.hold_model()
+        owner = await self.connect(); value = assignment(); await owner.request("worker.open", value)
+        run_id = str(uuid.uuid4()); await owner.request("worker.start", {"run_id": run_id, "text": "Wait for controlled cancellation"})
+        self.assertTrue(await asyncio.to_thread(started.wait, 10))
+        reader = await self.connect(); await reader.request("worker.open", value)
+        with self.assertRaises(RemoteRequestError): await reader.request("worker.cancel", {"run_id": "different-run"})
+        response = await reader.request("worker.cancel", {"run_id": run_id})
+        self.assertTrue(response["requested"]); self.assertFalse(response["stopped"])
+        async def confirmed():
+            while True:
+                snapshot = await reader.request("worker.status")
+                if snapshot["cleanup_confirmed"]: return snapshot
+                await asyncio.sleep(.1)
+        final = await asyncio.wait_for(confirmed(), 10)
+        self.assertEqual(final["phase"], "cancelled")
+        repeated = await reader.request("worker.cancel", {"run_id": run_id})
+        self.assertTrue(repeated["stopped"]); self.assertFalse(repeated["requested"])
+        self.assertEqual(len(self.fixture.local.records), 1)
 
     async def test_real_remote_tool_waits_for_live_parent_authority_even_under_full_access(self):
         fixture = self.fixture

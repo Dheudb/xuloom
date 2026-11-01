@@ -863,6 +863,7 @@ class QueryEngine:
         had_workers = bool(workers and any(not task.done() for task in workers.tasks.values()))
         if workers:
             await workers.close()
+        await self.shell_task_manager.close(owner=self.agent_id if self.agent_depth else None)
         if not self.has_active_turn():
             return had_workers
 
@@ -2749,7 +2750,7 @@ class QueryEngine:
             "plan": self.plan_manager.export(),
             "sandbox": self.sandbox_manager.export_state(),
             "browser": self.browser_manager.export_state(),
-            "shell_tasks": self.shell_task_manager.export_state(),
+            "shell_tasks": self.shell_task_manager.export_state(owner=self.agent_id if self.agent_depth else None),
             "permissions": self.permission_manager.export_state(),
             "memory_files": self.memory_file_manager.export_state(),
             "file_state_cache": self.file_state_cache.export_state(),
@@ -2863,8 +2864,6 @@ class QueryEngine:
             await asyncio.gather(goal_task, return_exceptions=True)
         failures = await asyncio.gather(self.request_abort(), return_exceptions=True)
         stop = [self.tool_context["command_sessions"].close(owner=self.agent_id if self.agent_depth else None)]
-        if self.agent_depth == 0:
-            stop.extend(self.shell_task_manager.terminate_task(identity) for identity in list(self.shell_task_manager.tasks))
         failures.extend(await asyncio.gather(*stop, return_exceptions=True))
         if self.agent_depth == 0 and self.session_manager.owns_writer(self.session_id) and not any(isinstance(item, BaseException) for item in failures):
             try:
@@ -3359,18 +3358,29 @@ class QueryEngine:
         self, **kwargs,
     ):
         from xuloom.core.output_limits import active_budgets, reserve, settle
+        acquire = self.tool_context.get("acquire_model_budget")
+        lease = None
+        if acquire is not None:
+            lease = await acquire(kwargs["max_tokens"])
+            if not isinstance(lease, dict) or type(lease.get("maximum")) is not int or not 0 < lease["maximum"] <= kwargs["max_tokens"] or not isinstance(lease.get("id"), str):
+                raise ValueError("Delegating model budget did not return a valid reservation")
+            kwargs["max_tokens"] = lease["maximum"]
         budgets = active_budgets(self.tool_context.get("goal_budget"))
-        if not budgets:
-            return await self._receive_model_response(**kwargs)
-        reserved = reserve(kwargs["max_tokens"], budgets)
-        kwargs["max_tokens"] = reserved
+        reserved = None
         response = None
         try:
+            if budgets:
+                reserved = reserve(kwargs["max_tokens"], budgets)
+                kwargs["max_tokens"] = reserved
             response, entries, fallback = await self._receive_model_response(**kwargs)
             return response, entries, fallback
         finally:
             usage = self._serialize_response_usage(response) if response is not None else {}
-            settle(budgets, reserved, int(usage.get("output_tokens", 0) or 0))
+            reported = int(usage.get("output_tokens", 0) or 0)
+            if reserved is not None:
+                settle(budgets, reserved, reported)
+            if lease is not None:
+                self.tool_context["settle_model_budget"](lease, reported)
 
     async def _receive_model_response(
         self,
@@ -3999,8 +4009,13 @@ class QueryEngine:
             if mailbox:
                 incoming = mailbox()
                 if incoming:
+                    seen = {message.get("_delegated_message_id") for message in self.messages}
                     for message in incoming:
-                        self.messages.append(create_user_message("Parent message: " + message["text"], origin="subagent"))
+                        if message["id"] not in seen:
+                            item = create_user_message("Parent message: " + message["text"], origin="subagent")
+                            item["_delegated_message_id"] = message["id"]
+                            self.messages.append(item)
+                            seen.add(message["id"])
                     self._sync_message_context()
                     self.persist_session_state()
                     if self.session_manager.last_save_ok:
@@ -4417,6 +4432,11 @@ class QueryEngine:
                         self.memory_extractor.record_turn()
                         await self.memory_extractor.maybe_extract(self.messages)
                     self.persist_session_state()
+                    mailbox = self.tool_context.get("delegated_mailbox")
+                    if mailbox and mailbox():
+                        # A message accepted while the model was streaming is
+                        # still part of this assignment, not a completed reply.
+                        continue
                     return finish_run(self, (final_answer), 'completed')
                     
             except Exception as e:

@@ -5,7 +5,7 @@ import json
 import re
 import uuid
 
-VERSION = 1
+VERSION = 2
 IDENTITY = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 ROLE_FIELDS = {"agent_type", "agent_role", "system_prompt", "critical_reminder", "allowed_tools", "disallowed_tools",
     "skills", "model", "connection", "reasoning_effort", "web_search", "mcp_servers", "read_only", "omit_claude_md"}

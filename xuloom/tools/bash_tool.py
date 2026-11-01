@@ -216,7 +216,7 @@ When the user asks you to create a new git commit:
                     metadata={"command": command},
                     is_error=True,
                 )
-            record = await task_manager.start_task(command, cwd=cwd)
+            record = await task_manager.start_task(command, cwd=cwd, owner=self.context.get("agent_id"))
             return build_tool_result(
                 ok=True,
                 content=f"Background task started: {record['task_id']}",
