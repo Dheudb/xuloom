@@ -1,5 +1,6 @@
 """System OpenSSH + encrypted loopback SSH + real remote bridge and CLI."""
 import asyncio
+import io
 import json
 import os
 from pathlib import Path
@@ -20,6 +21,9 @@ from xuloom.remote.config import validate_profile, save, profiles, remove
 from xuloom.remote.ssh import SSHClient, RemoteDisconnected, RemoteRequestError, ssh_argv
 from xuloom.remote.cli import dispatch as remote_dispatch
 from xuloom.remote.proxy import SSHBridge
+from xuloom.remote.terminal import interactive_chat, PipeInput
+from xuloom.features.chat_links import remote_chat_link
+from rich.console import Console
 
 
 class SSHConfigTests(unittest.TestCase):
@@ -37,6 +41,18 @@ class SSHConfigTests(unittest.TestCase):
 
 
 class SSHProtocolTests(unittest.IsolatedAsyncioTestCase):
+    async def test_pipe_input_retains_utf8_and_can_cancel_an_idle_read_without_a_thread(self):
+        incoming, outgoing = os.pipe()
+        try:
+            with os.fdopen(incoming, "rb", buffering=0) as stream:
+                reader = PipeInput(stream)
+                waiting = asyncio.create_task(reader.read())
+                await asyncio.sleep(.06); waiting.cancel()
+                with self.assertRaises(asyncio.CancelledError): await waiting
+                os.write(outgoing, "你好\n/quit\n".encode("utf-8"))
+                self.assertEqual(await reader.read(), "你好"); self.assertEqual(await reader.read(), "/quit")
+        finally: os.close(outgoing)
+
     async def test_timeout_does_not_replay_request(self):
         writes = []
         class Input:
@@ -78,7 +94,7 @@ class SSHWireTests(unittest.IsolatedAsyncioTestCase):
         client = SSHClient(profile or self.profile, callback); self.clients.append(client)
         await client.start(); return client
 
-    def hold_model(self, *, question=False):
+    def hold_model(self, *, question=False, write=False):
         started, self.release = threading.Event(), threading.Event()
         owner = self
         def respond(handler):
@@ -88,22 +104,40 @@ class SSHWireTests(unittest.IsolatedAsyncioTestCase):
                 handler.send_response(200); handler.send_header("Content-Type", "application/json"); handler.end_headers()
                 handler.wfile.write(json.dumps({"choices": [{"message": {"role": "assistant", "content": "memory"}}]}).encode()); return
             delta = {"content": "partial remote"}
-            if question:
+            question_turn = question and body["messages"][-1]["role"] != "tool"
+            write_turn = write and body["messages"][-1]["role"] != "tool"
+            if question_turn:
                 delta = {"tool_calls": [{"index": 0, "id": "question", "type": "function", "function": {"name": "ask_user_question_tool", "arguments": json.dumps({"questions": [{"question": "Choose input", "options": [{"label": "A"}, {"label": "B"}]}]})}}]}
+            if write_turn:
+                delta = {"tool_calls": [{"index": 0, "id": "write", "type": "function", "function": {"name": "file_write_tool", "arguments": json.dumps({"file_path": str(owner.remote/"must-not-exist.txt"), "content": "DENIED_WRITE"})}}]}
             handler.send_response(200); handler.send_header("Content-Type", "text/event-stream"); handler.end_headers()
             def frame(value, finish=None): return ("data: "+json.dumps({"choices": [{"index": 0, "delta": value, "finish_reason": finish}]})+"\n\n").encode()
             try:
                 handler.wfile.write(frame(delta)); handler.wfile.flush(); started.set()
-                if not question: owner.release.wait(30)
-                handler.wfile.write(frame({}, "tool_calls" if question else "stop")+b"data: [DONE]\n\n")
+                if not question and not write: owner.release.wait(30)
+                handler.wfile.write(frame({}, "tool_calls" if question_turn or write_turn else "stop")+b"data: [DONE]\n\n")
             except (OSError, ConnectionError): pass
         self.local.server.RequestHandlerClass.do_POST = respond
         return started
 
-    async def run_cli(self, *args):
+    def cli_environment(self):
         config = self.root/"local-config"; config.mkdir(exist_ok=True)
         (config/"config.json").write_text(json.dumps({"ssh_connections": [self.profile], "model_connections": []}), encoding="utf-8")
         env = {**os.environ, "XULOOM_CONFIG_DIR": str(config), "XULOOM_DATA_DIR": str(self.root/"local-data"), "OPENAI_API_KEY": "never-forward-local-key", "XULOOM_SKILLS_PATHS": ""}
+        return env
+
+    async def program(self, argv, data=b""):
+        process = await asyncio.create_subprocess_exec(os.environ.get("XULOOM_TEST_LOCAL_PYTHON", sys.executable), "-I", "-m", "xuloom", *argv,
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=self.cli_environment())
+        communication = asyncio.create_task(process.communicate(data))
+        try: output, error = await asyncio.wait_for(asyncio.shield(communication), 45)
+        except asyncio.TimeoutError:
+            process.kill(); output, error = await communication
+            self.fail("CLI did not exit: " + output.decode("utf-8", "replace") + error.decode("utf-8", "replace"))
+        return process.returncode, output.decode("utf-8"), error.decode("utf-8")
+
+    async def run_cli(self, *args):
+        env = self.cli_environment()
         process = await asyncio.create_subprocess_exec(os.environ.get("XULOOM_TEST_LOCAL_PYTHON", sys.executable), "-I", "-m", "xuloom", "remote", *args, "--json", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env)
         communication = asyncio.create_task(process.communicate())
         try: output, error = await asyncio.wait_for(asyncio.shield(communication), 40)
@@ -114,6 +148,111 @@ class SSHWireTests(unittest.IsolatedAsyncioTestCase):
         events = [json.loads(line) for line in output.splitlines()]
         self.assertEqual(sum(event["type"] == "final" for event in events), 1, error.decode()+output.decode())
         return process.returncode, events, error.decode()
+
+    async def empty_chat(self):
+        client = await self.connect(); sid = (await client.request("sessions.create"))["sessionId"]
+        await client.aclose(); return sid
+
+    async def test_real_cli_links_and_terminal_resume_use_remote_history_and_never_a_local_engine(self):
+        sid = await self.empty_chat()
+        connections = len(self.server.commands)
+        code, output, error = await self.program(["remote", "chat", "test", "--json"])
+        self.assertEqual(code, 2); self.assertEqual(len(self.server.commands), connections)
+        code, output, error = await self.program(["chat-link", "--remote", "test", "--session", sid, "--json"])
+        self.assertEqual(code, 0, error+output)
+        result = json.loads(output)["result"]; url = result["url"]
+        self.assertTrue(result["chat"]["remote_verified"]); self.assertEqual(self.local.records, [])
+        connections = len(self.server.commands)
+        code, output, error = await self.program(["chat-link", "--resolve", url, "--json"])
+        self.assertEqual(code, 0, error); self.assertFalse(json.loads(output)["result"]["chat"]["remote_verified"])
+        self.assertEqual(len(self.server.commands), connections, "Resolving a URI must not launch SSH")
+        code, output, error = await self.program(["--chat", url], "/status\n/link\n你好 CLI\n/quit\n".encode("utf-8"))
+        self.assertEqual(code, 0, error+output); self.assertIn(url, output); self.assertIn("answer-remote", output)
+        self.assertNotIn("key-remote", output); self.assertNotIn("never-forward-local-key", output)
+        client = await self.connect(); history = (await client.request("initialize", {"sessionId": sid}))["history"]
+        self.assertEqual([row["text"] for row in history if row["role"] == "user"], ["你好 CLI"])
+        self.assertFalse((self.root/"local-data/history").exists())
+        for record in self.local.records: self.local.assert_credentials(record, "remote", "openai")
+        code, output, error = await self.program(["remote", "chat", "test", "--session", sid], b"/quit\n")
+        self.assertEqual(code, 0, error+output); self.assertIn("你好 CLI", output)
+
+    async def test_interactive_questions_wait_for_real_answers_and_model_controls_stay_remote(self):
+        self.hold_model(question=True)
+        sid = await self.empty_chat(); inputs = iter(["/model list", "/model use 1", "/permission full", "$web-research ask me", "2", "/quit"])
+        output = io.StringIO()
+        async def read(_): return next(inputs)
+        registry_readers = []
+        def terminal(registry):
+            registry_readers.append(registry)
+            async def prompt(label):
+                from prompt_toolkit.document import Document
+                from xuloom.skills.terminal import SkillCompleter
+                completions = list(SkillCompleter(registry).get_completions(Document("$we"), None))
+                self.assertTrue(any(choice.text == "web-research " for choice in completions))
+                return await read(label)
+            return SimpleNamespace(prompt_async=prompt)
+        with patch("xuloom.remote.proxy.resolve", return_value=self.profile), patch.object(sys.stdin, "isatty", return_value=True), patch.object(sys.stdout, "isatty", return_value=True), patch("xuloom.skills.terminal.input_session", side_effect=terminal):
+            result = await interactive_chat("test", session_id=sid, binding=self.profile, console=Console(file=output))
+        self.assertTrue(result["ok"], result); self.assertIn("Choose input", output.getvalue())
+        self.assertEqual(len(registry_readers), 1)
+        self.assertTrue(any(record["body"]["messages"][-1]["role"] == "tool" and "B" in json.dumps(record["body"]["messages"][-1]) for record in self.local.records))
+        self.assertEqual(sum(bool(r["body"].get("stream")) for r in self.local.records), 2)
+        self.assertTrue(any("Skill: web-research" in json.dumps(record["body"]) for record in self.local.records))
+
+    async def test_interactive_approval_never_defaults_to_allow_or_writes_on_deny(self):
+        self.hold_model(write=True); sid = await self.empty_chat()
+        inputs = iter(["write it", "", "2", "/quit"]); output = io.StringIO()
+        async def read(_): return next(inputs)
+        with patch("xuloom.remote.proxy.resolve", return_value=self.profile):
+            result = await interactive_chat("test", session_id=sid, binding=self.profile, read=read, console=Console(file=output))
+        self.assertTrue(result["ok"], result)
+        self.assertFalse((self.remote/"must-not-exist.txt").exists())
+        self.assertIn("空输入不会自动批准", output.getvalue())
+
+    async def test_bad_terminal_answer_stops_owned_turn_instead_of_leaving_an_invisible_pending_approval(self):
+        self.hold_model(write=True); sid = await self.empty_chat(); count = 0
+        async def read(_):
+            nonlocal count
+            count += 1
+            if count == 1: return "write it"
+            if count == 2: raise ValueError("malformed terminal answer")
+            return "/quit"
+        with patch("xuloom.remote.proxy.resolve", return_value=self.profile):
+            result = await interactive_chat("test", session_id=sid, binding=self.profile, read=read, console=Console(file=io.StringIO()))
+        self.assertTrue(result["ok"], result)
+        self.assertFalse((self.remote/"must-not-exist.txt").exists())
+        client = await self.connect()
+        self.assertEqual((await client.request("session.status", {"sessionId": sid}))["writer"], "available")
+        initial = await client.request("initialize", {"sessionId": sid})
+        self.assertEqual([message["text"] for message in initial["history"] if message["role"] == "user"], ["write it"])
+
+    async def test_interactive_stop_then_continue_keeps_the_original_prompt(self):
+        started = self.hold_model(); sid = await self.empty_chat(); inputs = iter(["original remote task", "/continue", "/quit"])
+        async def read(_):
+            value = next(inputs)
+            if value == "/continue": self.release.set()
+            return value
+        with patch("xuloom.remote.proxy.resolve", return_value=self.profile):
+            task = asyncio.create_task(interactive_chat("test", session_id=sid, binding=self.profile, read=read, console=Console(file=io.StringIO())))
+            self.assertTrue(await asyncio.to_thread(started.wait, 20)); task.cancel()
+            result = await asyncio.wait_for(task, 30)
+        self.assertTrue(result["ok"], result)
+        client = await self.connect(); initial = await client.request("initialize", {"sessionId": sid})
+        self.assertEqual([row["text"] for row in initial["history"] if row["role"] == "user"], ["original remote task"])
+        self.assertEqual(sum(bool(r["body"].get("stream")) for r in self.local.records), 2)
+
+    async def test_interactive_disconnect_cancels_idle_input_without_a_pending_stdin_thread(self):
+        sid = await self.empty_chat(); reading, cancelled = asyncio.Event(), asyncio.Event()
+        async def read(_):
+            reading.set()
+            try: await asyncio.Future()
+            finally: cancelled.set()
+        with patch("xuloom.remote.proxy.resolve", return_value=self.profile):
+            task = asyncio.create_task(interactive_chat("test", session_id=sid, binding=self.profile, read=read, console=Console(file=io.StringIO())))
+            await asyncio.wait_for(reading.wait(), 20); self.server.disconnect()
+            result = await asyncio.wait_for(task, 15)
+        self.assertEqual(result["reason"], "remote_disconnected"); self.assertTrue(result["outcome_unknown"])
+        self.assertTrue(cancelled.is_set()); self.assertEqual(self.local.records, [])
 
     async def test_handshake_history_files_status_and_git_need_no_model(self):
         client = await self.connect()

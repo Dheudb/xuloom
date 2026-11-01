@@ -386,7 +386,7 @@ async function invoke(method, params) {
   const routed = await remote.handle(method, params);
   if (routed.handled) return routed.value;
   if (method === "chat.copy") {
-    const row = catalog.find(params.id);
+    const row = remote.remoteId(params.id) ? remote.find(params.id) : catalog.find(params.id);
     const url = chatLink(row.id);
     clipboard.writeText(url);
     return { url };
@@ -400,6 +400,11 @@ async function invoke(method, params) {
   if (method === "chat.open") {
     parseLink(params.url);
     const resolved = await globalConfig().request("chat.resolve", { url: params.url });
+    if (resolved.transport === "ssh") {
+      // Use the frozen target checked by the resolver, not a URI-supplied host.
+      return remote.openRow({ ...resolved, binding: resolved.binding, machine: resolved.machine, sessionId: resolved.session_id,
+        id: resolved.id, permissionMode: remote.projects().flatMap(project => project.sessions).find(row => row.id === resolved.id)?.permissionMode || "ask" });
+    }
     const snapshot = catalog.snapshot();
     if (snapshot.projects.some(project => projectKey(project.path) === projectKey(resolved.project) && project.archived))
       throw new Error("此项目已归档，请先在设置中恢复");

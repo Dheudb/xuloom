@@ -26,11 +26,12 @@ def parser():
     status = sub.add_parser("git-status", help="Read repository/branch without a model request")
     status.add_argument("--cwd", default=os.getcwd())
     status.add_argument("--json", action="store_true")
-    link = sub.add_parser("chat-link", help="Create or resolve a local chat address without calling a model")
+    link = sub.add_parser("chat-link", help="Create or resolve a local/known SSH chat address without calling a model")
     link.add_argument("--cwd", default=os.getcwd())
     mode = link.add_mutually_exclusive_group(required=True)
     mode.add_argument("--session")
     mode.add_argument("--resolve", metavar="URL")
+    link.add_argument("--remote", metavar="CONNECTION_ID", help="Verify an existing SSH session and create its link")
     link.add_argument("--json", action="store_true")
     for name in ("exec", "goal", "schedule"):
         item = sub.add_parser(name)
@@ -126,9 +127,21 @@ async def dispatch(args, emit):
         from xuloom.remote.cli import dispatch as remote_dispatch
         return await remote_dispatch(args, emit)
     if args.command == "chat-link":
-        from xuloom.features.chat_links import chat_link, resolve_link
-        url = args.resolve if args.resolve else chat_link(args.cwd, args.session)
+        from xuloom.features.chat_links import chat_link, remote_chat_link, resolve_link
+        if getattr(args, "remote", None) and args.resolve: raise ValueError("--remote cannot be combined with --resolve")
+        if getattr(args, "remote", None):
+            from xuloom.remote.config import resolve
+            url = remote_chat_link(resolve(args.remote), args.session)
+        else: url = args.resolve if args.resolve else chat_link(args.cwd, args.session)
         row = resolve_link(url)
+        if getattr(args, "remote", None):
+            from xuloom.remote.proxy import SSHBridge
+            bridge = SSHBridge(row["connection_id"], row["binding"], row["machine"], lambda _: None)
+            try:
+                connection = await bridge.dispatch("remote.connection", {})
+                await bridge.dispatch("initialize", {"sessionId": row["session_id"]})
+                row.update(remote_verified=True, machine=connection["machine"])
+            finally: await bridge.close()
         return {"ok": True, "reason": "completed", "url": url, "chat": row,
                 **({"text": url} if not args.resolve else {})}
     if args.command == "git-status":
@@ -216,6 +229,17 @@ def main(argv):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
     args = parser().parse_args(argv)
+    if args.command == "remote" and args.action == "chat":
+        if args.json: parser().error("remote chat is interactive; use remote exec --json for JSONL")
+        from xuloom.remote.terminal import interactive_chat
+        from xuloom.remote.config import resolve
+        try:
+            result = asyncio.run(interactive_chat(args.id, session_id=args.session, binding=resolve(args.id),
+                permission=args.permission, collaboration=args.collaboration, execution=args.sandbox))
+            return 0 if result["ok"] else EXIT_CODES.get(result["reason"], 1)
+        except KeyboardInterrupt: return 130
+        except (ValueError, OSError) as error:
+            print(str(error), file=sys.stderr); return 1
     wire = sys.stdout
     async def emit(event):
         if args.json:

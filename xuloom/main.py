@@ -925,7 +925,7 @@ def main():
                         help="Resume the most recent session")
     parser.add_argument("-r", "--resume", dest="resume_id", type=str, default=None,
                         help="Resume a specific session by ID")
-    parser.add_argument("--chat", metavar="URL", help="Open a local Xuloom chat link in this terminal")
+    parser.add_argument("--chat", metavar="URL", help="Open a local or configured SSH Xuloom chat in this terminal")
     parser.add_argument("-p", "--prompt", dest="prompt_text", type=str, default=None,
                         help="Send an initial prompt directly (non-interactive start)")
     parser.add_argument("-y", "--dangerously-skip-permissions", dest="auto_approve",
@@ -971,6 +971,14 @@ def main():
         _ProactorBasePipeTransport.__del__ = _silent_del
 
     try:
+        if linked and linked.get("transport") == "ssh":
+            for stream in (sys.stdin, sys.stdout, sys.stderr):
+                if hasattr(stream, "reconfigure"): stream.reconfigure(encoding="utf-8")
+            from xuloom.remote.terminal import interactive_chat
+            from xuloom.cli import EXIT_CODES
+            result = asyncio.run(interactive_chat(linked["connection_id"], session_id=linked["session_id"], binding=linked["binding"],
+                machine=linked["machine"], permission="full" if args.auto_approve else "ask", collaboration=args.collaboration, execution=args.sandbox))
+            raise SystemExit(0 if result["ok"] else EXIT_CODES.get(result["reason"], 1))
         asyncio.run(interactive_loop(
             resume_session_id=resume_id,
             initial_prompt=initial_prompt,
@@ -982,6 +990,9 @@ def main():
         ))
     except KeyboardInterrupt:
         pass
+    except (ValueError, OSError) as error:
+        console.print(str(error), markup=False)
+        raise SystemExit(1)
 
 if __name__ == "__main__":
     main()

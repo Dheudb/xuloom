@@ -5,12 +5,8 @@ import base64
 import json
 import sys
 
-from xuloom.remote.config import resolve, validate_profile
+from xuloom.remote.config import resolve, target
 from xuloom.remote.ssh import SSHClient, RemoteDisconnected
-
-
-def target(profile):
-    return {key: value for key, value in validate_profile(profile).items() if key != "name"}
 
 
 class SSHBridge:

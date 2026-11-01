@@ -117,7 +117,7 @@ export default function SessionSidebar({ catalog, activeId, live, opening, actio
         buttons[next]?.focus();
       }}>
       {value.kind === "session" ? <>
-        <button role="menuitem" disabled={!!value.row.remote} title={value.row.remote ? "SSH 会话深链接正在接入" : undefined} onClick={() => run("chat.copy", { id: value.row.id })}><Link2 size={14} />复制聊天链接</button>
+        <button role="menuitem" onClick={() => run("chat.copy", { id: value.row.id })}><Link2 size={14} />复制聊天链接</button>
         <button role="menuitem" onClick={() => { setRename(value); setName(value.row.title); setMenu(null); setError(""); }}><Pencil size={14} />重命名会话</button>
         <button role="menuitem" onClick={() => run("session.update", { id: value.row.id, patch: { pinned: !value.row.pinned } })}><Pin size={14} />{value.row.pinned ? "取消置顶" : "置顶会话"}</button>
         <button role="menuitem" onClick={() => run("session.update", { id: value.row.id, patch: { archived: true } })}>

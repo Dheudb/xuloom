@@ -277,8 +277,8 @@ export function SettingsDialog({
         </div>
         <div className="form-section" role="tabpanel" id="settings-panel-workspace" aria-labelledby="settings-tab-workspace" hidden={tab !== "workspace"}>
           <h3><Link2 size={16} /> 聊天链接</h3>
-          <p className="fine-print">右键会话可复制本机聊天链接。链接只定位已有历史，不包含聊天内容；另一台电脑需要自己的历史记录。</p>
-          <label>打开聊天链接<input aria-label="聊天链接" placeholder="xuloom://chat/v1/…" value={chatUrl} onChange={event => setChatUrl(event.target.value)} /></label>
+          <p className="fine-print">右键会话可复制本机或 SSH 聊天链接。链接不包含聊天正文或凭据；远端地址只使用已配置的 SSH 目标，不自动导入主机。</p>
+          <label>打开聊天链接<input aria-label="聊天链接" placeholder="xuloom://chat/…" value={chatUrl} onChange={event => setChatUrl(event.target.value)} /></label>
           <div className="actions">
             <button disabled={linkBusy || !chatUrl.trim()} onClick={async () => {
               setLinkBusy(true); setError("");

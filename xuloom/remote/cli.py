@@ -9,7 +9,7 @@ from xuloom.remote.ssh import SSHClient, RemoteDisconnected, RemoteRequestError
 def add_parser(sub):
     parent = sub.add_parser("remote", help="Manage keyless SSH profiles and execute on another Xuloom installation")
     actions = parent.add_subparsers(dest="action", required=True)
-    for action in ("list", "add", "remove", "check", "sessions", "inspect", "exec", "files", "read", "git-status"):
+    for action in ("list", "add", "remove", "check", "sessions", "inspect", "exec", "chat", "files", "read", "git-status"):
         item = actions.add_parser(action)
         item.add_argument("--json", action="store_true", help="UTF-8 JSON events and final receipt")
         if action != "list": item.add_argument("id", help="Saved SSH connection ID")
@@ -19,17 +19,20 @@ def add_parser(sub):
             item.add_argument("--python", default="python3", help="Remote Python with Xuloom installed")
             item.add_argument("--platform", choices=("posix", "windows"), default="posix")
             item.add_argument("--port", type=int, help="Override the SSH alias's configured port"); item.add_argument("--ssh-config", default="")
-        if action in {"exec", "inspect"}: item.add_argument("--session")
+        if action in {"exec", "inspect", "chat"}: item.add_argument("--session")
+        if action in {"exec", "chat"}:
+            item.add_argument("--permission", choices=("ask", "full"), default="ask")
+            item.add_argument("--collaboration", choices=("solo", "auto", "ultra"))
+        if action == "chat": item.add_argument("--sandbox", choices=("host", "workspace"))
         if action == "exec":
             item.add_argument("prompt", nargs="?", help="Task text, or - for UTF-8 stdin")
             item.add_argument("--resume", action="store_true", help="Continue the saved stopped turn without adding a synthetic prompt")
-            item.add_argument("--permission", choices=("ask", "full"), default="ask")
-            item.add_argument("--collaboration", choices=("solo", "auto", "ultra"))
             item.add_argument("--skill", action="append", default=[])
         if action in {"files", "read"}: item.add_argument("path", nargs="?", default="")
 
 
 async def dispatch(args, emit):
+    if args.action == "chat": raise ValueError("Use the interactive remote chat entry point; remote exec provides JSONL execution")
     if args.action == "list": return {"ok": True, "reason": "completed", "connections": config.profiles()}
     if args.action == "add":
         value = config.save({key: getattr(args, key) for key in ("id", "name", "host", "port", "cwd", "python", "platform", "ssh_config")})

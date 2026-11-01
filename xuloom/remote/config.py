@@ -2,6 +2,8 @@
 import ntpath
 import os
 import re
+import hashlib
+import json
 from pathlib import PurePosixPath
 
 from xuloom.core.config import load_config, update_config
@@ -49,6 +51,16 @@ def resolve(identity):
     if match is None:
         raise ValueError("Unknown SSH connection: " + str(identity))
     return match
+
+
+def target(profile):
+    return {key: value for key, value in validate_profile(profile).items() if key != "name"}
+
+
+def profile_key(profile):
+    """Same canonical public target identity used by desktop navigation."""
+    payload = json.dumps(target(profile), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def save(value):

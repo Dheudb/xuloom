@@ -1,8 +1,6 @@
 "use strict";
 const crypto = require("node:crypto");
-const target = profile => Object.fromEntries(Object.entries(profile).filter(([key]) => key !== "name").sort(([a], [b]) => a.localeCompare(b)));
-const keyOf = profile => crypto.createHash("sha256").update(JSON.stringify(target(profile))).digest("hex");
-const remoteId = value => typeof value === "string" && /^ssh:[0-9a-f]{64}:[A-Za-z0-9_-]{1,128}$/.test(value);
+const { remoteKey: keyOf, remoteId } = require("./chat-links.cjs");
 
 /** Navigation metadata only. Execution, ownership and history stay in the shared runtime. */
 function remoteWorkspaces(context) {

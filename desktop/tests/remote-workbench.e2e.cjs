@@ -8,16 +8,17 @@ const python = resolveEnginePython({packaged:false,projectRoot:repository});
 const service = spawn(python, ['-u', path.join(repository,'tests/remote_workbench_fixture.py'), fixture], {cwd:repository,windowsHide:true,stdio:['pipe','pipe','pipe']});
 let diagnostics=''; service.stderr.on('data', chunk => diagnostics += chunk);
 const ready = new Promise((resolve,reject) => { const lines=readline.createInterface({input:service.stdout}); lines.once('line', line=>{try{resolve(JSON.parse(line));}catch(error){reject(error);}});service.once('exit',code=>reject(new Error('fixture exited '+code+' '+diagnostics))); });
-let app, page;
+let app, page, clipboardBefore;
 (async()=>{try{
  const info=await ready;
  const env={...process.env,HOME:path.join(fixture,'local-home'),USERPROFILE:path.join(fixture,'local-home'),XULOOM_USER_DATA:path.join(fixture,'local-data'),XULOOM_DATA_DIR:path.join(fixture,'local-data'),XULOOM_CONFIG_DIR:info.config,XULOOM_TEST_HEADLESS:'1',XULOOM_SKILLS_PATHS:''};
  for(const key of ['ELECTRON_RUN_AS_NODE','XULOOM_DEV_URL','OPENAI_API_KEY','OPENAI_MODEL','OPENAI_BASE_URL','XULOOM_MODEL_PROVIDER'])delete env[key];
- async function launch(){app=await electron.launch({executablePath:process.env.XULOOM_TEST_EXECUTABLE,args:process.env.XULOOM_TEST_EXECUTABLE?[]:[root],env});page=await app.firstWindow();page.setDefaultTimeout(45000);await page.waitForFunction(()=>!document.querySelector('.new-task')?.disabled);}
+ async function launch(url){app=await electron.launch({executablePath:process.env.XULOOM_TEST_EXECUTABLE,args:[...(process.env.XULOOM_TEST_EXECUTABLE?[]:[root]),...(url?[url]:[])],env});page=await app.firstWindow();page.setDefaultTimeout(45000);await page.waitForFunction(()=>!document.querySelector('.new-task')?.disabled);}
  async function send(text){await page.getByRole('textbox',{name:'任务输入'}).fill(text);await page.getByRole('textbox',{name:'任务输入'}).press('Enter');}
  async function idle(){await page.waitForFunction(()=>!document.querySelector('.send-button.stop'));}
  async function menu(id){await page.locator(`.session-item[data-session-id="${id}"]`).click({button:'right'});}
  await launch();
+ clipboardBefore=await app.evaluate(({clipboard})=>clipboard.readText());
  await page.getByRole('button',{name:'设置与模型',exact:true}).click();await page.getByRole('tab',{name:'SSH 远程',exact:true}).click();
  await page.getByRole('button',{name:'新建远程会话',exact:true}).click();
  await page.locator('.session-item.active[data-session-id^="ssh:"]').waitFor();
@@ -27,6 +28,19 @@ let app, page;
  assert.equal(await page.getByRole('combobox',{name:'选择模型'}).inputValue(),JSON.stringify(['remote-models','remote-a']));
  await page.getByRole('textbox',{name:'任务输入'}).fill('hello remote');await page.getByRole('textbox',{name:'任务输入'}).press('Enter');
  await page.getByText('REMOTE_REPLY_remote-a',{exact:true}).waitFor();
+ await idle();await menu(first);await page.getByRole('menuitem',{name:'复制聊天链接',exact:true}).click();
+ const link=await app.evaluate(({clipboard})=>clipboard.readText());
+ assert.match(link,/^xuloom:\/\/chat\/ssh\/v1\/[0-9a-f]{64}\/[A-Za-z0-9_-]+$/);
+ assert(!link.includes(info.profile.host));assert(!link.includes(info.remote));
+ const callsBeforeLinks=fs.readFileSync(path.join(fixture,'wire.jsonl'),'utf8').trim().split('\n').length;
+ await page.getByRole('textbox',{name:'任务输入'}).fill('unsent linked remote draft');await page.locator('.new-task').click();
+ await page.getByRole('button',{name:'设置与模型',exact:true}).click();await page.getByRole('tab',{name:'工作区',exact:true}).click();
+ await page.getByRole('textbox',{name:'聊天链接',exact:true}).fill(link);await page.getByRole('button',{name:'打开会话',exact:true}).click();
+ await page.locator(`.session-item.active[data-session-id="${first}"]`).waitFor();
+ assert.equal(await page.getByRole('textbox',{name:'任务输入'}).inputValue(),'unsent linked remote draft');
+ assert.equal(fs.readFileSync(path.join(fixture,'wire.jsonl'),'utf8').trim().split('\n').length,callsBeforeLinks,'Link navigation must not call a model');
+ await app.evaluate(({app},url)=>app.emit('open-url',{preventDefault(){}},url),link+'?prompt=NEVER_EXECUTE');
+ await page.getByText(/无效的 Xuloom 聊天链接/).first().waitFor();
  await page.getByRole('combobox',{name:'选择模型'}).selectOption(JSON.stringify(['remote-models','remote-b']));
  await page.getByRole('combobox',{name:'访问权限'}).selectOption('full');
  await page.getByRole('textbox',{name:'任务输入'}).fill('write report');await page.getByRole('textbox',{name:'任务输入'}).press('Enter');
@@ -46,7 +60,7 @@ let app, page;
  await idle();
  if(!process.env.XULOOM_TEST_EXECUTABLE)await page.screenshot({path:path.join(root,'build/remote-workbench.png')});
  await page.getByRole('textbox',{name:'任务输入'}).fill('remote draft persisted');
- await app.close();app=null;await launch();
+ await app.close();app=null;await launch(link);
  await page.locator(`.session-item.active[data-session-id="${first}"]`).waitFor();
  assert.equal(await page.getByRole('textbox',{name:'任务输入'}).inputValue(),'remote draft persisted');
  await page.locator('.new-task').click();await page.locator('.session-item.active:not([data-session-id^="ssh:"])').waitFor();
@@ -60,6 +74,9 @@ let app, page;
  const fork=await page.locator('.session-item.active').getAttribute('data-session-id');
  await menu(fork);await page.getByRole('menuitem',{name:'归档会话',exact:true}).click();
  await page.locator(`.session-item[data-session-id="${fork}"]`).waitFor({state:'detached'});
+ const forkLink=require('../electron/chat-links.cjs').chatLink(fork);
+ await app.evaluate(({app},url)=>app.emit('open-url',{preventDefault(){}},url),forkLink);
+ await page.getByText(/此远端会话或工作区已归档/).first().waitFor();
  await page.getByRole('button',{name:'设置与模型',exact:true}).click();await page.getByRole('tab',{name:'已归档会话',exact:true}).click();
  await page.locator(`[data-archived-session="${fork}"]`).getByRole('button',{name:/恢复会话/}).click();
  await page.getByRole('button',{name:'关闭设置',exact:true}).click();
@@ -67,6 +84,16 @@ let app, page;
  await menu(fork);await page.getByRole('menuitem',{name:'删除会话',exact:true}).click();await page.getByRole('menuitem',{name:'确认删除会话',exact:true}).click();
  await page.locator(`.session-item[data-session-id="${fork}"]`).waitFor({state:'detached'});
  await page.locator(`.session-item[data-session-id="${first}"] .session-select`).click();
+ const deleted=await page.evaluate(async url=>{try{await window.xuloom.invoke('chat.open',{url});return false;}catch{return true;}},forkLink);
+ assert(deleted,'Deleted remote history must not be recreated by a link');
+ assert.equal(await page.locator(`.session-item[data-session-id="${fork}"]`).count(),0);
+ const configurationPath=path.join(info.config,'config.json'), beforeTarget=fs.readFileSync(configurationPath,'utf8');
+ const changed=JSON.parse(beforeTarget);changed.ssh_connections[0].cwd=path.join(fixture,'different remote target');
+ fs.writeFileSync(configurationPath,JSON.stringify(changed));
+ try{
+  const message=await page.evaluate(async url=>{try{await window.xuloom.invoke('chat.open',{url});return '';}catch(error){return String(error);}},link);
+  assert(message.includes('SSH 连接目标已更改'),'Old links must not reuse a live connection after its configured target changes');
+ }finally{fs.writeFileSync(configurationPath,beforeTarget);}
  await send('hold remote once');await page.locator('.send-button.stop').waitFor();
  let seen=false;
  for(let attempt=0;attempt<150;attempt++){
@@ -83,5 +110,5 @@ let app, page;
  const finalWire=fs.readFileSync(path.join(fixture,'wire.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
  assert.equal(finalWire.filter(row=>row.body.stream&&JSON.stringify(row.body.messages.at(-1)?.content).includes('hold remote once')).length,1,'Disconnect must not replay the prompt');
  assert(finalWire.some(row=>row.body.messages.some(message=>message.role==='tool'&&JSON.stringify(message.content).includes('Choice B'))));
- console.log('Remote workbench E2E passed: encrypted SSH chat, model/key routing, files, Git branch, real user choice, restart/draft, local separation, fork/archive/restore/delete, active disconnect/reconnect without replay');
-}catch(error){if(page)console.error((await page.locator('body').innerText()).slice(-5000));console.error(diagnostics);throw error;}finally{if(app)await app.close();service.stdin.end(JSON.stringify({action:'stop'})+'\n');}})().catch(error=>{console.error(error);process.exitCode=1;});
+ console.log('Remote workbench E2E passed: encrypted SSH chat, model/key routing, files, Git branch, real user choice, copied/pasted/startup SSH deep links with no model calls, archive/invalid URI guards, restart/draft, local separation, fork/archive/restore/delete, active disconnect/reconnect without replay');
+}catch(error){if(page)console.error((await page.locator('body').innerText()).slice(-5000));console.error(diagnostics);throw error;}finally{if(app){if(clipboardBefore!==undefined)await app.evaluate(({clipboard},text)=>clipboard.writeText(text),clipboardBefore).catch(()=>{});await app.close();}service.stdin.end(JSON.stringify({action:'stop'})+'\n');}})().catch(error=>{console.error(error);process.exitCode=1;});

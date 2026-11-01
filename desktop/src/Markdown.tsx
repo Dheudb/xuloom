@@ -57,7 +57,7 @@ function webpageURL(href?: string) {
 }
 
 function chatURL(value?: string) {
-  return value && !/[\r\n]/.test(value) && /^xuloom:\/\/chat\/v1\/[0-9a-f]{16}\/[A-Za-z0-9_-]{1,128}$/.test(value) ? value : null;
+  return value && value.length <= 512 && !/[\r\n]/.test(value) && /^xuloom:\/\/chat\/(v1\/[0-9a-f]{16}|ssh\/v1\/[0-9a-f]{64})\/[A-Za-z0-9_-]{1,128}$/.test(value) ? value : null;
 }
 
 function fileReference(value: string) {
