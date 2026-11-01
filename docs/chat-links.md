@@ -57,3 +57,5 @@ Python 接口为 `xuloom.features.chat_links.chat_link(cwd, session_id)` 和 `re
 后续 SSH 地址与终端验收使用加密 SSH 回环和隔离本地 HTTP/SSE。源码桌面流程覆盖复制/粘贴/启动打开、草稿、归档、删除、目标改变与无模型请求导航；原本机链接流程继续覆盖真实第二进程转发与 Markdown 内部跳转。终端用正式子进程和真实管道输入检查中文、打开历史、生成/解析链接及退出，用同一 SSH 运行时检查选择题、显式拒绝、停止/继续、空闲断线和远端 `$` 补全来源。不把这些证据当作两台物理机器、原生 ConPTY 键盘或 macOS/Linux 安装注册已经验证。
 
 该阶段最终验证：Python 3.12 串行全量 446 项（445 通过、1 跳过），桌面逻辑 61 项及前端构建通过。源码本机链接和 SSH 桌面 E2E 均通过；原 EXE 的 SSH 桌面 E2E、以包内 Python 为远端/正式 CLI 的加密检查 19 项通过。本地构建 `20261101-134005`，136 个 Python/技能文件和桌面资源与源码一致，九项公开内置 Skill 不包含私人 Taiyi，运行时没有加入 Paramiko，稳定 EXE 字节未变。此开发阶段尚未同步 GitHub/Release。
+
+后续已完成导航恢复检查并公开 [v0.1.2](https://github.com/Dheudb/xuloom/releases/tag/v0.1.2)，源码提交 `2942c53`、本地构建 `20261101-142836`。最新验证结果与早期失败记录见 [审查记录](developer-base-audit.md#ssh损坏导航的离线恢复)。

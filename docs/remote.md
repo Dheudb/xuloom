@@ -137,4 +137,6 @@ finally:
 
 导航恢复阶段：v0.1.2 最终 Python 3.12 全量 457 项（456 通过、1 符号链接权限跳过）、桌面逻辑 64 项与构建通过。最终原安装 `20261101-142836` 的恢复界面、包内导航/CLI 11 项及完整加密 SSH 工作台通过；移除引用后原远端历史仍能重新打开，没有新增模型请求。较早失败及两个准备构建的证据区分保留在 [审查记录](developer-base-audit.md#ssh损坏导航的离线恢复)，没有用一次针对性重跑代替最终全量。
 
+上述已验证功能已随 [v0.1.2](https://github.com/Dheudb/xuloom/releases/tag/v0.1.2) 公开，源码与标签为 `2942c53`，下载 ZIP 和校验文件均已上传。两机/跨平台及后续远端能力仍按持续目标验收。
+
 参考：[OpenSSH 命令手册](https://man.openbsd.org/ssh.1)、[OpenSSH 配置手册](https://man.openbsd.org/ssh_config.5)、[Paramiko 测试服务接口](https://docs.paramiko.org/en/stable/api/server.html)。

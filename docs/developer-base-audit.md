@@ -109,3 +109,5 @@ Git 分支/状态的桌面与 CLI 共用只读查询，包含空仓库、detache
 最终安装 137 个 Python/技能文件、16 个 Electron 文件和 62 个前端文件与源码逐字节一致；仅一个 `xuloom-0.1.2.dist-info`，九个公开内置 Skill，没有 Paramiko 或私人内容。原 EXE SHA256 仍为 `2529b494f4123f152bce346051f7bd855ef95006424a561953cf17c49a3d1ba8`。本轮仅删除一处打包配置中的重复短路表达式，没有据此宣称已完成整个无效代码审查。
 
 任意损坏的整个 JSON 文件/根对象、连接配置修复、两机与 Linux/macOS 原生验收仍有边界，详见 [持续目标](product-roadmap.md)。当前代码未增加运行依赖、第二套引擎或调度状态；私人 Taiyi 未读取、修改或打包。
+
+2026-11-01 已公开 [v0.1.2](https://github.com/Dheudb/xuloom/releases/tag/v0.1.2)：源码提交/标签 `2942c53679567040d97c2001cc7d38b284a655cd`，Windows ZIP 233,461,277 字节，SHA256 `51d4e5ff48afe35abc3418979208131658aa674b5d84c58e8730e1d835430565`。已核对 GitHub 的资产 digest/大小和 latest 标记；不是只有源码推送或本地更新。ZIP 的 `RELEASE.json` 绑定上述提交与构建，排除 3,927 个缓存/本机安装来源条目；后续 main 上的文档进度更新不改变该 Release 的来源。旧 v0.1.1 保留，没有触发 Actions。

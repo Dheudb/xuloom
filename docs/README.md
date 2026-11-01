@@ -16,6 +16,7 @@
 | [聊天深链接](chat-links.md) | 右键复制、桌面/CLI 打开、移动与归档边界 |
 | [实例连接绑定](runtime-connections.md) | 多供应商客户端、压缩器与子代理的连接归属、切换及恢复 |
 | [媒体接口核对与计划](media-adapters-plan.md) | 官方协议现状、后续生成工具的边界与验收；尚非已实现功能 |
+| [外部 Agent 后端计划](external-agents-plan.md) | Codex 等后端的协议、权限和生命周期接入约束；尚待实现 |
 | [开发与打包](development.md) | 环境、测试、Windows 运行时与构建产物 |
 | [框架排查记录](framework-audit-2026-10-30.md) | 工具回执、写后记录、Windows Shell、故障注入及验证边界 |
 | [源码对照与加固](framework-source-comparison-2026-10-30.md) | Codex、Pi、DSH 与 Claude 公开资料对照，文件事务、进程和完整输出修复 |
