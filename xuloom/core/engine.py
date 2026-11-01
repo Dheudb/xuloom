@@ -306,7 +306,10 @@ class QueryEngine:
             "enter_plan_mode": EnterPlanModeTool(),
             "exit_plan_mode": ExitPlanModeTool(),
         }
+        from xuloom.tools.media_tool import MediaTool
+        all_tools["media_tool"] = MediaTool()
         latent_tool_names = {
+            "media_tool",
             "goal_report_tool",
             "schedule_tool",
             "browser_tool",

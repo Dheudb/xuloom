@@ -13,6 +13,14 @@ MAX_PIXELS = 40_000_000
 FORMATS = {"PNG", "JPEG", "WEBP", "GIF", "BMP"}
 
 
+def artifact_owner(context):
+    delegation = context.get("delegation") or {}
+    identity = delegation.get("root_session_id") or delegation.get("owner_session_id") or context.get("session_id")
+    if not isinstance(identity, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", identity):
+        raise ValueError("Invalid media owner session")
+    return identity
+
+
 def archive_images(content, directory=None, name=""):
     media = []
     for block in content if isinstance(content, list) else []:

@@ -1,6 +1,6 @@
 # 媒体接口核对与实现约束
 
-核对日期：2026-11-01。本文是后续实现依据，**不表示 v0.1.2 已提供媒体生成工具**。图片、视频、语音和音乐继续属于持续目标；没有调用真实供应商或用户 Key。
+核对日期：2026-11-01。本文保留供应商协议核对依据。v0.1.5 已实现 fal Queue API 薄适配器、配置入口、持久化回执及媒体预览，使用方法见 [媒体生成](media.md)。OpenAI 图片／语音独立协议尚未接入；没有调用真实供应商或用户 Key，本地协议验收不代表真实供应商成功。
 
 ## 已核对的官方信息
 
@@ -27,9 +27,9 @@
 
 每个适配器覆盖未配置、错误字段、鉴权失败、成功产物、取消、超时、错误 MIME、超大响应、下载/保存失败，以及异步提交后进程重启与结果未知。先用本地协议服务检查 App/CLI 一致性；真实供应商调用须另有用户授权，不能用本地替身宣称真实模型生成成功。
 
-## 下一实现候选：统一队列协议
+## 已实现适配器的协议依据：fal Queue
 
-2026-11-01 已核对 fal 官方队列 [提交](https://fal.ai/docs/api-reference/inference-api/queue/submit)、[状态](https://fal.ai/docs/api-reference/inference-api/queue/status)、[结果](https://fal.ai/docs/api-reference/inference-api/queue/result) 和 [取消](https://fal.ai/docs/api-reference/inference-api/queue/cancel)。这是薄适配器候选，当前没有调用服务或实现生成工具。
+2026-11-01 已核对 fal 官方队列 [提交](https://fal.ai/docs/api-reference/inference-api/queue/submit)、[状态](https://fal.ai/docs/api-reference/inference-api/queue/status)、[结果](https://fal.ai/docs/api-reference/inference-api/queue/result) 和 [取消](https://fal.ai/docs/api-reference/inference-api/queue/cancel)。实现采用这些返回地址和状态语义；尚未调用真实服务。
 
 - 提交返回真实 request ID 及状态、结果、取消 URL；采用返回地址，不能简单把含子端点的模型名拼成查询地址。凭据只发往已配置的队列来源，下载产物不携带队列 Key。
 - `COMPLETED` 同样可能表示失败或取消；必须检查错误和最终结果，确认文件保存后才能报告成功。取消信号已发送不等于远端已停止。
@@ -37,4 +37,4 @@
 - [FLUX.2 编辑](https://fal.ai/models/fal-ai/flux-2/edit/api) 接受 prompt 和 image_urls（最多四张）；文件输入可用数据 URI。[MiniMax Speech](https://fal.ai/models/fal-ai/minimax/speech-02-hd/api) 接受 text、声音设置并返回 audio；[Music 2.6](https://fal.ai/models/fal-ai/minimax-music/v2.6/api) 使用音乐 prompt、歌词或纯器乐选项，输出独立 audio。两种音频能力不能混同。
 - [旧 Veo 3 fast](https://fal.ai/models/fal-ai/veo3/fast/api) 已弃用；[Veo 3.1 fast API](https://fal.ai/models/fal-ai/veo3.1/fast/api) 也明确预告 2026-11-17 弃用。因此不将这两个短期/失效端点设为产品默认值；模型由用户明确选择，实施时再核对当前 schema 和替代端点。
 
-实现仍复用现有权限、执行意图、中央产物状态和 App/CLI 入口，不安装 fal SDK 或模型权重。适配器和配置 UI、音视频预览、故障验证尚待实施；此核对不能计为媒体生成功能完成。
+实现复用现有权限、中央产物存档、文件事件和 App/CLI 入口，不安装 fal SDK 或模型权重。适配器与 UI 的本地验证记录另列，不能将本文的文档核对当成真实供应商验收。

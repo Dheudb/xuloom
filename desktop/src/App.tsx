@@ -940,6 +940,7 @@ export default function App() {
           targetLabel={active?.remote ? "SSH · " + active.remote.host : undefined}
           catalog={catalog}
           workspaceAction={workspaceAction}
+          mediaControl={async (action, jobId) => { setSettingsOpen(false); try { await invoke("media.control", { action, jobId }); } catch (error) { onError(error); } }}
           defaultDirectory={defaultDirectory}
           chooseDirectory={() => window.xuloom.invoke("workspace.choose")}
           saveDirectory={async (directory) => {

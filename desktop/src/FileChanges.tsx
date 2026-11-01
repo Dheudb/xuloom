@@ -19,13 +19,15 @@ export default function FileChanges({ files, project, onOpen, onUndo, compact = 
   const [restored, setRestored] = useState<string[]>([]);
   if (!files.length) return null;
   const known = files.filter((file) => file.statsAvailable);
+  const mediaCount = files.filter(file => !file.statsAvailable && file.operation === "generate").length;
   return <section className={"file-changes " + (compact ? "compact" : "")} aria-label="文件变更">
     <header><FileDiff size={17} /><div><strong>{compact ? files[0]?.source === "git" ? "Git 未提交的文件" : "会话修改的文件" : `已修改 ${files.length} 个文件`}</strong>
-      <ChangeCounts added={known.length ? known.reduce((sum, file) => sum + (file.added || 0), 0) : null} removed={known.length ? known.reduce((sum, file) => sum + (file.removed || 0), 0) : null} />
-      {known.length !== files.length && <small>部分文件未记录行数</small>}</div></header>
+      {(known.length > 0 || mediaCount !== files.length) && <ChangeCounts added={known.length ? known.reduce((sum, file) => sum + (file.added || 0), 0) : null} removed={known.length ? known.reduce((sum, file) => sum + (file.removed || 0), 0) : null} />}
+      {mediaCount > 0 && <small>{mediaCount} 项媒体产物</small>}
+      {files.some(file => !file.statsAvailable && file.operation !== "generate") && <small>部分文件未记录行数</small>}</div></header>
     {(expanded || compact ? files : files.slice(0, 3)).map((file) => <div key={file.path} className="file-change-actions"><button className="changed-file-row" title={file.path}
       aria-label={"打开文件 " + relativeFile(file.path, project)} onClick={() => onOpen(file.path, file)}>
-      <span>{relativeFile(file.path, project)}</span><ChangeCounts added={file.added} removed={file.removed} /></button>
+      <span>{relativeFile(file.path, project)}</span>{file.operation === "generate" && !file.statsAvailable ? <small className="file-counts-unknown">媒体产物</small> : <ChangeCounts added={file.added} removed={file.removed} />}</button>
       {onUndo && file.revisionId && !restored.includes(file.revisionId) && <button className="icon-button" aria-label={"撤销最近一次写入 " + relativeFile(file.path, project)} title="撤销该文件最近一次工具写入" disabled={busy}
         onClick={() => { setConfirm(file.revisionId!); setError(""); }}><Undo2 size={14} /></button>}
       {confirm === file.revisionId && <div className="file-undo-confirm"><span>恢复这一次写入前的内容？后续改动会阻止撤销。</span><button disabled={busy} onClick={() => setConfirm("")}>取消</button><button disabled={busy} onClick={async () => {

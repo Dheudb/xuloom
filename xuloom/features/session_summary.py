@@ -85,6 +85,11 @@ def record_receipt(references, *, turn_id, agent_id, tool_name, tool_use_id, res
         path = metadata["path"]
         group["files"][os.path.normcase(path)] = {"path": path, "name": os.path.basename(path),
             "operation": metadata.get("operation", "write"), **provenance}
+    if tool_name == "media_tool":
+        for item in metadata.get("output_files", []) if isinstance(metadata.get("output_files"), list) else []:
+            if isinstance(item, dict) and isinstance(item.get("path"), str):
+                path = item["path"]
+                group["files"][os.path.normcase(path)] = {"path": path, "name": os.path.basename(path), "operation": "generate", **provenance}
     for item in metadata.get("sources", []) if isinstance(metadata.get("sources"), list) else []:
         if not isinstance(item, dict) or not source_url(item.get("url")):
             continue

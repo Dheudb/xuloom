@@ -314,8 +314,9 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
         sub_engine._thinking_config_explicit = same_model and self.context.get("thinking_config_explicit", False)
         sub_engine.tool_context["thinking_config_explicit"] = sub_engine._thinking_config_explicit
         definition = copy.deepcopy(builtin_agent_def or {})
+        from xuloom.context.tool_media import artifact_owner
         sub_engine.tool_context["delegation"] = {"owner_session_id": self.context.get("session_id"), "owner_turn_id": owner_turn_id, "role_definition": definition,
-            "connection_binding": copy.deepcopy(connection_binding)}
+            "connection_binding": copy.deepcopy(connection_binding), "root_session_id": artifact_owner(self.context)}
         sub_engine.tool_context["delegated_mailbox"] = lambda: self._mailbox(child_agent_id)
         sub_engine.tool_context["ack_delegated_mailbox"] = lambda ids: self._ack_mailbox(child_agent_id, ids)
         self._configure_subagent_permissions(sub_engine)

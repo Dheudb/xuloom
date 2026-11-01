@@ -23,6 +23,8 @@ EXIT_CODES = {"completed": 0, "cancelled": 130, "session_busy": 4, "session_conf
 def parser():
     p = argparse.ArgumentParser(prog="xuloom", description="Non-interactive tasks, persisted goals and timed messages")
     sub = p.add_subparsers(dest="command", required=True)
+    from xuloom.media.cli import add_parser as add_media_parser
+    add_media_parser(sub)
     status = sub.add_parser("git-status", help="Read repository/branch without a model request")
     status.add_argument("--cwd", default=os.getcwd())
     status.add_argument("--json", action="store_true")
@@ -130,6 +132,9 @@ async def open_engine(args, emit):
 
 
 async def dispatch(args, emit):
+    if args.command == "media":
+        from xuloom.media.cli import dispatch as media_dispatch
+        return {"ok": True, "reason": "completed", **await media_dispatch(args, emit)}
     if args.command == "summary":
         from xuloom.features.session_summary import read_summary
         return {"ok": True, "reason": "completed", "summary": read_summary(args.cwd, args.session, turn_id=args.turn, all_turns=args.all)}

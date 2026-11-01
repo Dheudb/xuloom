@@ -144,7 +144,11 @@ async function main() {
     await dragTo(treeSeparator, 300);
     const savedLayout = () => JSON.parse(fs.readFileSync(path.join(data, "workbench.json"), "utf8")).layout;
     await page.waitForFunction(() => !document.body.classList.contains("panel-resizing"));
-    assert.equal(savedLayout().inspectorWidth, 1100); assert.equal(savedLayout().reviewTreeWidth, 300);
+    // File preview and capability panels deliberately retain separate widths.
+    const layoutDeadline = Date.now() + 5000;
+    while ((savedLayout().filePreviewWidth !== 1100 || savedLayout().reviewTreeWidth !== 300) && Date.now() < layoutDeadline)
+      await new Promise(resolve => setTimeout(resolve, 50));
+    assert.equal(savedLayout().filePreviewWidth, 1100); assert.equal(savedLayout().reviewTreeWidth, 300);
     const longLine = "READABLE_LONG_LINE_" + "可读内容-with-space ".repeat(160) + "TAIL_VISIBLE";
     fs.writeFileSync(path.join(project, "note.md"), longLine + "\n" + Array.from({ length: 200 }, (_, index) => "line " + index).join("\n"));
     await dialog().getByRole("button", { name: "刷新文件内容", exact: true }).click();

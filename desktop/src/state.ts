@@ -51,6 +51,12 @@ export function applyEvent(
       return { ...session, goal: event.goal };
     case "managed_turn_started":
       return beginTurn({ ...session, attachments: [] }, event.text);
+    case "operation_started":
+      return { ...session, busy: true, error: "" };
+    case "operation_finished":
+      return { ...session, busy: false, interactions: [] };
+    case "operation_error":
+      return { ...session, error: event.message };
     case "turn_restarted":
       return beginTurn({ ...session, messages: event.history, attachments: event.attachments || [] }, event.text);
     case "turn_resumed": {

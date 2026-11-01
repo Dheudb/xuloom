@@ -6,6 +6,7 @@ import FileChanges, { ChangeCounts, relativeFile } from "./FileChanges";
 import DiffView from "./DiffView";
 import WorkspaceTree from "./WorkspaceTree";
 import HtmlPreview from "./HtmlPreview";
+import MediaPreview from "./MediaPreview";
 import PanelResizer from "./PanelResizer";
 import { clampReviewTreeWidth, reviewTreeLimits } from "./panel-width";
 
@@ -25,14 +26,15 @@ export default function FilePreview({ sessionId, project, path, change, version,
     return () => observer.disconnect();
   }, []);
   const shownTreeWidth = clampReviewTreeWidth(treeWidth, layoutWidth);
-  const [file, setFile] = useState<{ content: string; path: string; size: number; truncated: boolean }>();
+  const [file, setFile] = useState<{ content: string; path: string; size: number; truncated: boolean; mime?: string; version?: string }>();
   const [error, setError] = useState(""), [loading, setLoading] = useState(true), [refresh, setRefresh] = useState(0);
   const [gitChange, setGitChange] = useState<FileChange>(), [diffError, setDiffError] = useState("");
   const [gitFiles, setGitFiles] = useState<FileChange[]>([]);
   const [diffLoading, setDiffLoading] = useState(false), [tree, setTree] = useState(true), [scope, setScope] = useState("workspace");
   const markdown = /\.md(?:own)?$/i.test(path);
-  const html = /\.html?$/i.test(path), previewable = markdown || html;
-  const [tab, setTab] = useState(initialView === "diff" ? "diff" : previewable ? "preview" : "source");
+  const media = /\.(png|jpe?g|webp|gif|bmp|mp4|webm|m4a|weba|mp3|wav|flac|ogg)$/i.test(path);
+  const html = /\.html?$/i.test(path), previewable = markdown || html || media;
+  const [tab, setTab] = useState(media ? "preview" : initialView === "diff" ? "diff" : previewable ? "preview" : "source");
   useEffect(() => {
     if (change?.source !== "git") return;
     let cancelled = false;
@@ -40,11 +42,11 @@ export default function FilePreview({ sessionId, project, path, change, version,
     return () => { cancelled = true; };
   }, [sessionId, change?.source, refresh]);
   useEffect(() => {
-    setTab(initialView === "diff" ? "diff" : previewable ? "preview" : "source");
+    setTab(media ? "preview" : initialView === "diff" ? "diff" : previewable ? "preview" : "source");
   }, [path, initialView, change?.updatedAt]);
   useEffect(() => {
     let cancelled = false; setLoading(true); setError(""); setFile(undefined);
-    window.xuloom.invoke("files.read", { session: sessionId, path }).then((value) => { if (!cancelled) setFile(value); })
+    window.xuloom.invoke(media ? "files.mediaInfo" : "files.read", { session: sessionId, path }).then((value) => { if (!cancelled) setFile(media ? { ...value, content: "", truncated: false } : value); })
       .catch((reason) => { if (!cancelled) setError(String(reason)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -63,16 +65,16 @@ export default function FilePreview({ sessionId, project, path, change, version,
   const listedChanges = change?.source === "git" ? gitFiles : changes;
   return <section className="file-preview docked-review" role="region" aria-label="文件预览">
     <header><div><h2 title={path}>{relativeFile(path, project).split(/[\\/]/).pop()}</h2><small title={path}>{tab === "diff" ? (change?.source === "git" ? "Git 工作区 · HEAD 与当前文件" : "会话变更 · 任务修改前后") : "文件内容 · 磁盘最新版本"}</small></div>
-      <button className="icon-button" aria-label="自动换行" aria-pressed={wrap} title="源码与差异自动换行" onClick={() => setWrap(!wrap)}><WrapText size={16} /></button>
+      {!media && <button className="icon-button" aria-label="自动换行" aria-pressed={wrap} title="源码与差异自动换行" onClick={() => setWrap(!wrap)}><WrapText size={16} /></button>}
       <button className="icon-button" aria-label="显示工作区文件树" aria-pressed={tree} onClick={() => setTree(!tree)}><FolderTree size={16} /></button>
       <button className="icon-button" aria-label="刷新文件内容" disabled={loading || diffLoading} onClick={() => setRefresh(refresh + 1)}><RefreshCw size={16} /></button>
       <button className="icon-button" aria-label="关闭文件预览" onClick={close}><X size={19} /></button></header>
     <div className="review-layout" ref={layoutRef}>
       <div className="review-editor">
         <nav className="file-preview-tabs" role="tablist" aria-label="文件视图">
-          {[["diff", "差异"], ["source", "源码"], ["preview", "预览"]].filter(([id]) => id !== "preview" || previewable).map(([id, label]) =>
+          {[["diff", "差异"], ["source", "源码"], ["preview", "预览"]].filter(([id]) => media ? id === "preview" : id !== "preview" || previewable).map(([id, label]) =>
             <button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)}>{label}</button>)}
-          {shownChange && <ChangeCounts added={shownChange.added} removed={shownChange.removed} />}
+          {shownChange && !media && <ChangeCounts added={shownChange.added} removed={shownChange.removed} />}
         </nav>
         <div className={"file-preview-body " + (wrap ? "wrap-lines " : "") + (tab === "preview" && html ? "web-preview-body" : "")} role="tabpanel">
           {tab === "diff" ? <>
@@ -87,7 +89,7 @@ export default function FilePreview({ sessionId, project, path, change, version,
             {error && <p role="alert" className="error">{error}</p>}
             {file && !loading && <>
               <p className="preview-limitation">最新文件 · {file.size.toLocaleString()} 字节{file.truncated && !(tab === "preview" && html) ? " · 仅展示前 500 KB" : ""}</p>
-              {tab === "preview" && (html ? <HtmlPreview sessionId={sessionId} path={file.path} revision={`${version || 0}:${refresh}`} /> : <div className="markdown"><Markdown text={file.content} onOpenFile={onOpen} sessionId={sessionId} basePath={file.path} /></div>)}
+              {tab === "preview" && (media ? <MediaPreview sessionId={sessionId} path={file.path} mime={file.mime || ""} revision={`${file.version || ""}:${refresh}`} /> : html ? <HtmlPreview sessionId={sessionId} path={file.path} revision={`${version || 0}:${refresh}`} /> : <div className="markdown"><Markdown text={file.content} onOpenFile={onOpen} sessionId={sessionId} basePath={file.path} /></div>)}
               {tab === "source" && <div className="file-source">{file.content.split(/\r?\n/).map((line, index) => <div className="source-line" key={index}><span className="line-number">{index + 1}</span><code>{line || " "}</code></div>)}</div>}
             </>}
           </>}

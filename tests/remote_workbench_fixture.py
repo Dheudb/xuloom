@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import threading
 import subprocess
+import wave
 
 from ssh_fixture import SSHFixture, paramiko
 
@@ -15,6 +16,8 @@ def main():
     root = Path(sys.argv[1]); remote = root / "remote files"; remote.mkdir()
     subprocess.run(["git", "init", "-b", "remote-main", str(remote)], check=True, capture_output=True)
     (remote / "report.md").write_text("# Remote document\nREMOTE_FILE_SOURCE", encoding="utf-8")
+    with wave.open(str(remote / "remote-audio.wav"), "wb") as output:
+        output.setparams((1, 2, 8000, 0, "NONE", "not compressed")); output.writeframes(b"\0\0" * 16000)
     configuration = root / "remote-config"; configuration.mkdir()
     records = root / "wire.jsonl"; lock = threading.Lock()
     hold = threading.Event()

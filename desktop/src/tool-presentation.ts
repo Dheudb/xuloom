@@ -7,7 +7,10 @@ export function toolPresentation(tool: Pick<ToolActivity, "name" | "status" | "i
   const input = tool.input || {}, name = tool.name;
   const done = tool.status === "completed", failed = ["error", "crashed", "interrupted"].includes(tool.status);
   let kind: ToolKind = "tool", action = "调用工具", brief = String(input.description || input.action || name);
-  if (name === "browser_tool" && ["render", "screenshot"].includes(String(input.action))) {
+  if (name === "media_tool") {
+    kind = "image"; action = ({ submit: "提交媒体生成", status: "查询生成任务", cancel: "提交取消请求", capabilities: "查看生成连接", list: "查看生成记录" } as Record<string, string>)[String(input.action)] || "媒体生成";
+    brief = String(input.model || input.job_id || "");
+  } else if (name === "browser_tool" && ["render", "screenshot"].includes(String(input.action))) {
     kind = "image"; action = "截图检查"; brief = basename(input.file_path) || String(input.url || "网页");
   } else if (name === "view_image" || name === "file_read_tool" && imagePath.test(String(input.file_path || input.path || "")) || tool.media?.length) {
     kind = "image"; action = "查看图像";

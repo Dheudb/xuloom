@@ -504,6 +504,28 @@ class DesktopBridge:
             return resolve_link(params.get("url"), require_openable=True)
         if method == "config.get":
             return self.config()
+        if method in {"media.connections", "media.save", "media.remove"}:
+            from xuloom.media import config as media_config
+            if method == "media.connections":
+                return {"connections": media_config.public_connections()}
+            self.require_idle()
+            if method == "media.remove" and params.get("confirm") is not True:
+                raise ValueError("请确认移除媒体连接；这不会取消供应商已有任务")
+            rows = await asyncio.to_thread(media_config.save, params.get("connection")) if method == "media.save" else await asyncio.to_thread(media_config.remove, params.get("id"))
+            return {"connections": rows}
+        if method == "media.jobs":
+            from xuloom.media.jobs import listing
+            sid = self.engine.session_id if self.engine else self.resume_id
+            return {"jobs": await asyncio.to_thread(listing, {"session_cwd": str(self.cwd), "session_id": sid}) if sid else []}
+        if method == "media.control":
+            self.require_idle()
+            if params.get("action") not in {"status", "cancel"} or not (self.engine or self.resume_id):
+                raise ValueError("请打开已有会话，并选择查询或取消已有媒体任务")
+            engine = await self.ensure_engine(write=True)
+            from xuloom.media.jobs import load
+            load(engine.tool_context, params.get("jobId"))
+            self.turn_task = asyncio.create_task(self.media_control(engine, params["action"], params["jobId"]))
+            return {"started": True}
         if method == "collaboration.get":
             return {"collaborationMode": self.collaboration_mode}
         if method in {"execution.get", "execution.set"}:
@@ -635,6 +657,12 @@ class DesktopBridge:
             return {"project": str(self.cwd), "persistedId": sid, "executionMode": self.execution_mode, "collaborationMode": self.collaboration_mode, "permissionMode": self.approval_policy.mode, "config": self.config(), "capabilities": self.capabilities(), "sessions": self.sessions(), "history": self.history(messages, traces), "activity": activity, "workers": workers, "fileChanges": self.file_changes}
         if method == "files.read":
             return preview_file(self.cwd, params.get("path"), self.file_changes)
+        if method in {"files.mediaInfo", "files.mediaChunk"}:
+            from xuloom.media import preview
+            if method == "files.mediaInfo":
+                return await asyncio.to_thread(preview.info, self.cwd, params.get("path"), self.file_changes)
+            return await asyncio.to_thread(preview.read, self.cwd, params.get("path"), self.file_changes,
+                params.get("version"), params.get("offset", 0), params.get("length", 262144))
         if method == "session.summary":
             from xuloom.features.session_summary import read_summary
             sid = self.engine.session_id if self.engine else self.resume_id
@@ -826,6 +854,24 @@ class DesktopBridge:
         if method == "changes":
             return await git_changes(self.cwd)
         raise ValueError("Unknown method: " + method)
+
+    async def media_control(self, engine, action, identity):
+        self.emit({"type": "operation_started", "operation": "media", "jobId": identity})
+        try:
+            engine.activate_tools(["media_tool"])
+            receipt = await engine._execute_tool_wrapper({"id": "media-control-" + uuid.uuid4().hex, "name": "media_tool",
+                "input": {"action": action, "job_id": identity, "wait_ms": 0}}, lambda _: None)
+            from xuloom.media.jobs import load, public
+            record = public(load(engine.tool_context, identity))
+            self.emit({"type": "media_job_changed", "job": record})
+            if receipt["is_error"]:
+                self.emit({"type": "operation_error", "message": record.get("error") or "媒体操作未执行；请检查权限与已有任务记录。"})
+        except asyncio.CancelledError:
+            self.emit({"type": "operation_error", "message": "已停止本机操作；供应商任务可能仍在运行，可继续查询或请求取消。"})
+        except Exception as error:
+            self.emit({"type": "operation_error", "message": str(error)})
+        finally:
+            self.emit({"type": "operation_finished", "operation": "media"})
 
     async def goal_turn(self, engine):
         from xuloom.features import goals

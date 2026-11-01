@@ -923,7 +923,7 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
 
 
 def main():
-    if len(sys.argv) > 1 and sys.argv[1] in {"exec", "goal", "schedule", "git-status", "chat-link", "summary", "remote"}:
+    if len(sys.argv) > 1 and sys.argv[1] in {"exec", "goal", "schedule", "git-status", "chat-link", "summary", "media", "remote"}:
         from xuloom.cli import main as noninteractive
         raise SystemExit(noninteractive(sys.argv[1:]))
     import argparse

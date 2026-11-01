@@ -10,6 +10,7 @@ import tempfile
 import threading
 from types import SimpleNamespace
 import unittest
+import wave
 from unittest.mock import patch
 
 if __package__:
@@ -93,6 +94,21 @@ class SSHWireTests(unittest.IsolatedAsyncioTestCase):
     async def connect(self, profile=None, callback=None):
         client = SSHClient(profile or self.profile, callback); self.clients.append(client)
         await client.start(); return client
+
+    async def test_remote_media_ranges_use_remote_bytes_without_a_model_request(self):
+        memory = io.BytesIO()
+        with wave.open(memory, "wb") as output:
+            output.setparams((1, 2, 8000, 0, "NONE", "not compressed")); output.writeframes(b"\0\0" * 800)
+        raw = memory.getvalue(); path = self.remote / "remote-audio.wav"; path.write_bytes(raw)
+        client = await self.connect()
+        before = len(self.local.records)
+        info = await client.request("files.mediaInfo", {"path": str(path)})
+        part = await client.request("files.mediaChunk", {"path": str(path), "version": info["version"], "offset": 11, "length": 51})
+        import base64
+        self.assertEqual(base64.b64decode(part["data"]), raw[11:62])
+        self.assertEqual(info["mime"], "audio/wav"); self.assertEqual(len(self.local.records), before)
+        with self.assertRaises(RemoteRequestError):
+            await client.request("files.mediaChunk", {"path": str(path), "version": "old", "offset": 0, "length": 51})
 
     def hold_model(self, *, question=False, write=False):
         started, self.release = threading.Event(), threading.Event()

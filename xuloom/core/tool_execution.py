@@ -4,7 +4,6 @@ import copy
 import hashlib
 import json
 import os
-import re
 from pydantic import ValidationError
 from xuloom.context.tool_results import build_tool_result, serialize_tool_result
 from xuloom.core.storage import artifact_directory
@@ -283,10 +282,8 @@ async def execute_tool(self, tool_block, sys_print_callback=print, *, turn: int 
 
     receipt = {"type": "tool_result", "tool_use_id": tool_id, "content": native_content if native_content is not None else res_text,
                "is_error": status == "error", **({"_input_error": True} if input_error else {})}
-    from xuloom.context.tool_media import archive_images
-    media_owner = (self.tool_context.get("delegation") or {}).get("owner_session_id") or self.session_id
-    if not isinstance(media_owner, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", media_owner):
-        media_owner = self.session_id
+    from xuloom.context.tool_media import archive_images, artifact_owner
+    media_owner = artifact_owner(self.tool_context)
     media = archive_images(native_content, artifact_directory(self.session_cwd) / media_owner,
         name=os.path.basename(str(tool_inputs.get("file_path") or tool_inputs.get("path") or ""))) if native_content is not None else []
     self.in_progress_tools.pop(tool_id, None)

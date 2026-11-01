@@ -396,6 +396,8 @@ def _plan(spec, identities):
                     remove(child)
         index(root, sid, None)
     for file in _files(artifacts):
+        if spec["action"] == "fork" and file.relative_to(artifacts).parts[0] == "media-jobs":
+            continue  # A branch receives display history, never ownership of provider requests.
         copy(file, target_artifacts / file.relative_to(artifacts))
         if spec["action"] == "move": remove(file)
     copy(checkpoint, destination, payload)

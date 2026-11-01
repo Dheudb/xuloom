@@ -214,11 +214,12 @@ function remoteWorkspaces(context) {
     if (["project.remove", "project.delete"].includes(method) && isPath) throw new Error("请在该 SSH 工作区中逐个删除会话；远端目录不会在本机被删除");
     const source = sessions.get(params.session);
     if (!source?.remote) return { handled: false };
+    if (["preview.close", "media-preview.close"].includes(method)) return { handled: false };
     if (source.moving) throw new Error("会话正在移除本机引用，请稍候");
     if (source.disconnected && method !== "session.close") throw new Error("SSH 连接已断开，结果未确认。请重新选择会话查看保存状态；不会自动重发任务。");
     if (["attachments.import", "attachments.open", "attachments.preview", "preview.open", "project.reveal", "capabilities.directory", "capabilities.import"].includes(method))
       throw new Error("远端文件传输/网页预览入口尚未接入；未尝试打开本机同名路径");
-    if (["session.close", "session.activate", "preview.close"].includes(method)) return { handled: false };
+    if (["session.close", "session.activate", "preview.close", "media-preview.open", "media-preview.close"].includes(method)) return { handled: false };
     const { session, ...payload } = params;
     if (method === "permissions.set") {
       if (!["ask", "full"].includes(params.mode)) throw new Error("权限模式无效");
@@ -228,7 +229,7 @@ function remoteWorkspaces(context) {
         await dispose(session); broadcast(); throw new Error("远端权限更改未确认，连接已关闭；请重新打开会话核对状态。" + error.message);
       }
     }
-    if (method === "prompt" || method === "prompt.resume") {
+    if (method === "prompt" || method === "prompt.resume" || method === "media.control") {
       if (source.busy) throw new Error("远端会话已有运行中的任务");
       if (params.attachments?.length) throw new Error("远端附件尚未传输；未提交任务");
       source.busy = true;

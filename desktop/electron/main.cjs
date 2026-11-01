@@ -9,8 +9,11 @@ const preferences = require("./settings.cjs");
 const { parseLink, chatLink, startupLinks } = require("./chat-links.cjs");
 const { prepareMove, moveSpec } = require("./session-move.cjs");
 const { HtmlPreviews, SCHEME: PREVIEW_SCHEME } = require("./html-preview.cjs");
-protocol.registerSchemesAsPrivileged([{ scheme: PREVIEW_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
+const { MediaPreviews, SCHEME: MEDIA_SCHEME } = require("./media-preview.cjs");
+protocol.registerSchemesAsPrivileged([{ scheme: PREVIEW_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
+  { scheme: MEDIA_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }]);
 const htmlPreviews = new HtmlPreviews();
+const mediaPreviews = new MediaPreviews();
 const { BrowserCaptures } = require("./browser-capture.cjs");
 const browserCaptures = new BrowserCaptures();
 app.setName("Xuloom");
@@ -65,7 +68,9 @@ const engineMethods = new Set([
   "changes",
   "files.read",
   "files.image",
+  "files.mediaInfo", "files.mediaChunk",
   "media.read",
+  "media.connections", "media.save", "media.remove", "media.jobs", "media.control",
   "files.undo",
   "files.list",
   "git.status",
@@ -156,8 +161,8 @@ function send(id, payload) {
     for (const [key, status] of source.commands || []) if (status === "running") source.commands.set(key, "interrupted");
     void source.transport.close().catch(error => settingsFailure(error, "SSH 连接关闭未确认："));
   }
-  if (source && payload.type === "managed_turn_started") source.busy = true;
-  if (source && payload.type === "turn_finished") source.busy = false;
+  if (source && ["managed_turn_started", "operation_started"].includes(payload.type)) source.busy = true;
+  if (source && ["turn_finished", "operation_finished"].includes(payload.type)) source.busy = false;
   if (source && payload.type === "subagent_status") source.workers.set(payload.agent.agent_id, payload.agent.status);
   if (source && payload.type === "command_status") {
     source.commands ||= new Map();
@@ -356,6 +361,7 @@ async function disposeSession(id) {
   if (source.attachmentImport) await source.attachmentImport.catch(() => {});
   await source.transport.close();
   htmlPreviews.revokeSession(id);
+  mediaPreviews.revokeSession(id);
   sessions.delete(id);
   if (window && !window.isDestroyed()) window.webContents.send("workbench:event", { type: "session_unloaded", session: id });
 }
@@ -482,6 +488,10 @@ async function invoke(method, params) {
     return true;
   }
   if (method === "config.get") return globalConfig().request("config.get");
+  if (["media.connections", "media.save", "media.remove"].includes(method) && !params.session) {
+    if (method !== "media.connections" && [...sessions.values()].some(running)) throw new Error("请先停止运行中的任务，再修改媒体连接");
+    return globalConfig().request(method, params);
+  }
   if (["remote.profiles", "remote.save", "remote.remove", "remote.check"].includes(method))
     return globalConfig().request(method, params);
   if (method === "config.models") return globalConfig().request(method, params);
@@ -558,6 +568,7 @@ async function invoke(method, params) {
       source.moving = true;
       await source.transport.close();
       htmlPreviews.revokeSession(row.id);
+      mediaPreviews.revokeSession(row.id);
       sessions.delete(row.id);
     }
     let moved;
@@ -658,6 +669,8 @@ async function invoke(method, params) {
     const file = await source.transport.request("files.read", { path: params.path });
     return htmlPreviews.create(params.session, source.project, file.path);
   }
+  if (method === "media-preview.open") return mediaPreviews.create(params.session, source.transport, params.path);
+  if (method === "media-preview.close") { mediaPreviews.revoke(params.token, params.session); return true; }
   if (method === "collaboration.set") {
     if (source.busy) throw new Error("请先停止或等待当前任务，再切换协作档位");
     return source.transport.request(method, { mode: params.mode });
@@ -705,7 +718,7 @@ async function invoke(method, params) {
   }
   if (!engineMethods.has(method)) throw new Error("不支持的操作");
   const { session: _session, ...payload } = params;
-  if (method === "prompt" || method === "prompt.resume") {
+  if (method === "prompt" || method === "prompt.resume" || method === "media.control") {
     if (source.busy || source.attachmentImport) throw new Error("此会话已有运行中的任务或附件正在添加");
     source.busy = true;
     const row = catalog.find(params.session);
@@ -725,6 +738,7 @@ app.whenReady().then(() => {
   const scheduleTimer = setInterval(tickSchedules, 5000);
   scheduleTimer.unref();
   protocol.handle(PREVIEW_SCHEME, (request) => htmlPreviews.respond(request));
+  protocol.handle(MEDIA_SCHEME, (request) => mediaPreviews.respond(request));
   window = new BrowserWindow({
     show: process.env.XULOOM_TEST_HEADLESS !== "1",
     width: 1440,
