@@ -217,9 +217,9 @@ function remoteWorkspaces(context) {
     if (["preview.close", "media-preview.close"].includes(method)) return { handled: false };
     if (source.moving) throw new Error("会话正在移除本机引用，请稍候");
     if (source.disconnected && method !== "session.close") throw new Error("SSH 连接已断开，结果未确认。请重新选择会话查看保存状态；不会自动重发任务。");
-    if (["attachments.import", "attachments.open", "attachments.preview", "preview.open", "project.reveal", "capabilities.directory", "capabilities.import"].includes(method))
+    if (["attachments.import", "attachments.open", "attachments.preview", "project.reveal", "capabilities.directory", "capabilities.import"].includes(method))
       throw new Error("远端文件传输/网页预览入口尚未接入；未尝试打开本机同名路径");
-    if (["session.close", "session.activate", "preview.close", "media-preview.open", "media-preview.close"].includes(method)) return { handled: false };
+    if (["session.close", "session.activate", "preview.open", "preview.close", "media-preview.open", "media-preview.close"].includes(method)) return { handled: false };
     const { session, ...payload } = params;
     if (method === "permissions.set") {
       if (!["ask", "full"].includes(params.mode)) throw new Error("权限模式无效");

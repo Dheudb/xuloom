@@ -9,7 +9,7 @@ from xuloom.remote.ssh import SSHClient, RemoteDisconnected, RemoteRequestError
 def add_parser(sub):
     parent = sub.add_parser("remote", help="Manage keyless SSH profiles and execute on another Xuloom installation")
     actions = parent.add_subparsers(dest="action", required=True)
-    for action in ("list", "add", "remove", "check", "sessions", "inspect", "summary", "exec", "chat", "files", "read", "git-status", "references", "forget"):
+    for action in ("list", "add", "remove", "check", "sessions", "inspect", "summary", "exec", "chat", "files", "read", "preview", "git-status", "references", "forget"):
         item = actions.add_parser(action)
         item.add_argument("--json", action="store_true", help="UTF-8 JSON events and final receipt")
         if action not in {"list", "references"}: item.add_argument("id", help="Local reference token" if action == "forget" else "Saved SSH connection ID")
@@ -21,7 +21,7 @@ def add_parser(sub):
             item.add_argument("--python", default="python3", help="Remote Python with Xuloom installed")
             item.add_argument("--platform", choices=("posix", "windows"), default="posix")
             item.add_argument("--port", type=int, help="Override the SSH alias's configured port"); item.add_argument("--ssh-config", default="")
-        if action in {"exec", "inspect", "summary", "chat"}: item.add_argument("--session")
+        if action in {"exec", "inspect", "summary", "chat", "preview"}: item.add_argument("--session")
         if action == "summary":
             choice = item.add_mutually_exclusive_group()
             choice.add_argument("--turn")
@@ -35,6 +35,11 @@ def add_parser(sub):
             item.add_argument("--resume", action="store_true", help="Continue the saved stopped turn without adding a synthetic prompt")
             item.add_argument("--skill", action="append", default=[])
         if action in {"files", "read"}: item.add_argument("path", nargs="?", default="")
+        if action == "preview":
+            item.add_argument("path", help="Remote HTML entry file")
+            item.add_argument("--asset", help="Workspace-relative resource, rather than the entry HTML")
+            item.add_argument("--offset", type=int, help="Read a bounded base64 content chunk at this offset")
+            item.add_argument("--length", type=int, default=262144, help="Chunk bytes, at most 524288")
 
 
 async def dispatch(args, emit):
@@ -67,6 +72,13 @@ async def dispatch(args, emit):
         elif args.action in {"files", "read"}:
             value = await client.request("files.list" if args.action == "files" else "files.read", {"path": args.path})
             result = {"ok": True, "reason": "completed", "file": value}
+        elif args.action == "preview":
+            if session_id: await client.request("initialize", {"sessionId": session_id})
+            params = {"path": args.path, "asset": args.asset}
+            file = await client.request("files.htmlInfo", params)
+            chunk = {} if args.offset is None else {"chunk": await client.request("files.htmlChunk",
+                {**params, "asset": file["asset"], "version": file["version"], "offset": args.offset, "length": args.length})}
+            result = {"ok": True, "reason": "completed", "file": file, **chunk}
         elif args.action == "summary":
             await client.request("initialize", {"sessionId": session_id})
             result = {"ok": True, "reason": "completed", "summary": await client.request("session.summary", {"turnId": args.turn, "all": args.all})}

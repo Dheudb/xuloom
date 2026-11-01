@@ -95,10 +95,13 @@ async function main() {
     assert.match(failures.results[2], /404/); assert.equal(failures.pending, 0);
     assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
     fs.writeFileSync(path.join(project, "long.html"), '<html><body style="margin:0;background:#aabbcc;height:1800px"><div style="position:absolute;top:1700px;width:100%;height:100px;background:#123456">bottom</div></body></html>');
-    const full = await app.evaluate(async ({ app }, project) => {
+    const selected = await page.locator('.session-item.active').getAttribute('data-session-id');
+    const full = await app.evaluate(async ({ app, BrowserWindow }, {project, selected}) => {
       const load = process.getBuiltinModule("node:module").createRequire(app.getAppPath() + "/package.json");
-      return new (load("./electron/browser-capture.cjs").BrowserCaptures)().capture("fixture", project, "full", { file_path: "long.html", width: 800, height: 600, full_page: true, wait_ms: 0 });
-    }, project);
+      const web = BrowserWindow.getAllWindows()[0].webContents;
+      const transport = { request: (method, params) => web.executeJavaScript('window.xuloom.invoke('+JSON.stringify(method)+','+JSON.stringify({...params,session:selected})+')') };
+      return new (load("./electron/browser-capture.cjs").BrowserCaptures)().capture("fixture", project, "full", { file_path: "long.html", width: 800, height: 600, full_page: true, wait_ms: 0 }, transport);
+    }, {project, selected});
     const fullFile = path.join(fixture, "full-page.png"); fs.writeFileSync(fullFile, Buffer.from(full.png_base64, "base64"));
     assert.equal(full.height, 1800); assert.equal(full.truncated, false);
     // Chromium/runtime display profiles shift dark colors slightly. Keep exact

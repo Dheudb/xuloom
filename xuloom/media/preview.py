@@ -31,19 +31,24 @@ def info(cwd, requested, known):
 
 
 def read(cwd, requested, known, expected_version, offset=0, length=262144):
-    if type(offset) is not int or type(length) is not int or offset < 0 or not 1 <= length <= 524288:
-        raise ValueError("无效媒体读取范围，单次最多 512 KB")
     path = preview_path(cwd, requested, known)
     if path.suffix.lower() not in {".mp4", ".webm", ".m4a", ".weba", ".mp3", ".wav", ".flac", ".ogg"}:
         raise ValueError("分段读取仅支持音视频文件")
+    return read_range(path, expected_version, offset, length, MEDIA_LIMIT)
+
+
+def read_range(path, expected_version, offset, length, limit):
+    """Read a previously authorized path; callers retain file-type/root policy."""
+    if type(offset) is not int or type(length) is not int or offset < 0 or not 1 <= length <= 524288:
+        raise ValueError("无效文件读取范围，单次最多 512 KB")
     with path.open("rb") as stream:
         before = os.fstat(stream.fileno())
-        if before.st_size > MEDIA_LIMIT or expected_version != version(path, before):
-            raise ValueError("媒体文件版本已变化，请重新打开预览")
+        if before.st_size > limit or expected_version != version(path, before):
+            raise ValueError("文件版本已变化，请重新打开预览")
         if offset > before.st_size:
             raise ValueError("读取位置超过文件大小")
         stream.seek(offset); value = stream.read(min(length, before.st_size - offset))
         if expected_version != version(path, os.fstat(stream.fileno())):
-            raise ValueError("媒体文件读取期间发生变化")
+            raise ValueError("文件读取期间发生变化")
     return {"data": base64.b64encode(value).decode("ascii"), "offset": offset, "nextOffset": offset + len(value),
         "size": before.st_size, "eof": offset + len(value) >= before.st_size, "version": expected_version}

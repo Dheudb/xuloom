@@ -6,7 +6,7 @@
 
 | 功能 | 桌面与 CLI 的验收要求 | 当前状态 |
 |---|---|---|
-| SSH 远程 Xuloom | 配置 SSH 主机、远端工作目录及 Xuloom 启动命令；真实远端会话运行与事件回传、继续、取消、结果和文件访问；显示执行机器；断线不得静默改为本地执行或重复副作用 | 已接 [交互/非交互 SSH CLI、RPC 与桌面聊天](remote.md)，复用现有 JSONL、提问、权限、文件树/文本/差异、会话管理与深链接；远端附件、HTML 预览仍待接入，两机及 POSIX 原生验收仍待验证 |
+| SSH 远程 Xuloom | 配置 SSH 主机、远端工作目录及 Xuloom 启动命令；真实远端会话运行与事件回传、继续、取消、结果和文件访问；显示执行机器；断线不得静默改为本地执行或重复副作用 | 已接 [交互/非交互 SSH CLI、RPC 与桌面聊天](remote.md)，复用现有 JSONL、提问、权限、文件树/文本/差异、会话管理与深链接；本机／SSH HTML 与相对资源已接同一执行端校验和分块读取，见 [网页预览验证](remote-html-validation-2026-11-02.md)；远端附件、物理两机及 POSIX 原生验收仍待完成 |
 | 分布式多代理 | 主任务可把工作交给已配置远端执行端；父子身份、工作目录、排队、通知与结果可追溯；断线/进程重启区分存活、已结束与不确定；取消遵守所有权 | [原生 SSH worker](distributed-workers-plan.md) 已接入现有 FIFO、跟进、持久化消息、结果及所有权取消；App 图形角色配置、只读远端历史与正式 CLI 已通过加密回环端到端检查。[v0.1.6 本地与原安装验收](distributed-workers-validation-2026-11-01.md)：源码 561 项（560 通过、1 跳过）、Node 68 项、包内 56 项及原 EXE 新旧 SSH/本地子代理界面通过；物理跨机、POSIX 原生及外部后端仍待验收 |
 | 异构子代理 | 每个角色可指定不同模型、供应商连接和执行端；可选接入 Codex、Claude Code、Pi、DSH 等已安装 CLI；保留真实身份和回执，不靠模型转抄 ID；缺少后端明确报错 | [实例连接绑定](runtime-connections.md)及原生本地/SSH 角色已接入共享定义、FIFO 与持久化。可选 [Claude Code / Pi 后端](external-agents.md)使用用户已安装程序和受控 MCP；Pi 的确认式停止、历史/回执对账及 App/正式 CLI 跨进程续聊已补齐，见 [v0.1.10 验证](external-recovery-validation-2026-11-02.md)。Codex/DSH、Claude 未知中断恢复、完整外部中间历史 UI 及外部 SSH 组合仍未完成，不算全部异构功能已完成 |
 | Git 状态 | 当前会话显示真实仓库与分支，处理 detached HEAD、未提交文件和非 Git 工作区；切项目/远端后及时更新；CLI 可查询同一信息 | 本地桌面和 CLI 已实现，见 [仓库状态](git-status.md)；SSH 工作台查询远端同一接口，已加入加密 SSH 桌面分支显示验收 |
@@ -25,6 +25,8 @@
 | 发布同步 | 同步经验证的公开代码与 Windows 安装包，版本、源码提交、资产校验和与验证记录对应；排除私人 Skill、凭据和聊天数据 | [v0.1.10](https://github.com/Dheudb/xuloom/releases/tag/v0.1.10) 原安装检查完成，构建 `20261102-002830`，详见 [停止与恢复验证](external-recovery-validation-2026-11-02.md)。最终源码 625 项（624 通过、1 跳过）、Node 68 项、包内 75 项及原 EXE App/CLI/原生 SSH 检查通过；发行包的 `RELEASE.json` 绑定源码提交，ZIP 与 SHA256 文件按现有发布流程核对。此前 [v0.1.9](https://github.com/Dheudb/xuloom/releases/tag/v0.1.9) 和 [Pi 接入验证](pi-agents-validation-2026-11-01.md)保留；其余后端及跨平台范围继续有效 |
 
 ## 轻量实现约束
+
+本机／SSH 网页预览现已统一到执行端路径与版本校验，见 [0.1.12 验证](remote-html-validation-2026-11-02.md)。原安装构建 `20261102-024246` 的五条 App／CLI 流程及包内 54 项（53 通过、1 跳过）通过，最终源码 644 项（643 通过、1 跳过）、Node 70 项通过。资源仍更新同一 EXE，未新增 SDK 或模型提示词；HTML 和音视频共用有界分块读取。远端附件、远端截图、全部外部后端与跨平台等范围继续有效。
 
 当前工具发现专项已在原安装 `0.1.11`（构建 `20261102-014129`）验收，见 [验证记录](tool-discovery-validation-2026-11-02.md)：最终源码 639 项（638 通过、1 跳过）、Node 68 项、原安装包内 94 项，以及实际 Pi 的 App／正式 CLI 续聊、停止恢复、原生 SSH、MCP 设置及外观检查通过。修复同时覆盖实际 Claude 的目录缓存，保留角色权限与发现状态恢复；没有增加提示词、SDK 或调度状态机。公开下载以 [Releases](https://github.com/Dheudb/xuloom/releases) 的资产及校验和为准；表中 Codex／DSH、外部 SSH 组合、远端附件和跨平台等剩余范围不变。
 

@@ -1,6 +1,6 @@
 const { randomUUID } = require("node:crypto");
+const { previewStream } = require("./preview-stream.cjs");
 const SCHEME = "xuloom-media";
-const CHUNK = 262144;
 
 class MediaPreviews {
   constructor() { this.pages = new Map(); }
@@ -33,23 +33,8 @@ class MediaPreviews {
         if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= file.size)
           return denied(416, "媒体范围超出文件", { "content-range": `bytes */${file.size}` });
       }
-      let cursor = start, stopped = false;
-      const body = request.method === "HEAD" ? null : new ReadableStream({
-        pull: async (controller) => {
-          if (stopped) return;
-          if (!this.pages.has(url.hostname)) { stopped = true; controller.error(new Error("媒体预览已关闭")); return; }
-          try {
-            const value = await transport.request("files.mediaChunk", { path: file.path, version: file.version, offset: cursor, length: Math.min(CHUNK, end - cursor + 1) });
-            if (stopped || !this.pages.has(url.hostname)) { stopped = true; controller.error(new Error("媒体预览已关闭")); return; }
-            const bytes = Buffer.from(value.data, "base64");
-            if (value.offset !== cursor || value.nextOffset !== cursor + bytes.length || value.size !== file.size || value.version !== file.version || !bytes.length || bytes.length > Math.min(CHUNK, end - cursor + 1))
-              throw new Error("媒体读取回执无效");
-            cursor += bytes.length; controller.enqueue(bytes);
-            if (cursor > end) { stopped = true; controller.close(); }
-          } catch (error) { stopped = true; controller.error(error); }
-        },
-        cancel() { stopped = true; },
-      });
+      const body = request.method === "HEAD" ? null : previewStream(transport, "files.mediaChunk", { path: file.path }, file,
+        start, end, () => this.pages.has(url.hostname));
       return new Response(body, { status: range ? 206 : 200, headers: {
         "content-type": file.mime, "content-length": String(end - start + 1), "accept-ranges": "bytes",
         ...(range ? { "content-range": `bytes ${start}-${end}/${file.size}` } : {}),

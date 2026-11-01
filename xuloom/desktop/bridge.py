@@ -10,7 +10,7 @@ import uuid
 from pathlib import Path
 from xuloom.branding import configuration_file
 
-from xuloom.core.config import load_config, load_config_into_env, update_config, normalize_api_base_url
+from xuloom.core.config import load_config, load_config_into_env, update_config
 from xuloom.core.model_catalog import public_config, active_connection, save_connection, delete_connection, select_model, select_reasoning, discover_models, apply_connection_env, apply_catalog_env
 from xuloom.security.permissions import ApprovalPolicy
 from xuloom.desktop.activity import restore_activity
@@ -336,7 +336,9 @@ class DesktopBridge:
         self.emit({"type": "turn_started"})
         try:
             # Validate all selections before creating a turn or emitting loaded events.
-            selections = prepared[0] if prepared is not None else [(name, self.skills.read(name)) for name in selected_skills]
+            if prepared is None:
+                for name in selected_skills:
+                    self.skills.read(name)
             engine = await self.ensure_engine(write=True)
             from xuloom.desktop.attachments import prepare_attachments
             attachment_blocks, attachment_items = prepared[1] if prepared is not None else prepare_attachments(self.cwd, getattr(engine, "session_id", ""), attachment_ids or [])
@@ -690,6 +692,12 @@ class DesktopBridge:
             return {"controlledExecution": controlled, "controlledModel": controlled_model, "project": str(self.cwd), "persistedId": sid, "executionMode": self.execution_mode, "collaborationMode": self.collaboration_mode, "permissionMode": self.approval_policy.mode, "config": self.config(), "capabilities": self.capabilities(), "sessions": self.sessions(), "history": self.history(messages, traces), "activity": activity, "workers": workers, "fileChanges": self.file_changes}
         if method == "files.read":
             return preview_file(self.cwd, params.get("path"), self.file_changes)
+        if method in {"files.htmlInfo", "files.htmlChunk"}:
+            from xuloom.features import html_preview
+            if method == "files.htmlInfo":
+                return await asyncio.to_thread(html_preview.info, self.cwd, params.get("path"), self.file_changes, params.get("asset"))
+            return await asyncio.to_thread(html_preview.read, self.cwd, params.get("path"), self.file_changes,
+                params.get("asset"), params.get("version"), params.get("offset", 0), params.get("length", 262144))
         if method in {"files.mediaInfo", "files.mediaChunk"}:
             from xuloom.media import preview
             if method == "files.mediaInfo":

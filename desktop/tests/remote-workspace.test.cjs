@@ -88,8 +88,9 @@ test('permission acknowledgement loss closes ownership without saving full acces
 });
 test('SSH file actions never fall through to a local path or mixed delete',async()=>{
  const f=fixture();const {value}=await f.work.handle('remote.open',{id:'lab'});
- for(const method of ['attachments.import','project.reveal','preview.open','capabilities.directory'])
+ for(const method of ['attachments.import','project.reveal','capabilities.directory'])
   await assert.rejects(f.work.handle(method,{session:value.id,path:'/remote/project'}),/未尝试打开本机/);
+ assert.deepEqual(await f.work.handle('preview.open',{session:value.id,path:'/remote/project/page.html'}),{handled:false});
  await assert.rejects(f.work.handle('session.delete',{ids:[value.id,'local-row'],confirm:true}),/分别管理/);
  await assert.rejects(f.work.handle('session.move',{id:value.id,path:'C:/local'}),/没有移动/);
  assert.equal(f.disposed.length,0);

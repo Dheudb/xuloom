@@ -7,6 +7,7 @@
 | [目标与调度](goals-and-schedules.md) | 目标预算与验收、正式非交互 CLI、延迟和重复唤醒 |
 | [模型配置](models.md) | 支持的协议、本地模型与兼容边界 |
 | [后台渲染与验证](browser-capture.md) | 隐藏窗口截图、原生图像输入、权限与 CLI 依赖 |
+| [本机与 SSH 网页预览验证](remote-html-validation-2026-11-02.md) | 远端相对资源、App／CLI 读取、截图路径及版本／关闭边界 |
 | [Skills 与子代理](capabilities.md) | 目录规范、发现顺序、导入与执行 |
 | [MCP 与搜索](mcp.md) | 市场、配置、连接测试和内置搜索 |
 | [项目架构](architecture.md) | 目录职责和运行流程 |

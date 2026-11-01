@@ -70,6 +70,7 @@ const engineMethods = new Set([
   "files.read",
   "files.image",
   "files.mediaInfo", "files.mediaChunk",
+  "files.htmlInfo", "files.htmlChunk",
   "media.read",
   "media.connections", "media.save", "media.remove", "media.jobs", "media.control",
   "files.undo",
@@ -148,7 +149,7 @@ function send(id, payload) {
       void source.transport.request("browser.capture_result", { requestId: payload.requestId, result: { error: "远端尚未连接截图渲染器；未调用本机浏览器" } }).catch(() => {});
       return;
     }
-    if (source) browserCaptures.capture(id, source.project, payload.requestId, payload.input)
+    if (source) browserCaptures.capture(id, source.project, payload.requestId, payload.input, source.transport)
       .catch(error => ({ error: error.message }))
       .then(result => source.transport.request("browser.capture_result", { requestId: payload.requestId, result }))
       .catch(() => {}); // A cancelled/closed engine no longer owns a pending request.
@@ -667,8 +668,7 @@ async function invoke(method, params) {
     return { name: item.name, source: image.resize({ width: Math.max(1, Math.round(size.width * scale)), height: Math.max(1, Math.round(size.height * scale)), quality: "good" }).toDataURL() };
   }
   if (method === "preview.open") {
-    const file = await source.transport.request("files.read", { path: params.path });
-    return htmlPreviews.create(params.session, source.project, file.path);
+    return htmlPreviews.create(params.session, source.transport, params.path);
   }
   if (method === "media-preview.open") return mediaPreviews.create(params.session, source.transport, params.path);
   if (method === "media-preview.close") { mediaPreviews.revoke(params.token, params.session); return true; }

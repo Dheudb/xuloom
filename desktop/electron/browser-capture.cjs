@@ -13,7 +13,7 @@ class BrowserCaptures {
   cancel(owner, requestId) {
     for (const [key, entry] of this.active) if (entry.owner === owner && (!requestId || key === owner + ":" + requestId)) entry.cancel();
   }
-  async capture(owner, project, requestId, input) {
+  async capture(owner, project, requestId, input, transport) {
     const key = owner + ":" + requestId;
     if (this.active.has(key)) throw new Error("Duplicate capture request");
     if (this.active.size >= 4) throw new Error("Four screenshot renders are already running; retry after they finish");
@@ -34,7 +34,8 @@ class BrowserCaptures {
           const root = await fs.realpath(project), file = await fs.realpath(path.resolve(root, input.file_path));
           if (!inside(root, file) || path.relative(root, file).split(path.sep).some(part => part.startsWith(".")))
             throw new Error("Screenshot HTML must be inside the session workspace, outside hidden directories");
-          target = (await previews.create(owner, root, file)).url;
+          if (!transport?.request) throw new Error("Screenshot HTML requires its owning engine's file transport");
+          target = (await previews.create(owner, transport, file)).url;
         } else {
           const url = new URL(input.url);
           if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error("Only HTTP(S) URLs without credentials are allowed");

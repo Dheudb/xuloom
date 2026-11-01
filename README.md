@@ -13,7 +13,7 @@
 
 Windows 下载包自带 Python 和 MCP SDK，无需安装 Python、选择解释器或安装 Node.js。第三方 MCP 程序可能另需 Node.js、uv 等环境，按服务说明准备。
 
-当前源码版本为 **v0.1.11**，可下载成品及校验和以 Releases 为准。成品面向 Windows x64；Linux/macOS 可使用源码 CLI，尚无对应的桌面发行包。
+当前源码版本为 **v0.1.12**，可下载成品及校验和以 Releases 为准。成品面向 Windows x64；Linux/macOS 可使用源码 CLI，尚无对应的桌面发行包。
 
 执行过程按操作显示图标和简短说明：图片、编辑、终端、搜索等各有标识，点击过程行可展开参数与结果，完成后整轮过程自动折叠。读取图片会显示可点击放大的缩略图；会话保存图片快照，原文件被修改或删除后仍能回看。预览本身不会调用模型；模型理解图片还需所连接的接口支持图片输入。
 
@@ -30,6 +30,8 @@ Xuloom 支持 **OpenAI 兼容 Chat Completions** 和 **Anthropic Messages**。�
 ## 远程使用与会话导航
 
 **设置 → SSH 远程**可添加另一台机器的 SSH 连接、远端工作目录与已安装 Xuloom 的 Python 路径。桌面可打开真实远端会话、切换远端模型、处理审批和问题、查看文件与 Git 分支。CLI 使用同一份连接配置：`xuloom remote chat 连接ID`，程序化执行使用 `xuloom remote exec 连接ID "任务" --json`。凭据和历史留在远端，不会自动把本机 Key 上传过去。
+
+SSH 会话的 HTML 可直接在文件面板预览，支持工作区内的相对 CSS、脚本、图片和数据资源。资源由远端校验并通过 SSH 分块读取，不转发网页端口、不调用模型；CLI 使用 `xuloom remote preview 连接ID 页面路径 --json` 查询同一资源。两端需更新到支持此协议的版本，详见 [远端网页预览](docs/remote.md#网页预览与资源读取)。
 
 右键会话可复制聊天深链接；CLI 可生成、解析或打开同一地址。SSH 链接选择本机已配置目标，不是跨账户的云分享链接。离线或损坏的本机引用可以在 SSH 设置里移除，不删除远端历史。详见 [SSH 远程](docs/remote.md)、[聊天链接](docs/chat-links.md) 与 [实例及角色模型绑定](docs/runtime-connections.md)。
 
