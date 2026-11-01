@@ -39,7 +39,7 @@ def freeze_role(value):
     for key in ("agent_type", "agent_role", "system_prompt", "critical_reminder", "model", "connection", "backend_program"):
         if result.get(key) is not None and not isinstance(result[key], str):
             raise ValueError("Invalid remote role " + key)
-    if result.get("backend", "native") not in {"native", "claude"}:
+    if result.get("backend", "native") not in {"native", "claude", "pi"}:
         raise ValueError("Unsupported remote execution backend")
     for key in ("allowed_tools", "disallowed_tools", "skills", "mcp_servers"):
         if key not in result or result[key] is None:

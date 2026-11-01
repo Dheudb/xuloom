@@ -135,7 +135,7 @@ export type InitialSession = {
 export type RemoteLocation = { connectionId: string; host: string; name: string; key: string; hostname?: string };
 export type EngineEvent = { session: string; type: string; [key: string]: any };
 export type Worker = {
-  backend?: "native" | "claude";
+  backend?: "native" | "claude" | "pi";
   executor?: string;
   outcome_unknown?: boolean;
   pending_message_count?: number;

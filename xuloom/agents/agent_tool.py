@@ -256,6 +256,8 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
             binding, options = resolve_connection(connection_binding["connection_id"], connection_binding["model"], frozen=connection_binding)
             child_model, provider, base = binding["model"], binding["provider"], binding["api_base_url"]
         same_model = connection_binding is None and child_model == self.context.get("primary_model")
+        input_contract = self.context.get("model_input_contract")
+        inherited_contract = {"inputs": input_contract(child_model), "reasoning": copy.deepcopy(self.context.get("reasoning_profile"))} if same_model and callable(input_contract) else None
         sub_engine = QueryEngine(
             model=child_model,
             fallback_model=child_model if connection_binding is not None else self.context.get("fallback_model"),
@@ -273,7 +275,7 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
             reasoning_effort=(builtin_agent_def or {}).get("reasoning_effort") or (self.context.get("reasoning_effort") if same_model else None),
             collaboration_mode="solo",
             execution_mode=getattr(self.context.get("execution_sandbox"), "mode", "host"),
-            model_contract=connection_binding["contract"] if connection_binding is not None else None,
+            model_contract=connection_binding["contract"] if connection_binding is not None else inherited_contract,
             **options,
         )
         if same_model and self.context.get("reasoning_profile") is not None:
@@ -329,7 +331,7 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
         if resume_state:
             sub_engine.messages = copy.deepcopy(resume_state["messages"])
             metadata = resume_state.get("metadata", {})
-            from xuloom.agents.external.claude import restore as restore_external
+            from xuloom.agents.external.runtime import restore as restore_external
             try:
                 restore_external(sub_engine, metadata)
             except BaseException:
@@ -573,7 +575,7 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
             builtin_def["model"] = model or builtin_def.get("model")
         elif builtin_def.get("backend", "native") != "native":
             from xuloom.agents.external.program import resolve
-            builtin_def["_external_binding"] = resolve(builtin_def.get("backend_program"))
+            builtin_def["_external_binding"] = resolve(builtin_def.get("backend_program"), backend=builtin_def["backend"], workspace=self.context.get("session_cwd"))
         binding = None
         if not remote and builtin_def.get("connection"):
             from xuloom.agents.connections import resolve_connection

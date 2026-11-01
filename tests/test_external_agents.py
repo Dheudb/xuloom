@@ -6,13 +6,14 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import tempfile
 import threading
 import unittest
 from unittest.mock import patch
 
 import httpx
-from xuloom.agents.external.claude import configure, restore
+from xuloom.agents.external.runtime import configure, restore
 from xuloom.agents.external.host import LocalHost, SOURCE_ID
 from xuloom.agents.external.program import environment, resolve
 from xuloom.core.engine import QueryEngine
@@ -44,10 +45,37 @@ class ExternalFixture(unittest.IsolatedAsyncioTestCase):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 fixture.records.append({"body": body, "headers": {k.lower(): v for k, v in self.headers.items()}})
                 if fixture.mode == "hold": fixture.release.wait(20)
+                if self.path.endswith("/chat/completions"):
+                    finished = any(message.get("role") == "tool" for message in body["messages"])
+                    name = "Bash" if fixture.mode == "builtin" else "mcp__xuloom__file_read_tool"
+                    def chunk(delta, reason=None):
+                        return {"id": "chatcmpl_fixture", "object": "chat.completion.chunk", "created": 0, "model": body["model"],
+                            "choices": [{"index": 0, "delta": delta, "finish_reason": reason}]}
+                    if finished:
+                        events = [chunk({"role": "assistant", "content": "CONTROLLED_RESULT"}), chunk({}, "stop")]
+                    else:
+                        arguments = json.dumps({"file_path": "evidence.png" if fixture.mode == "image" else "evidence.txt"})
+                        events = [chunk({"role": "assistant", "tool_calls": [{"index": 0, "id": "call_fixture", "type": "function", "function": {"name": name, "arguments": arguments[:12]}}]}),
+                            chunk({"tool_calls": [{"index": 0, "function": {"arguments": arguments[12:]}}]}), chunk({}, "tool_calls")]
+                    events.append({"id": "chatcmpl_fixture", "object": "chat.completion.chunk", "created": 0, "model": body["model"], "choices": [],
+                        "usage": {"prompt_tokens": 12, "completion_tokens": 5, "total_tokens": 17}})
+                    if fixture.mode == "no_usage": events.pop()
+                    if not body.get("stream"):
+                        message = {"role": "assistant", "content": "CONTROLLED_RESULT"} if finished else {"role": "assistant", "content": None,
+                            "tool_calls": [{"id": "call_fixture", "type": "function", "function": {"name": name, "arguments": json.dumps({"file_path": "evidence.txt"})}}]}
+                        raw = json.dumps({"id": "chatcmpl_fixture", "object": "chat.completion", "model": body["model"], "created": 0,
+                            "choices": [{"index": 0, "message": message, "finish_reason": "stop" if finished else "tool_calls"}],
+                            "usage": {"prompt_tokens": 12, "completion_tokens": 5, "total_tokens": 17}}).encode()
+                    else: raw = ("".join("data: " + json.dumps(event) + "\n\n" for event in events) + ("" if fixture.mode == "truncated" else "data: [DONE]\n\n")).encode()
+                    try:
+                        self.send_response(200); self.send_header("Content-Type", "text/event-stream" if body.get("stream") else "application/json"); self.send_header("Content-Length", str(len(raw)))
+                        self.end_headers(); self.wfile.write(raw)
+                    except OSError: pass
+                    return
                 finished = any(isinstance(m.get("content"), list) and any(b.get("type") == "tool_result" for b in m["content"]) for m in body["messages"])
                 block = {"type": "text", "text": ""} if finished else {"type": "tool_use", "id": "toolu_contract", "name": "mcp__xuloom__file_read_tool", "input": {}}
                 if fixture.mode == "builtin": block["name"] = "Bash"
-                delta = {"type": "text_delta", "text": "CONTROLLED_RESULT"} if finished else {"type": "input_json_delta", "partial_json": json.dumps({"file_path": "evidence.txt"})}
+                delta = {"type": "text_delta", "text": "CONTROLLED_RESULT"} if finished else {"type": "input_json_delta", "partial_json": json.dumps({"file_path": "evidence.png" if fixture.mode == "image" else "evidence.txt"})}
                 start = {"id": "msg_contract", "type": "message", "role": "assistant", "model": MODEL, "content": [], "stop_reason": None, "stop_sequence": None, "usage": {"input_tokens": 12, "output_tokens": 0}}
                 events = [{"type": "message_start", "message": start}, {"type": "content_block_start", "index": 0, "content_block": block},
                     {"type": "content_block_delta", "index": 0, "delta": delta}, {"type": "content_block_stop", "index": 0},
@@ -65,9 +93,9 @@ class ExternalFixture(unittest.IsolatedAsyncioTestCase):
         self.base = "http://127.0.0.1:" + str(self.server.server_port)
         (self.root / "evidence.txt").write_text("OWNED_EVIDENCE", encoding="utf8")
 
-    def engine(self):
-        engine = QueryEngine(model=MODEL, model_provider="anthropic", api_key="fixture-only", api_base_url=self.base,
-            cwd=self.root, network_mode="direct", collaboration_mode="ultra")
+    def engine(self, provider="anthropic", **options):
+        engine = QueryEngine(model=MODEL, model_provider=provider, api_key="fixture-only", api_base_url=self.base,
+            cwd=self.root, network_mode="direct", collaboration_mode="ultra", **options)
         engine.permission_manager.approval_policy.set_mode("full")
         self.engines.append(engine)
         return engine
@@ -79,7 +107,12 @@ class ExternalFixture(unittest.IsolatedAsyncioTestCase):
         self.encoder.stop(); self.config.stop(); self.env.stop()
         # The fixture root is explicitly checked before recursive removal; CLI paths can exceed MAX_PATH.
         assert self.root.parent.resolve() == Path(tempfile.gettempdir()).resolve() and self.root.name.startswith("xuloom-external-contract-")
-        shutil.rmtree(IOPath(self.root)); self.temp.cleanup()
+        def writable_remove(operation, path, exc_info):
+            if not isinstance(exc_info[1], PermissionError): raise exc_info[1]
+            assert IOPath(path).resolve().is_relative_to(IOPath(self.root).resolve())
+            os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+            operation(path)
+        shutil.rmtree(IOPath(self.root), onerror=writable_remove); self.temp.cleanup()
 
     def state(self, engine):
         engine.require_writer(); engine.messages.append(create_user_message("Read evidence.txt"))
@@ -92,6 +125,61 @@ class ExternalFixture(unittest.IsolatedAsyncioTestCase):
         return {"model": MODEL, "stream": True, "max_tokens": 100,
             "messages": [{"role": "user", "content": "Read evidence.txt"}],
             "tools": [{"name": "mcp__xuloom__file_read_tool", "input_schema": {"type": "object"}}]}
+
+
+@unittest.skipUnless(MCP, "optional MCP runtime not installed")
+class OpenAIHostTests(ExternalFixture):
+    def request(self):
+        return {"model": MODEL, "stream": True, "max_tokens": 100,
+            "messages": [{"role": "user", "content": "Read evidence.txt"}],
+            "tools": [{"type": "function", "function": {"name": "mcp__xuloom__file_read_tool", "parameters": {"type": "object"}}}]}
+
+    async def test_fragmented_and_nonstream_tool_arguments_get_owned_identity(self):
+        engine = self.engine("openai"); state = self.state(engine)
+        async with httpx.AsyncClient(trust_env=False) as http:
+            for streaming in (True, False):
+                state["seen_tool_ids"] = []
+                async with LocalHost(engine, state) as host:
+                    result = await http.post(host.url + "/v1/chat/completions", json={**self.request(), "stream": streaming}, headers={"Authorization": "Bearer " + host.token})
+                    self.assertEqual(result.status_code, 200)
+                    self.assertIn(SOURCE_ID, result.text)
+                    self.assertEqual(host.calls["call_fixture"], ("file_read_tool", {"file_path": "evidence.txt"}))
+                    self.assertEqual(host.usage["output_tokens"], 5)
+        self.assertTrue(all(r["headers"]["authorization"] == "Bearer fixture-only" for r in self.records))
+
+    async def test_eof_before_done_never_grants_a_tool_identity(self):
+        engine = self.engine("openai"); state = self.state(engine); self.mode = "truncated"
+        async with LocalHost(engine, state) as host, httpx.AsyncClient(trust_env=False) as http:
+            result = await http.post(host.url + "/v1/chat/completions", json=self.request(), headers={"Authorization": "Bearer " + host.token})
+            self.assertEqual(host.failure, "provider_error")
+            self.assertNotIn(SOURCE_ID, result.text)
+            self.assertEqual(host.calls, {})
+            self.assertEqual(state["seen_tool_ids"], [])
+
+    async def test_controlled_catalog_model_and_choice_count_cannot_be_changed(self):
+        engine = self.engine("openai"); state = self.state(engine)
+        changes = [{"n": 2}, {"n": True}, {"model": "other"}, {"tools": [{"type": "web_search"}]},
+            {"functions": [{"name": "Bash"}]}, {"web_search_options": {}}, {"audio": {}},
+            {"tools": [{"type": "function", "function": {"name": "Bash"}}]}, {"mcp_servers": [{"url": "https://untrusted.invalid"}]}]
+        async with httpx.AsyncClient(trust_env=False) as http:
+            for change in changes:
+                async with LocalHost(engine, state) as host:
+                    result = await http.post(host.url + "/v1/chat/completions", json={**self.request(), **change}, headers={"Authorization": "Bearer " + host.token})
+                    self.assertEqual(result.status_code, 400)
+            self.assertFalse(self.records)
+
+    async def test_absent_usage_retains_native_conservative_output_charge(self):
+        from xuloom.agents.collaboration import DELEGATION_BUDGET, new_run
+        engine = self.engine("openai"); state = self.state(engine); self.mode = "no_usage"
+        budget = new_run(engine.tool_context["collaboration"])
+        token = DELEGATION_BUDGET.set(budget)
+        try:
+            async with LocalHost(engine, state) as host, httpx.AsyncClient(trust_env=False) as http:
+                result = await http.post(host.url + "/v1/chat/completions", json=self.request(), headers={"Authorization": "Bearer " + host.token})
+                self.assertEqual(result.status_code, 200)
+                self.assertIsNone(host.failure)
+                self.assertEqual((budget["output_used"], budget["output_reserved"]), (100, 0))
+        finally: DELEGATION_BUDGET.reset(token)
 
 
 @unittest.skipUnless(MCP, "optional MCP runtime not installed")
@@ -156,12 +244,13 @@ class ExternalHostTests(ExternalFixture):
 
     async def test_unknown_catalog_changed_model_and_origin_never_reach_provider(self):
         engine = self.engine(); state = self.state(engine)
-        async with LocalHost(engine, state) as host, httpx.AsyncClient(trust_env=False) as http:
+        async with httpx.AsyncClient(trust_env=False) as http:
             for change, headers in (({"model": "changed"}, {}), ({"tools": [{"name": "Bash"}]}, {}),
                 ({"tools": [{"name": "mcp__xuloom__file_read_tool", "type": "web_search_20250305"}]}, {}),
                 ({"mcp_servers": [{"url": "https://untrusted.invalid"}]}, {}), ({}, {"Origin": "https://untrusted.invalid"})):
-                result = await http.post(host.url + "/v1/messages", json={**self.request(), **change}, headers={"x-api-key": host.token, **headers})
-                self.assertIn(result.status_code, {400, 401})
+                async with LocalHost(engine, state) as host:
+                    result = await http.post(host.url + "/v1/messages", json={**self.request(), **change}, headers={"x-api-key": host.token, **headers})
+                    self.assertIn(result.status_code, {400, 401})
             self.assertEqual(self.records, [])
 
     async def test_checkpoint_failure_and_duplicate_identity_do_not_start_an_operation(self):

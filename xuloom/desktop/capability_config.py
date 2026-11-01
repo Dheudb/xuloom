@@ -25,8 +25,8 @@ def create_definition(registry, params):
         from xuloom.agents.executors import executor, profile
         location = executor(params.get("executor"))
         backend = params.get("backend", "native")
-        if backend not in {"native", "claude"}:
-            raise ValueError("请选择原生引擎或已安装的 Claude Code")
+        if backend not in {"native", "claude", "pi"}:
+            raise ValueError("请选择原生引擎或已安装的 Claude Code / Pi")
         program = params.get("backend_program")
         if backend != "native":
             metadata["backend"] = backend
@@ -36,7 +36,7 @@ def create_definition(registry, params):
                 metadata["backend_program"] = program
             if location == "local":
                 from xuloom.agents.external.program import resolve
-                resolve(program)
+                resolve(program, backend=backend, workspace=registry.cwd)
         if location != "local":
             profile(location)
             metadata["executor"] = location
@@ -49,6 +49,8 @@ def create_definition(registry, params):
                 binding, _ = resolve_connection(connection, None if model == "inherit" else model)
                 if backend == "claude" and binding["provider"] != "anthropic":
                     raise ValueError("Claude Code 后端需要 Anthropic Messages 协议的连接")
+                if backend == "pi" and binding["provider"] not in {"anthropic", "openai"}:
+                    raise ValueError("Pi 后端需要 Anthropic Messages 或 OpenAI Chat 协议的连接")
             metadata["connection"] = connection
         if params.get("tools", "").strip():
             tools = tool_list(params["tools"])

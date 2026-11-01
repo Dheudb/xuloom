@@ -1,101 +1,25 @@
 """Optional installed Claude Code as a sampler, using the existing owned runtime."""
 import asyncio
-import copy
 import json
 import os
-from pathlib import Path
-from types import SimpleNamespace
 import uuid
 
 from xuloom.core.run_result import PersistenceError
-from xuloom.core.storage import artifact_directory, atomic_text
+from xuloom.core.storage import atomic_text
 from .host import LocalHost, LIMIT
-from .program import environment, resolve, verify
-
-
-class ExternalExecutionError(RuntimeError):
-    def __init__(self, reason, message):
-        super().__init__(message)
-        self.reason = reason
-
-
-def configure(engine, definition):
-    backend = definition.get("backend", "native")
-    if backend not in {"native", "claude"}:
-        raise ValueError("Unsupported external agent backend: " + str(backend))
-    if backend == "native":
-        engine.tool_context.pop("external_backend", None)
-        return
-    if engine.model_provider != "anthropic":
-        raise ValueError("Claude Code requires an explicit Anthropic Messages model connection")
-    if engine.execution_sandbox.enabled:
-        raise ValueError("External Claude execution is not supported by this system isolation backend; no host fallback was started")
-    binding = resolve(definition.get("backend_program"))
-    if definition.get("_external_binding") is not None and definition["_external_binding"] != binding:
-        raise ValueError("External program changed while the worker was queued; no process was started")
-    previous = engine.tool_context.get("external_agent")
-    if previous and previous.get("binding") != binding:
-        raise ValueError("The installed external backend changed; create a new worker after reviewing the program")
-    engine.tool_context["external_backend"] = binding
-
-
-def restore(engine, metadata):
-    state = copy.deepcopy(metadata.get("external_agent"))
-    if state is not None:
-        if not isinstance(state, dict) or state.get("backend") != "claude" or state.get("phase") not in {"idle", "running", "interrupted"}:
-            raise ValueError("Invalid external execution checkpoint")
-        if str(uuid.UUID(state["session_id"])) != state["session_id"] or not isinstance(state.get("seen_tool_ids"), list):
-            raise ValueError("Invalid external session identity")
-        if type(state.get("message_cursor")) is not int or state["message_cursor"] < 0:
-            raise ValueError("Invalid external message checkpoint")
-        engine.tool_context["external_agent"] = state
-    else:
-        engine.tool_context.pop("external_agent", None)
-
-
-def response(text, usage):
-    return SimpleNamespace(content=[SimpleNamespace(type="text", text=text)], stop_reason="end_turn",
-        usage=SimpleNamespace(**usage))
+from .program import environment
+from .runtime import prepare, cleanup, response, ExternalExecutionError
 
 
 async def sample(engine, *, system_prompt, api_messages, turn_count, model_name, max_tokens,
                  event_callback=None, **_):
     from xuloom.core.engine import AbortRequestedError
-    from xuloom.core.model_inputs import validate_media, validate_transport
-    validate_media(api_messages, engine._input_contract(model_name))
-    validate_transport(api_messages, engine.model_provider)
+    prepared = await prepare(engine, system_prompt=system_prompt, api_messages=api_messages, model_name=model_name)
+    if prepared.get("cached") is not None:
+        return prepared["cached"], [], False
+    state, home, content = prepared["state"], prepared["home"], prepared["content"]
     binding = engine.tool_context["external_backend"]
-    try:
-        await verify(binding)
-    except asyncio.CancelledError:
-        raise
-    except Exception as error:
-        raise ExternalExecutionError("external_dependency_error", "The installed Claude Code no longer satisfies its frozen execution contract; no model was started") from error
-    state = engine.tool_context.get("external_agent")
-    if state is None:
-        state = {"backend": "claude", "binding": binding, "session_id": str(uuid.uuid4()), "phase": "idle",
-            "model": model_name, "seen_tool_ids": [], "message_cursor": 0, "has_session": False}
-        engine.tool_context["external_agent"] = state
-    if state["binding"] != binding or state["model"] != model_name:
-        raise ExternalExecutionError("binding_changed", "External worker model/program changed; no request was started")
-    if state["phase"] != "idle":
-        raise ExternalExecutionError("external_outcome_unknown", "The external execution was interrupted. Its transcript and tool receipts were preserved; inspect them before starting a new worker. It was not automatically replayed.")
-    cursor = state["message_cursor"]
-    inputs = [copy.deepcopy(m["content"]) for m in engine.messages[cursor:]
-        if m.get("role") == "user" and not m.get("_is_tool_result")]
-    if not inputs:
-        if "result" in state:
-            return response(state["result"], {name: 0 for name in ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")}), [], False
-        raise ExternalExecutionError("protocol_error", "External execution has no owned input")
-    content = []
-    for value in inputs:
-        content.extend(value if isinstance(value, list) else [{"type": "text", "text": value}])
-    owner = (engine.tool_context.get("delegation") or {}).get("owner_session_id") or engine.session_id
-    home = artifact_directory(engine.session_cwd) / owner / "external" / state["session_id"]
-    home.mkdir(parents=True, exist_ok=True)
-    atomic_text(home / "instructions.txt", system_prompt)
     config_path = home / "connection.json"
-    state.update(phase="running", message_cursor=len(engine.messages))
     process = None
     tasks = []
     try:
@@ -179,13 +103,4 @@ async def sample(engine, *, system_prompt, api_messages, turn_count, model_name,
     except Exception as error:
         raise ExternalExecutionError("external_execution_error", "External execution failed before a valid completion receipt; inspect its saved transcript") from error
     finally:
-        if process is not None and process.returncode is None:
-            process.kill(); await process.wait()  # Only the child created above, never an unrelated CLI.
-        for task in tasks:
-            if not task.done(): task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-        config_path.unlink(missing_ok=True)
-        if state["phase"] == "running":
-            state["phase"] = "interrupted"
-            if not engine.persist_session_state():
-                raise PersistenceError("External cancellation/failure could not be checkpointed; inspect saved execution before retrying")
+        await cleanup(engine, state, process, tasks, [config_path])

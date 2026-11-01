@@ -2621,7 +2621,7 @@ class QueryEngine:
             self.messages = msgs
             self._sync_message_context()
             metadata = state.get("metadata", {})
-            from xuloom.agents.external.claude import restore as restore_external
+            from xuloom.agents.external.runtime import restore as restore_external
             restore_external(self, metadata)
             if self.agent_depth == 0:
                 previous_delegation = self.tool_context.pop("delegation", {})
@@ -3371,7 +3371,7 @@ class QueryEngine:
         self, **kwargs,
     ):
         if self.tool_context.get("external_backend"):
-            from xuloom.agents.external.claude import sample
+            from xuloom.agents.external.runtime import sample
             return await sample(self, **kwargs)
         from xuloom.core.output_limits import model_reservation
         async with model_reservation(self, kwargs["max_tokens"]) as grant:
@@ -4442,7 +4442,7 @@ class QueryEngine:
             except Exception as e:
                 if streaming_tool_entries:
                     await self._cancel_streaming_tool_tasks(streaming_tool_entries)
-                from xuloom.agents.external.claude import ExternalExecutionError
+                from xuloom.agents.external.runtime import ExternalExecutionError
                 from xuloom.core.output_limits import ModelBudgetError
                 if isinstance(e, (ExternalExecutionError, ModelBudgetError)):
                     return finish_run(self, str(e), e.reason if isinstance(e, ExternalExecutionError) else "budget_exhausted")

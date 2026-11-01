@@ -123,6 +123,7 @@ class LocalHost:
                 await manager.handle_request(scope, receive, send)
         core = Starlette(routes=[Route("/mcp", MCPRoute(), methods=["GET", "POST", "DELETE"]),
             Route("/v1/messages", self.messages, methods=["POST"]),
+            Route("/v1/chat/completions", self.chat_completions, methods=["POST"]),
             Route("/v1/messages/count_tokens", self.count_tokens, methods=["POST"])], lifespan=lifespan)
         async def application(scope, receive, send):
             if scope["type"] == "http":
@@ -161,7 +162,7 @@ class LocalHost:
         finally:
             self.socket.close()
 
-    async def payload(self, request):
+    async def payload(self, request, protocol="anthropic"):
         data = bytearray()
         async for part in request.stream():
             data.extend(part)
@@ -172,9 +173,13 @@ class LocalHost:
         tools, messages = value.get("tools", []), value.get("messages")
         if not isinstance(tools, list) or not isinstance(messages, list) or not messages:
             raise ValueError("External request has invalid tools or messages")
-        if value.get("mcp_servers"):
+        if value.get("mcp_servers") or any(key in value for key in ("functions", "function_call", "web_search_options", "audio", "modalities")):
             raise ValueError("Provider-hosted MCP is outside the owned tool boundary")
         for tool in tools:
+            if protocol == "openai":
+                if not isinstance(tool, dict) or tool.get("type") != "function" or not isinstance(tool.get("function"), dict):
+                    raise ValueError("Provider-hosted tools are outside the owned tool boundary")
+                tool = tool["function"]
             if not isinstance(tool, dict) or not isinstance(tool.get("name"), str):
                 raise ValueError("Invalid external tool definition")
             if tool.get("type", "custom") != "custom":
@@ -183,8 +188,15 @@ class LocalHost:
             if name not in SAFE_INTERNAL and (not name.startswith(PREFIX) or name[len(PREFIX):] not in self.tools()):
                 raise ValueError("The external program exposed an uncontrolled tool")
         for message in messages:
-            if not isinstance(message, dict) or message.get("role") not in {"assistant", "user"} or not isinstance(message.get("content"), (str, list)):
+            roles = {"assistant", "user"} if protocol == "anthropic" else {"assistant", "user", "system", "developer", "tool"}
+            if not isinstance(message, dict) or message.get("role") not in roles or (not isinstance(message.get("content"), (str, list)) and not (protocol == "openai" and message.get("role") == "assistant" and message.get("tool_calls"))):
                 raise ValueError("Invalid external message")
+            if protocol == "openai":
+                for call in message.get("tool_calls", []):
+                    arguments = json.loads(call["function"]["arguments"])
+                    if not isinstance(arguments, dict): raise ValueError("Invalid external tool arguments")
+                    arguments.pop(SOURCE_ID, None)
+                    call["function"]["arguments"] = json.dumps(arguments)
             if isinstance(message.get("content"), list):
                 for block in message["content"]:
                     if not isinstance(block, dict): raise ValueError("Invalid external content block")
@@ -198,6 +210,8 @@ class LocalHost:
 
     async def count_tokens(self, request):
         try:
+            if self.engine.model_provider != "anthropic" or self.failure or self.engine.abort_event.is_set():
+                raise ValueError("Token counting is unavailable for this owned execution")
             value = await self.payload(request)
             model, messages = value.pop("model"), value.pop("messages")
             result = await self.engine.client.with_options(max_retries=0).messages.count_tokens(model=model, messages=messages, extra_body=value)
@@ -207,16 +221,32 @@ class LocalHost:
             return self.failure_response(400, "Configured token counting endpoint is unavailable")
 
     async def messages(self, request):
+        return await self.relay(request, "anthropic")
+
+    async def chat_completions(self, request):
+        return await self.relay(request, "openai")
+
+    async def relay(self, request, protocol):
         from starlette.responses import StreamingResponse
+        if self.failure or self.engine.abort_event.is_set():
+            return self.failure_response(409, "The owning execution has stopped; no new model request was permitted")
         try:
-            value = await self.payload(request)
-            if type(value.get("max_tokens")) is not int or value["max_tokens"] <= 0:
+            if self.engine.model_provider != protocol: raise ValueError("Changed provider protocol")
+            value = await self.payload(request, protocol)
+            maximum = value.get("max_completion_tokens", value.get("max_tokens")) if protocol == "openai" else value.get("max_tokens")
+            if type(maximum) is not int or maximum <= 0 or (protocol == "openai" and (type(value.get("n", 1)) is not int or value.get("n", 1) != 1)):
                 raise ValueError("Invalid output grant request")
-        except (ValueError, KeyError):
+            if type(value.get("stream", False)) is not bool: raise ValueError("Invalid streaming mode")
+        except (ValueError, KeyError, TypeError):
             self.fail("protocol_error")
             return self.failure_response(400, "External request does not match its controlled capability")
         queue, ready = asyncio.Queue(64), asyncio.get_running_loop().create_future()
-        task = asyncio.create_task(self.forward(value, request.headers, queue, ready))
+        if protocol == "openai":
+            from .openai import forward
+            execution = forward(self, value, queue, ready)
+        else:
+            execution = self.forward(value, request.headers, queue, ready)
+        task = asyncio.create_task(execution)
         self.tasks.add(task); task.add_done_callback(self.tasks.discard)
         try:
             status, content_type = await ready
@@ -245,6 +275,21 @@ class LocalHost:
                 await asyncio.gather(task, return_exceptions=True)
         return StreamingResponse(drain(), media_type=content_type)
 
+    def reasoning_options(self, body, maximum):
+        """The frozen native model controls override the external CLI's defaults."""
+        from xuloom.core.reasoning import request_options
+        if self.engine.reasoning_profile is not None:
+            for key in ("thinking", "reasoning_effort", "reasoning", "enable_thinking", "chat_template_kwargs"):
+                body.pop(key, None)
+            if isinstance(body.get("output_config"), dict):
+                body["output_config"].pop("effort", None)
+                if not body["output_config"]: body.pop("output_config")
+            options = request_options(self.engine.reasoning_profile, self.engine.model_provider,
+                effort_override=self.engine.reasoning_effort, max_tokens=maximum)
+            body.update(options.pop("extra_body", {})); body.update(options)
+        elif self.engine.reasoning_effort and self.engine.model_provider == "openai":
+            body["reasoning_effort"] = self.engine.reasoning_effort
+
     async def grant_tool(self, block):
         name, identity = block.get("name", ""), block.get("id")
         if name in SAFE_INTERNAL: return block
@@ -271,6 +316,7 @@ class LocalHost:
                     body = copy.deepcopy(value)
                     model, messages = body.pop("model"), body.pop("messages")
                     body.pop("max_tokens"); streamed = body.pop("stream", False)
+                    self.reasoning_options(body, grant["maximum"])
                     extra = {name: headers[name] for name in ("anthropic-beta", "anthropic-version") if name in headers}
                     client = self.engine.client.with_options(max_retries=0)
                     async with client.messages.with_streaming_response.create(model=model, messages=messages,
