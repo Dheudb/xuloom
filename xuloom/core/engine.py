@@ -140,6 +140,7 @@ class QueryEngine:
         execution_mode=None,
         api_key=None,
         network_mode=None,
+        model_contract=None,
     ):
         from xuloom.security.execution import ExecutionSandbox
         self.execution_sandbox = ExecutionSandbox(cwd or os.getcwd(), execution_mode or os.environ.get("XULOOM_EXECUTION_MODE", "host"))
@@ -160,7 +161,11 @@ class QueryEngine:
             or os.environ.get("XULOOM_LOCAL_TOKENIZER_MODEL", "")
         )
         self.primary_model = self._resolve_primary_model(model)
-        self.reasoning_profile = configured_profile(self.model_provider, self.primary_model, self.api_base_url)
+        # A resolved role binding supplies an exact account contract, including
+        # explicit unknown capabilities. Do not guess another same-URL account.
+        self._model_contract = copy.deepcopy(model_contract)
+        profile = model_contract.get("reasoning") if model_contract is not None else configured_profile(self.model_provider, self.primary_model, self.api_base_url)
+        self.reasoning_profile = normalize_profile(profile, self.model_provider) if profile is not None else None
         if reasoning_effort and self.model_provider != "openai" and self.reasoning_profile is None:
             raise ValueError("Anthropic effort requires an explicit model reasoning profile")
         if self.reasoning_profile is not None:
@@ -437,6 +442,7 @@ class QueryEngine:
         self._retired_model_clients.extend(client for client in (self.client, self.compactor.client) if client and not client.is_closed)
         self.model_provider, self.primary_model, self.model = next_provider, next_model, next_model
         self.api_base_url, self._api_key, self.network_mode = next_base, next_key, next_network
+        self._model_contract = None
         self.fallback_model = next_fallback
         self.reasoning_profile = next_profile
         self.reasoning_effort = None  # Per-model controls must not leak from the previous model.
@@ -470,6 +476,7 @@ class QueryEngine:
         # Internal callable only: never place credentials into serializable
         # tool descriptions, worker records or checkpoint metadata.
         self.tool_context["model_client_options"] = lambda: {"api_key": self._api_key, "network_mode": self.network_mode}
+        self.tool_context["model_input_contract"] = self._input_contract
 
     def _resolve_model_provider(self, provider: str = None, model: str = None) -> str:
         resolved = str(
@@ -514,6 +521,12 @@ class QueryEngine:
         from xuloom.core.network import create_model_client
         return create_model_client(provider=self.model_provider, model=self.primary_model,
             api_base_url=self.api_base_url, api_key=self._api_key, network_mode=self.network_mode)
+
+    def _input_contract(self, model):
+        from xuloom.core.model_inputs import configured_inputs
+        if self._model_contract is not None and model == self.primary_model:
+            return self._model_contract.get("inputs")
+        return configured_inputs(self.model_provider, model, self.api_base_url)
 
     @property
     def is_configured(self) -> bool:
@@ -3358,8 +3371,8 @@ class QueryEngine:
         event_callback=None,
     ):
         """Returns (response, tool_entries, streaming_fallback_occurred)."""
-        from xuloom.core.model_inputs import configured_inputs, validate_media, validate_transport
-        validate_media(api_messages, configured_inputs(self.model_provider, model_name, self.api_base_url))
+        from xuloom.core.model_inputs import validate_media, validate_transport
+        validate_media(api_messages, self._input_contract(model_name))
         validate_transport(api_messages, self.model_provider)
         self.tool_context["request_model"] = model_name
         tool_entries = []
@@ -3869,12 +3882,12 @@ class QueryEngine:
             return RunResult(str(error), "session_busy" if isinstance(error, SessionBusyError) else "session_conflict", session_id=self.session_id, agent_id=self.agent_id)
         if resume and (user_input or input_blocks or attachments or selected_skills):
             raise ValueError("Resume cannot replace the original prompt, attachments or skills")
-        from xuloom.core.model_inputs import configured_inputs, validate_media, validate_transport, UnsupportedInput
+        from xuloom.core.model_inputs import validate_media, validate_transport, UnsupportedInput
         try:
             input_history = self.messages + ([{"content": input_blocks}] if input_blocks else [])
             validate_transport(input_history, self.model_provider)
             validate_media(input_history,
-                configured_inputs(self.model_provider, self.primary_model, self.api_base_url))
+                self._input_contract(self.primary_model))
         except UnsupportedInput as error:
             return finish_run(self, str(error), 'unsupported_input')
         if self.agent_depth == 0 and not resume:

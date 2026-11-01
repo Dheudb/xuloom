@@ -3,7 +3,10 @@ const fs = require('node:fs'), path = require('node:path'), os = require('node:o
 const root = path.resolve(__dirname, '..'), fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'xuloom-extensions-'));
 const home = path.join(fixture, 'home'), data = path.join(fixture, 'data'), config = path.join(fixture, 'config');
 for (const dir of [home, data, config]) fs.mkdirSync(dir);
-fs.writeFileSync(path.join(config, 'config.json'), JSON.stringify({model_connections:[]}));
+fs.writeFileSync(path.join(config, 'config.json'), JSON.stringify({model_connections:[
+ {id:'role-a',name:'Local A',provider:'openai',model:'model-a',models:['model-a'],api_key:'fixture-a',base_url:'http://127.0.0.1:1/v1'},
+ {id:'role-b',name:'Local B',provider:'anthropic',model:'model-b',models:['model-b','model-b2'],api_key:'fixture-b',base_url:'http://127.0.0.1:1'}
+]}));
 const env = {...process.env, HOME:home, USERPROFILE:home, XULOOM_DATA_DIR:data, XULOOM_USER_DATA:data, XULOOM_CONFIG_DIR:config, XULOOM_TEST_HEADLESS:'1', XULOOM_SKILLS_PATHS:''};
 for (const key of ['ELECTRON_RUN_AS_NODE','XULOOM_DEV_URL','OPENAI_API_KEY','OPENAI_MODEL','OPENAI_BASE_URL','XULOOM_MODEL_PROVIDER']) delete env[key];
 let app, page; const errors=[];
@@ -30,16 +33,18 @@ let app, page; const errors=[];
  await page.getByLabel('扩展保存范围').selectOption('project');
  await page.getByLabel('扩展名称',{exact:true}).fill('evidence-reader');
  await page.getByLabel('扩展描述',{exact:true}).fill('Verify claims independently');
+ await page.getByLabel('代理连接',{exact:true}).selectOption('role-b');
+ await page.getByLabel('代理模型',{exact:true}).selectOption('model-b2');
  await page.getByLabel('代理工具',{exact:true}).fill('Read, Skill');
  await page.getByLabel('代理技能',{exact:true}).fill('evidence-check');
  await page.getByLabel('扩展指令',{exact:true}).fill('Independently verify the supplied claims.');
  fs.mkdirSync(path.join(root,'test-results'),{recursive:true});
- const capture=await app.evaluate(async({BrowserWindow})=>(await BrowserWindow.getAllWindows()[0].webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG().toString('base64'));
- fs.writeFileSync(path.join(root,'test-results/extensions-settings.png'),Buffer.from(capture,'base64'));
+ await page.getByLabel('代理连接',{exact:true}).scrollIntoViewIfNeeded();
+ await page.screenshot({path:path.join(root,'test-results/extensions-settings.png')});
  await page.getByRole('button',{name:'保存 Subagent',exact:true}).click();
  await page.getByRole('status').filter({hasText:'Subagent 已保存并加载'}).waitFor();
  const caps=await page.evaluate(()=>window.xuloom.invoke('capabilities.list',{session:document.querySelector('.session-item.active').dataset.sessionId}));
- const agent=caps.agents.find(a=>a.name==='evidence-reader');assert(agent.valid);assert.equal(agent.scope,'project');assert.deepEqual(agent.skills,['evidence-check']);
+ const agent=caps.agents.find(a=>a.name==='evidence-reader');assert(agent.valid);assert.equal(agent.scope,'project');assert.deepEqual(agent.skills,['evidence-check']);assert.equal(agent.connection,'role-b');assert.equal(agent.model,'model-b2');
  await page.getByRole('button',{name:'关闭设置',exact:true}).click();
  const input=page.getByRole('textbox',{name:'任务输入'});await input.fill('$evidence');await input.focus();
  await page.getByRole('option').filter({hasText:'evidence-check'}).click();

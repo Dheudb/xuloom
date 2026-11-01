@@ -79,8 +79,9 @@ class FileReadTool(BaseAgenticTool):
         if ext in ['.png', '.jpg', '.jpeg', '.webp', '.gif']:
             from xuloom.core.model_inputs import configured_inputs, validate_media, UnsupportedInput
             try:
-                inputs = self.context["model_input_modalities"] if "model_input_modalities" in self.context else configured_inputs(self.context.get("model_provider", ""),
-                    self.context.get("request_model", self.context.get("primary_model", "")), self.context.get("api_base_url", ""))
+                model = self.context.get("request_model", self.context.get("primary_model", ""))
+                contract = self.context.get("model_input_contract")
+                inputs = self.context["model_input_modalities"] if "model_input_modalities" in self.context else contract(model) if callable(contract) else configured_inputs(self.context.get("model_provider", ""), model, self.context.get("api_base_url", ""))
                 validate_media([{"type": "image"}], inputs)
             except UnsupportedInput as error:
                 return "Error: " + str(error)

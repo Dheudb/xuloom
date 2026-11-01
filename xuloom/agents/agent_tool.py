@@ -267,6 +267,7 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
         background: bool = False,
         description: str = "",
         resume_state: dict = None,
+        connection_binding: dict = None,
     ) -> dict:
         from xuloom.core.engine import QueryEngine
 
@@ -276,25 +277,32 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
 
         child_agent_id = child_agent_id or f"{effective_role}-{uuid.uuid4()}"
         child_model = model or (builtin_agent_def or {}).get("model") or self.context.get("primary_model")
-        same_model = child_model == self.context.get("primary_model")
+        options = self.context["model_client_options"]() if callable(self.context.get("model_client_options")) else {}
+        provider, base = self.context.get("model_provider"), self.context.get("api_base_url")
+        if connection_binding is not None:
+            from xuloom.agents.connections import resolve_connection
+            binding, options = resolve_connection(connection_binding["connection_id"], connection_binding["model"], frozen=connection_binding)
+            child_model, provider, base = binding["model"], binding["provider"], binding["api_base_url"]
+        same_model = connection_binding is None and child_model == self.context.get("primary_model")
         sub_engine = QueryEngine(
             model=child_model,
-            fallback_model=self.context.get("fallback_model"),
+            fallback_model=child_model if connection_binding is not None else self.context.get("fallback_model"),
             permission_handler=self.context.get("permission_handler"),
             agent_id=child_agent_id,
             parent_agent_id=parent_agent_id,
             agent_depth=parent_depth + 1,
             agent_role=effective_role,
-            model_provider=self.context.get("model_provider"),
-            api_base_url=self.context.get("api_base_url"),
-            local_tokenizer_path=self.context.get("local_tokenizer_path"),
+            model_provider=provider,
+            api_base_url=base,
+            local_tokenizer_path=None if connection_binding is not None else self.context.get("local_tokenizer_path"),
             cwd=self.context.get("session_cwd"),
             thinking_config=self.context.get("thinking_config") if same_model else None,
             mode_thinking_overrides=self.context.get("mode_thinking_overrides") if same_model else None,
             reasoning_effort=(builtin_agent_def or {}).get("reasoning_effort") or (self.context.get("reasoning_effort") if same_model else None),
             collaboration_mode="solo",
             execution_mode=getattr(self.context.get("execution_sandbox"), "mode", "host"),
-            **(self.context["model_client_options"]() if callable(self.context.get("model_client_options")) else {}),
+            model_contract=connection_binding["contract"] if connection_binding is not None else None,
+            **options,
         )
         if same_model and self.context.get("reasoning_profile") is not None:
             from xuloom.core.reasoning import request_options
@@ -304,7 +312,8 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
         sub_engine._thinking_config_explicit = same_model and self.context.get("thinking_config_explicit", False)
         sub_engine.tool_context["thinking_config_explicit"] = sub_engine._thinking_config_explicit
         definition = copy.deepcopy(builtin_agent_def or {})
-        sub_engine.tool_context["delegation"] = {"owner_session_id": self.context.get("session_id"), "role_definition": definition}
+        sub_engine.tool_context["delegation"] = {"owner_session_id": self.context.get("session_id"), "role_definition": definition,
+            "connection_binding": copy.deepcopy(connection_binding)}
         sub_engine.tool_context["delegated_mailbox"] = lambda: self._mailbox(child_agent_id)
         sub_engine.tool_context["ack_delegated_mailbox"] = lambda ids: self._ack_mailbox(child_agent_id, ids)
         self._configure_subagent_permissions(sub_engine)
@@ -676,7 +685,11 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
         builtin_def = registry.resolve(subagent_type or "general-purpose")
         builtin_def = copy.deepcopy(builtin_def)
         builtin_def["disallowed_tools"] = list(builtin_def.get("disallowed_tools", []))
-        if (model or builtin_def.get("model") or self.context.get("primary_model")) == self.context.get("primary_model"):
+        binding = None
+        if builtin_def.get("connection"):
+            from xuloom.agents.connections import resolve_connection
+            binding, _ = resolve_connection(builtin_def["connection"], model or builtin_def.get("model"))
+        if binding is None and (model or builtin_def.get("model") or self.context.get("primary_model")) == self.context.get("primary_model"):
             builtin_def["reasoning_effort"] = builtin_def.get("reasoning_effort") or self.context.get("reasoning_effort")
         if reasoning_effort:
             from xuloom.core.reasoning import EFFORTS
@@ -684,11 +697,13 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
                 raise ValueError("Unsupported reasoning_effort")
             builtin_def["reasoning_effort"] = reasoning_effort
         from xuloom.core.reasoning import configured_profile, request_options
-        target_model = model or builtin_def.get("model") or self.context.get("primary_model")
-        target_profile = (self.context.get("reasoning_profile") if target_model == self.context.get("primary_model")
+        target_model = binding["model"] if binding else model or builtin_def.get("model") or self.context.get("primary_model")
+        target_profile = binding["contract"]["reasoning"] if binding else (self.context.get("reasoning_profile") if target_model == self.context.get("primary_model")
             else configured_profile(self.context.get("model_provider"), target_model, self.context.get("api_base_url")))
         if target_profile is not None:
-            request_options(target_profile, self.context.get("model_provider"), effort_override=builtin_def.get("reasoning_effort"))
+            request_options(target_profile, binding["provider"] if binding else self.context.get("model_provider"), effort_override=builtin_def.get("reasoning_effort"))
+        elif builtin_def.get("reasoning_effort") and binding and binding["provider"] != "openai":
+            raise ValueError("Anthropic effort requires an explicit model reasoning profile")
         parent_agent_id = self.context.get("agent_id")
 
         allowed = builtin_def.get("allowed_tools")
@@ -714,7 +729,8 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
             "status": "queued", "phase": "queued",
             "task": prompt[:240] + ("..." if len(prompt) > 240 else ""),
             "description": f"{description or '子代理'} {index + 1}/{count}" if count > 1 else description,
-            "model": model or builtin_def.get("model") or self.context.get("primary_model"),
+            "model": target_model,
+            "connection_binding": copy.deepcopy(binding),
             "background": run_in_background,
             "role_definition": copy.deepcopy(builtin_def),
             "turn": 1,
@@ -724,8 +740,9 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
             "admission_run_id": self.context["collaboration_run"]["id"],
             "dispatch": {"task": prompt, "allowed_tools": allowed, "inherit_context": inherit_context,
                 "parent_depth": parent_depth, "parent_agent_id": parent_agent_id, "builtin_agent_def": copy.deepcopy(builtin_def),
-                "model": model, "background": run_in_background},
-            "provider": self.context.get("model_provider"), "api_base_url": self.context.get("api_base_url"),
+                "model": target_model, "background": run_in_background, "connection_binding": copy.deepcopy(binding)},
+            "provider": binding["provider"] if binding else self.context.get("model_provider"),
+            "api_base_url": binding["api_base_url"] if binding else self.context.get("api_base_url"),
         } for index in range(count)]
         # Register every card before any child can make a model request.
         try:
@@ -739,6 +756,7 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
                 parent_agent_id=parent_agent_id,
                 builtin_agent_def=builtin_def,
                 model=model,
+                connection_binding=copy.deepcopy(binding),
                 child_agent_id=record["agent_id"],
                 background=run_in_background,
                 description=record["description"],

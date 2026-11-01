@@ -36,6 +36,9 @@ class AgentRegistry:
                         raise ValueError("model must be a string")
                     if metadata.get("model") == "inherit":
                         metadata["model"] = None
+                    connection = metadata.get("connection")
+                    if connection is not None and (not isinstance(connection, str) or not connection.strip() or len(connection) > 256):
+                        raise ValueError("connection must be a non-empty model connection ID")
                     effort = metadata.get("reasoning_effort")
                     from xuloom.core.reasoning import EFFORTS
                     if effort is not None and effort not in EFFORTS:
@@ -52,7 +55,7 @@ class AgentRegistry:
                     if "sandbox_mode" in metadata:
                         raise ValueError("sandbox_mode is not supported; use explicit tools and read_only (not an OS sandbox)")
                     entry.update(name=name, description=description, system_prompt=body, model=metadata.get("model"), allowed_tools=tool_list(metadata.get("tools")), skills=tool_list(metadata.get("skills", []), aliases=False), agent_type=name, agent_role="custom", disallowed_tools=set())
-                    entry.update(reasoning_effort=effort, web_search=web, mcp_servers=servers, read_only=readonly)
+                    entry.update(reasoning_effort=effort, web_search=web, mcp_servers=servers, read_only=readonly, connection=connection)
                     if name in BUILTIN_AGENTS:
                         raise ValueError("Custom agent name conflicts with a built-in agent")
                     if any("(" in tool for tool in entry["allowed_tools"]):

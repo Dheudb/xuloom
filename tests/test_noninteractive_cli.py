@@ -15,6 +15,7 @@ class CliTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.root = Path(self.temp.name)
         self.requests = []
+        self.wire = []
         self.mode = "text"
         self.request_started, self.finish_request = threading.Event(), threading.Event()
         owner = self
@@ -24,6 +25,7 @@ class CliTests(unittest.TestCase):
                 raw = self.rfile.read(int(self.headers["Content-Length"]))
                 if not raw: return
                 body = json.loads(raw)
+                owner.wire.append({"path": self.path, "headers": dict(self.headers), "body": body})
                 if not body.get("stream"):
                     self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
                     self.wfile.write(json.dumps({"choices": [{"message": {"role": "assistant", "content": "memory"}}]}).encode()); return
@@ -32,6 +34,9 @@ class CliTests(unittest.TestCase):
                 if owner.mode == "hold": owner.finish_request.wait(25)
                 has_tool_result = body["messages"][-1]["role"] == "tool"
                 delta, finish = {"content": "CLI_RESULT_你好"}, "stop"
+                if owner.mode == "heterogeneous" and not self.path.startswith("/worker/") and not has_tool_result:
+                    delta, finish = {"tool_calls": [{"index": 0, "id": "delegate", "type": "function", "function": {"name": "spawn_agent",
+                        "arguments": json.dumps({"prompt": "independent evidence", "subagent_type": "other-account"})}}]}, "tool_calls"
                 if owner.mode == "write" and not has_tool_result:
                     delta, finish = {"tool_calls": [{"index": 0, "id": "effect", "type": "function", "function": {"name": "file_write_tool",
                         "arguments": json.dumps({"file_path": str(owner.root/"effect.txt"), "content": "ONCE"})}}]}, "tool_calls"
@@ -72,6 +77,25 @@ class CliTests(unittest.TestCase):
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertEqual(result["session_id"], sid)
         self.assertIn("Analyze this sentence", json.dumps(self.requests[-1], ensure_ascii=False))
+
+    def test_native_named_connection_role_from_formal_cli(self):
+        self.mode = "heterogeneous"
+        config = self.root / "config"; config.mkdir()
+        (config / "config.json").write_text(json.dumps({"active_model_connection": "parent", "model_connections": [
+            {"id": "parent", "provider": "openai", "model": "fixture", "models": ["fixture"], "base_url": self.env["OPENAI_BASE_URL"], "api_key": "fixture"},
+            {"id": "other", "provider": "openai", "model": "other-model", "models": ["other-model"], "base_url": self.env["OPENAI_BASE_URL"].replace("/v1", "/worker/v1"), "api_key": "worker-key"}]}), encoding="utf-8")
+        roles = self.root / ".xuloom/agents"; roles.mkdir(parents=True)
+        (roles / "other-account.md").write_text("---\nname: other-account\ndescription: independent check\nconnection: other\n---\nCheck evidence independently.\n", encoding="utf-8")
+        process, events, final = self.cli("exec", "delegate once", "--permission", "full", "--collaboration", "auto")
+        self.assertEqual(process.returncode, 0, process.stderr + json.dumps(events))
+        worker = [r for r in self.wire if r["path"].startswith("/worker/")]
+        self.assertEqual(len(worker), 1)
+        self.assertEqual(worker[0]["headers"]["authorization"], "Bearer worker-key")
+        self.assertEqual(worker[0]["body"]["model"], "other-model")
+        for request in self.wire:
+            if not request["path"].startswith("/worker/"):
+                self.assertEqual(request["headers"]["authorization"], "Bearer fixture")
+        self.assertTrue(final["persisted"])
 
     def test_empty_desktop_draft_can_start_in_cli_without_closing_its_current_client(self):
         from unittest.mock import patch

@@ -45,10 +45,26 @@ class AgentLifecycle:
             row.pop("role_definition", None)
             row.pop("dispatch", None)
             row.pop("api_base_url", None)
+            binding = row.pop("connection_binding", None)
+            if binding:
+                row["connection_id"] = binding["connection_id"]
             rows.append(row)
         return rows
 
+    def _check_worker_connection(self, row):
+        binding = row.get("connection_binding")
+        if binding is not None:
+            from xuloom.agents.connections import resolve_connection
+            resolve_connection(binding["connection_id"], binding["model"], frozen=binding)
+            if row.get("provider") != binding["provider"] or (row.get("api_base_url") or "") != binding["api_base_url"] or row.get("model") != binding["model"]:
+                raise ValueError("Worker record does not match its frozen connection")
+            return binding["provider"], binding["api_base_url"]
+        if row.get("provider") != self.context.get("model_provider") or (row.get("api_base_url") or "") != (self.context.get("api_base_url") or ""):
+            raise ValueError("Restore the worker's original provider and API address before continuing")
+        return self.context.get("model_provider"), self.context.get("api_base_url")
+
     def _resume_state(self, row):
+        provider, base = self._check_worker_connection(row)
         manager = self.context.get("session_manager")
         if manager is None:
             raise ValueError("Subagent transcript storage is unavailable")
@@ -61,9 +77,11 @@ class AgentLifecycle:
         if owner and owner != self.context.get("session_id"):
             raise ValueError("Subagent belongs to a different conversation")
         runtime = raw.get("metadata", {}).get("model_runtime", {})
-        for field, key in (("provider", "model_provider"), ("api_base_url", "api_base_url")):
-            if field in runtime and (runtime[field] or "") != (self.context.get(key) or ""):
+        for field, expected in (("provider", provider), ("api_base_url", base)):
+            if field in runtime and (runtime[field] or "") != (expected or ""):
                 raise ValueError("Restore the worker's original provider and API address before continuing")
+        if row.get("connection_binding") is not None and runtime.get("primary_model") != row["model"]:
+            raise ValueError("Worker transcript does not match its frozen model")
         return raw
 
     async def _manage_worker(self, action, agent_id, prompt, timeout_ms, agent_ids, run_in_background):
@@ -143,16 +161,16 @@ class AgentLifecycle:
                   "turn": row.get("turn", 1) + 1, "background": run_in_background}
         record.update(status="queued", phase="queued", queued_at=int(time.time() * 1000), started_at=None,
             admission_run_id=self.context["collaboration_run"]["id"],
-            provider=self.context.get("model_provider"), api_base_url=self.context.get("api_base_url"),
             dispatch={"task": prompt, "allowed_tools": definition.get("allowed_tools"), "inherit_context": False,
                 "parent_depth": row.get("agent_depth", 1) - 1, "parent_agent_id": row.get("parent_agent_id"),
-                "builtin_agent_def": definition, "model": row.get("model"), "background": run_in_background, "resume": True})
+                "builtin_agent_def": definition, "model": row.get("model"), "background": run_in_background, "resume": True,
+                "connection_binding": copy.deepcopy(row.get("connection_binding"))})
         await self._write_subagent_registry_record(record)
         work = self._run_registered_subagent(record, task=prompt, allowed_tools=definition.get("allowed_tools"),
             inherit_context=False, parent_depth=row.get("agent_depth", 1) - 1,
             parent_agent_id=row.get("parent_agent_id"), builtin_agent_def=definition,
             model=row.get("model"), child_agent_id=agent_id, background=run_in_background,
-            description=row.get("description", ""), resume_state=state)
+            description=row.get("description", ""), resume_state=state, connection_binding=copy.deepcopy(row.get("connection_binding")))
         tasks.launch(agent_id, work, on_cancelled_before_start=self.context.get("register_subagent_record"))
         if not run_in_background:
             await tasks.tasks[agent_id]
@@ -173,9 +191,10 @@ class AgentLifecycle:
                 continue
             if row.get("status") != "queued" or not row.get("dispatch"):
                 raise ValueError("Only saved, never-started queued workers can be resumed; running/interrupted work is not replayed")
-            if row.get("provider") != self.context.get("model_provider") or (row.get("api_base_url") or "") != (self.context.get("api_base_url") or ""):
-                raise ValueError("Restore the queue's original provider and API address before resuming")
+            self._check_worker_connection(row)
             arguments = copy.deepcopy(row["dispatch"])
+            if arguments.get("connection_binding") != row.get("connection_binding"):
+                raise ValueError("Queued dispatch does not match its frozen connection")
             if arguments.pop("resume", False):
                 arguments["resume_state"] = self._resume_state(row)
             pending.append((row, arguments))

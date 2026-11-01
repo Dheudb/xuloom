@@ -58,7 +58,7 @@ description: 检索并比较某个主题的公开文献，给出可核对的引�
 
 Subagent 使用独立消息上下文执行分配的任务。角色可以指定职责、工具和 Skills；它仍受会话权限、协作额度和模型接口限制。
 
-**用界面添加：** 在 **设置 → Subagents → 新建 Subagent** 填写角色指令。模型默认 `inherit`，工具留空继承可用集合，Skills 填已存在的技能名称。已有定义可通过 **导入目录** 挂载。
+**用界面添加：** 在 **设置 → Subagents → 新建 Subagent** 填写角色指令。供应商连接默认继承主代理，也可选择已配置连接及其模型；工具留空继承可用集合，Skills 填已存在的技能名称。已有定义可通过 **导入目录** 挂载。
 
 **手动配置：** 将下列内容保存为 `.xuloom/agents/source-checker.md`；放到 `~/.xuloom/agents/` 则所有工作区可用。
 
@@ -74,7 +74,7 @@ skills: [literature-review]
 报告来源与理由，不擅自修改文件。
 ```
 
-先添加示例依赖的 `literature-review` Skill。`tools` 可使用 Read、Write、Edit、Exec、Grep、Glob、Skill 等别名或实际工具名；省略 `tools` 继承工具，手动填写 `tools: []` 表示禁用全部工具。`model` 可指定同一 API 连接里的模型 ID，不能据此跨供应商切换。
+先添加示例依赖的 `literature-review` Skill。`tools` 可使用 Read、Write、Edit、Exec、Grep、Glob、Skill 等别名或实际工具名；省略 `tools` 继承工具，手动填写 `tools: []` 表示禁用全部工具。省略 `connection` 时，`model` 使用主代理连接；添加 `connection: <已配置连接的 ID>` 可跨供应商运行原生子代理。桌面与 CLI 共用定义和凭据，详见 [角色连接](docs/capabilities.md#角色连接与异构原生子代理)。这不等于 SSH 或接入其他 Agent CLI。
 
 在右侧“代理”中点角色的 **分配任务**，或在 prompt 中明确指定角色。创建定义不会自动启动代理。输入框中的 **Solo** 关闭委派，**Auto** 按需委派，**Ultra** 更积极地寻找并行机会。两档默认不设子代理数量限制；只有显式设置宿主并发限制时，超额已接受任务才排队。详见 [协作与配置](docs/capabilities.md)。
 

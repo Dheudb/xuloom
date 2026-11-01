@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Capabilities } from "./types";
+import type { Capabilities, ModelConnection } from "./types";
 
 export default function ExtensionSettings({ kind, busy, invoke, changed }: {
   kind: "skills" | "agents"; busy: boolean;
@@ -8,7 +8,8 @@ export default function ExtensionSettings({ kind, busy, invoke, changed }: {
 }) {
   const [data, setData] = useState<Capabilities>(), [pending, setPending] = useState(false), [error, setError] = useState(""), [notice, setNotice] = useState("");
   const [creating, setCreating] = useState(false), [preview, setPreview] = useState("");
-  const [form, setForm] = useState({ name: "", description: "", prompt: "", scope: "global", model: "inherit", tools: "", skills: "" });
+  const [connections, setConnections] = useState<ModelConnection[]>([]);
+  const [form, setForm] = useState({ name: "", description: "", prompt: "", scope: "global", connection: "", model: "inherit", tools: "", skills: "" });
   const label = kind === "skills" ? "Skill" : "Subagent";
   async function action(method: string, params = {}) {
     setPending(true); setError(""); setNotice("");
@@ -20,6 +21,8 @@ export default function ExtensionSettings({ kind, busy, invoke, changed }: {
     finally { setPending(false); }
   }
   useEffect(() => { void action("capabilities.list"); }, []);
+  useEffect(() => { if (kind === "agents") { let active = true; void invoke("config.get").then(value => { if (active) setConnections(value.connections || []); }).catch(e => { if (active) setError(String(e)); }); return () => { active = false; }; } }, [kind]);
+  const selectedConnection = connections.find(item => item.connectionId === form.connection);
   const entries = data?.[kind] || [];
   const root = data?.settings[kind === "skills" ? form.scope === "global" ? "globalSkillsRoot" : "projectSkillsRoot" : form.scope === "global" ? "globalAgentsRoot" : "projectAgentsRoot"];
   return <div className="extension-settings">
@@ -33,7 +36,10 @@ export default function ExtensionSettings({ kind, busy, invoke, changed }: {
         <p className="extension-path">{root}</p>
         <label>名称<input aria-label="扩展名称" required maxLength={64} pattern="[a-z0-9]+(-[a-z0-9]+)*" placeholder="my-research" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></label>
         <label>描述与使用时机<input aria-label="扩展描述" required maxLength={1024} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></label>
-        {kind === "agents" && <><label>模型<input aria-label="代理模型" value={form.model} onChange={e => setForm({ ...form, model: e.target.value })} /></label><label>允许工具（逗号分隔；留空继承）<input aria-label="代理工具" placeholder="Read, Grep, Glob, Skill" value={form.tools} onChange={e => setForm({ ...form, tools: e.target.value })} /></label><label>挂载 Skills（逗号分隔）<input aria-label="代理技能" value={form.skills} onChange={e => setForm({ ...form, skills: e.target.value })} /></label></>}
+        {kind === "agents" && <><label>供应商连接<select aria-label="代理连接" value={form.connection} onChange={e => setForm({ ...form, connection: e.target.value, model: "inherit" })}><option value="">继承主代理连接</option>{connections.map(item => <option key={item.connectionId} value={item.connectionId}>{item.connectionName} · {item.provider}</option>)}</select></label>
+          <label>模型{selectedConnection ? <select aria-label="代理模型" value={form.model} onChange={e => setForm({ ...form, model: e.target.value })}><option value="inherit">连接的默认模型 · {selectedConnection.model}</option>{selectedConnection.models.map(model => <option key={model} value={model}>{model}</option>)}</select> : <input aria-label="代理模型" value={form.model} onChange={e => setForm({ ...form, model: e.target.value })} />}</label>
+          <p className="fine-print">连接与模型在任务入队时固定；后续可以轮换 Key，不能把已排队或已有历史的任务静默改派到另一地址。</p>
+          <label>允许工具（逗号分隔；留空继承）<input aria-label="代理工具" placeholder="Read, Grep, Glob, Skill" value={form.tools} onChange={e => setForm({ ...form, tools: e.target.value })} /></label><label>挂载 Skills（逗号分隔）<input aria-label="代理技能" value={form.skills} onChange={e => setForm({ ...form, skills: e.target.value })} /></label></>}
         <label>执行指令<textarea aria-label="扩展指令" required rows={7} maxLength={100000} value={form.prompt} onChange={e => setForm({ ...form, prompt: e.target.value })} /></label>
         <small>保存在你的配置目录中，不打包进 EXE；不会覆盖已有同名文件。</small>
         <div className="actions"><button type="submit" className="primary">保存 {label}</button><button type="button" onClick={() => setCreating(false)}>取消新建</button></div>

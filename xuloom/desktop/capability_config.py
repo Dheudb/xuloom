@@ -22,6 +22,11 @@ def create_definition(registry, params):
         model = str(params.get("model") or "inherit").strip()
         if len(model) > 256: raise ValueError("模型 ID 过长")
         metadata["model"] = model
+        connection = params.get("connection")
+        if connection:
+            from xuloom.agents.connections import resolve_connection
+            resolve_connection(connection, None if model == "inherit" else model)
+            metadata["connection"] = connection
         if params.get("tools", "").strip():
             tools = tool_list(params["tools"])
             if any("(" in tool for tool in tools): raise ValueError("请使用工具名称，不支持命令模式")

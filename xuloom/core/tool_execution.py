@@ -215,8 +215,8 @@ async def execute_tool(self, tool_block, sys_print_callback=print, *, turn: int 
                     raw_result = await confinement.tool(tool_name, tool_inputs, self.tool_context)
                 else:
                     raw_result = await handler(**tool_inputs)
-                from xuloom.core.model_inputs import configured_inputs, filter_tool_media
-                raw_result = filter_tool_media(raw_result, configured_inputs(self.model_provider, self.tool_context.get("request_model", self.primary_model), self.api_base_url))
+                from xuloom.core.model_inputs import filter_tool_media
+                raw_result = filter_tool_media(raw_result, self._input_contract(self.tool_context.get("request_model", self.primary_model)))
                 from xuloom.context.tool_results import native_tool_content
                 native_content = native_tool_content(raw_result, errors=native_errors,
                     artifact_dir=str(artifact_directory(self.session_cwd) / self.session_id), spill_recorder=spill_recorder)
