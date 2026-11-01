@@ -114,6 +114,7 @@ export function applyEvent(
       return {
         ...session,
         commands: event.type === "engine_exit" ? Object.fromEntries(Object.entries(session.commands || {}).map(([id, command]) => [id, { ...command, status: command.status === "running" ? "interrupted" : command.status }])) : session.commands,
+        workers: event.type === "engine_exit" ? session.workers.map(worker => ["running", "queued"].includes(worker.status) ? { ...worker, status: "interrupted" } : worker) : session.workers,
         busy: false,
         streamIndex: null,
         messages: finishTrace(session, event.type === "engine_exit" ? "interrupted" : "error").filter((message, index) =>

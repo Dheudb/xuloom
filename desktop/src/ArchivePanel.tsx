@@ -34,7 +34,7 @@ export default function ArchivePanel({ catalog, action }: {
   const projectCount = catalog.projects.filter((project) => project.archived).length;
   return <div className="archive-manager" aria-busy={busy}>
     <div className="settings-section-heading"><div><h3>已归档会话</h3>
-      <p>归档记录保留在本地。恢复后会重新显示在侧边栏。</p></div>
+      <p>归档不删除历史；SSH 会话仍保存在远端。恢复后会重新显示在侧边栏。</p></div>
       <button className="icon-button" aria-label="刷新归档列表" disabled={busy} onClick={() => void run("catalog.refresh", {})}><RefreshCw size={16} /></button>
     </div>
     <label className="archive-search"><Search size={16} /><input ref={search} aria-label="搜索归档记录" placeholder="搜索会话、项目或路径" value={query} onChange={(event) => setQuery(event.target.value)} /></label>

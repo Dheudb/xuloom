@@ -3,14 +3,16 @@ const readline = require("node:readline");
 const path = require("node:path");
 
 class EngineTransport {
-  constructor({ python, engineRoot, project, onEvent, isolated = false }) {
+  constructor({ python, engineRoot, project, onEvent, isolated = false, remote }) {
     this.pending = new Map();
     this.sequence = 0;
     this.closed = false;
     this.stderr = "";
     this.child = spawn(
       python,
-      [...(isolated ? ["-I"] : []), "-u", "-m", "xuloom.desktop.bridge"],
+      [...(isolated ? ["-I"] : []), "-u", "-m", remote ? "xuloom.remote.proxy" : "xuloom.desktop.bridge",
+        ...(remote ? ["--connection", remote.id, "--binding", Buffer.from(JSON.stringify(remote.binding)).toString("base64"),
+          ...(remote.machine ? ["--machine", Buffer.from(JSON.stringify(remote.machine)).toString("base64")] : [])] : [])],
       {
         cwd: project,
         windowsHide: true,

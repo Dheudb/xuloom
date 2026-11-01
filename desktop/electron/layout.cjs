@@ -3,6 +3,7 @@ function updateLayout(previous = {}, patch = {}) {
   let changed = false;
   for (const [key, min, max, label] of [
     ['inspectorWidth', 280, 12000, '右侧面板'], ['sidebarWidth', 200, 480, '历史栏'], ['reviewTreeWidth', 120, 12000, '文件目录栏'],
+    ['filePreviewWidth', 280, 12000, '文件预览'],
   ]) {
     if (!(key in patch)) continue;
     if (!Number.isFinite(patch[key]) || patch[key] < min || patch[key] > max)

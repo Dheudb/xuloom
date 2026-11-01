@@ -73,6 +73,7 @@ export default function App() {
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelTab, setPanelTab] = useState("skills");
   const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH);
+  const [filePanelWidth, setFilePanelWidth] = useState(700);
   const [reviewTreeWidth, setReviewTreeWidth] = useState(220);
   const [sidebarWidth, setSidebarWidth] = useState<number>();
   const [viewport, setViewport] = useState(window.innerWidth);
@@ -89,6 +90,7 @@ export default function App() {
   const input = useRef<HTMLTextAreaElement>(null);
   const navigation = useRef(0);
   const active = sessions.find((item) => item.id === activeId);
+  const selectedModel = active?.remote ? active.config : globalModel;
   const conversationScroll = useConversationScroll(activeId, active?.messages, active?.interactions);
   const effectiveSidebarWidth = clampSidebarWidth(sidebarWidth ?? defaultSidebarWidth(viewport), viewport, panelOpen);
   const draftSessions = useRef(sessions);
@@ -128,6 +130,7 @@ export default function App() {
         setAppVersion(value.version || "");
         setDefaultDirectory(value.workspaceSettings.defaultDirectory);
         if (Number.isFinite(value.layout?.inspectorWidth)) setPanelWidth(value.layout.inspectorWidth);
+        if (Number.isFinite(value.layout?.filePreviewWidth)) setFilePanelWidth(value.layout.filePreviewWidth);
         if (Number.isFinite(value.layout?.reviewTreeWidth)) setReviewTreeWidth(value.layout.reviewTreeWidth);
         if (Number.isFinite(value.layout?.sidebarWidth)) setSidebarWidth(value.layout.sidebarWidth);
         receiveCatalog(value.catalog);
@@ -191,7 +194,6 @@ export default function App() {
     change ||= active.fileChanges?.find((file) => file.path === path || relativeFile(file.path, active.project) === path.replace(/^\.[\\/]/, ""));
     setFilePreview({ path, change, initialView });
     setPanelOpen(true);
-    setPanelWidth((width) => Math.max(width, 700));
   }
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -232,7 +234,7 @@ export default function App() {
     if (changesSelection) setOpening(true);
     setNotice("");
     try {
-      if (active && ["chat.open", "project.open", "session.new", "session.open", "session.select", "session.move", "session.fork"].includes(method))
+      if (active && ["remote.open", "chat.open", "project.open", "session.new", "session.open", "session.select", "session.move", "session.fork"].includes(method))
         await window.xuloom.invoke("session.update", { id: active.id, patch: { draft: active.draft, draftEditId: active.editingId || "", draftAttachments: active.attachments.map((item) => item.id) } });
       const result = await window.xuloom.invoke(method, params);
       if (!result) return;
@@ -400,10 +402,14 @@ export default function App() {
       else await invoke("attachments.open", { id: item.id });
     } catch (error) { onError(error); }
   }
+  function applyModel(config: ModelConfig) {
+    const remoteKey = active?.remote?.key;
+    if (!remoteKey) setGlobalModel(config);
+    setSessions(previous => previous.map(session => session.busy || (remoteKey ? session.remote?.key !== remoteKey : !!session.remote) ? session : { ...session, config }));
+  }
   async function saveModel(value: ModelConfig & { apiKey: string }) {
     const config = await invoke("config.save", value);
-    setGlobalModel(config);
-    setSessions((previous) => previous.map((session) => session.busy ? session : { ...session, config }));
+    applyModel(config);
   }
   async function selectModel(value: string) {
     if (modelChanging) return;
@@ -411,18 +417,16 @@ export default function App() {
     try {
       const [connectionId, model] = JSON.parse(value);
       const config = await invoke("config.select", { connectionId, model });
-      setGlobalModel(config);
-      setSessions((previous) => previous.map((session) => session.busy ? session : { ...session, config }));
+      applyModel(config);
     } catch (error) { onError(error); }
     finally { setModelChanging(false); }
   }
   async function selectReasoning(value: { thinking?: "default" | "enabled" | "disabled"; effort?: string }) {
-    if (!globalModel || modelChanging) return;
+    if (!selectedModel || modelChanging) return;
     setModelChanging(true);
     try {
-      const config = await invoke("config.reasoning", { connectionId: globalModel.connectionId, model: globalModel.model, ...value });
-      setGlobalModel(config);
-      setSessions(previous => previous.map(session => session.busy ? session : { ...session, config }));
+      const config = await invoke("config.reasoning", { connectionId: selectedModel.connectionId, model: selectedModel.model, ...value });
+      applyModel(config);
     } catch (error) { onError(error); }
     finally { setModelChanging(false); }
   }
@@ -448,8 +452,8 @@ export default function App() {
   }
   async function openSettings() {
     try {
-      const [config, workspace] = await Promise.all([window.xuloom.invoke("config.get"), window.xuloom.invoke("workspace.get")]);
-      setGlobalModel(config);
+      const [config, workspace] = await Promise.all([invoke("config.get"), window.xuloom.invoke("workspace.get")]);
+      applyModel(config);
       setDefaultDirectory(workspace.defaultDirectory);
       setSettingsOpen(true);
     } catch (error) {
@@ -469,7 +473,7 @@ export default function App() {
   const runningCommands = Object.values(active?.commands || {}).filter((command) => command.status === "running").length;
 
   return (
-    <div className={"workbench " + (!panelOpen ? "panel-hidden" : "")} style={{ "--sidebar-width": effectiveSidebarWidth + "px", "--inspector-width": clampPanelWidth(panelWidth, viewport, effectiveSidebarWidth) + "px" } as React.CSSProperties}
+    <div className={"workbench " + (!panelOpen ? "panel-hidden" : "")} style={{ "--sidebar-width": effectiveSidebarWidth + "px", "--inspector-width": clampPanelWidth(filePreview ? filePanelWidth : panelWidth, viewport, effectiveSidebarWidth) + "px" } as React.CSSProperties}
       onDragEnter={(event) => { if (Array.from(event.dataTransfer.types).includes("Files")) { event.preventDefault(); dragDepth.current++; setFileDrag(true); } }}
       onDragLeave={() => { if (--dragDepth.current <= 0) { dragDepth.current = 0; setFileDrag(false); } }}
       onDragOver={(event) => { if (Array.from(event.dataTransfer.types).includes("Files")) { event.preventDefault(); event.dataTransfer.dropEffect = active?.busy || importing ? "none" : "copy"; } }}
@@ -532,9 +536,9 @@ export default function App() {
             <Folder size={15} />
             <button
               title={active?.project}
-              onClick={() => active && invoke("project.reveal").catch(onError)}
+              onClick={() => { if (active?.remote) { setFilePreview(undefined); setPanelTab("files"); setPanelOpen(true); } else if (active) void invoke("project.reveal").catch(onError); }}
             >
-              {active?.scope === "standalone" ? "独立会话" : active ? catalog.projects.find((project) => project.path.toLowerCase() === active.project.toLowerCase())?.name || basename(active.project) : "工作台"}
+              {active?.remote ? `${active.remote.name} · ${active.remote.host}` : active?.scope === "standalone" ? "独立会话" : active ? catalog.projects.find((project) => project.path.toLowerCase() === active.project.toLowerCase())?.name || basename(active.project) : "工作台"}
             </button>
             <ChevronRight size={13} />
             <span>{active ? title.slice(0, 35) : "开始"}</span>
@@ -543,7 +547,7 @@ export default function App() {
             {active && <GitStatus key={active.id + active.project} sessionId={active.id} project={active.project} busy={active.busy} />}
             <span className="local-tag">
               <span />
-              {active?.busy ? "执行中" : "本地"}
+              {active?.remote ? `SSH · ${active.remote.hostname || active.remote.host}${active.busy ? " · 执行中" : ""}` : active?.busy ? "执行中" : "本地"}
             </span>
             <div className="panel-shortcuts" aria-label="会话工具">
               {[
@@ -808,17 +812,17 @@ export default function App() {
                   onChange={(event) => void setCollaborationMode(event.target.value as SessionView["collaborationMode"])}>
                   <option value="solo">Solo · 独立</option><option value="auto">Auto · 自动</option><option value="ultra">Ultra · 增强</option>
                 </select>
-                {globalModel?.connections?.some((connection) => connection.models.length) ? <select
-                  className="model-picker" aria-label="选择模型" title={`${globalModel.connectionName || "API"} · ${globalModel.model}`}
+                {selectedModel?.connections?.some((connection) => connection.models.length) ? <select
+                  className="model-picker" aria-label="选择模型" title={`${selectedModel.connectionName || "API"} · ${selectedModel.model}`}
                   disabled={opening || modelChanging || active?.busy || !!runningWorkers || !!runningCommands}
-                  value={JSON.stringify([globalModel.connectionId, globalModel.model])}
+                  value={JSON.stringify([selectedModel.connectionId, selectedModel.model])}
                   onChange={(event) => void selectModel(event.target.value)}>
-                  {globalModel.connections.filter((connection) => connection.models.length).map((connection) =>
+                  {selectedModel.connections.filter((connection) => connection.models.length).map((connection) =>
                     <optgroup key={connection.connectionId} label={connection.connectionName}>
                       {connection.models.map((model) => <option key={model} value={JSON.stringify([connection.connectionId, model])}>{model}</option>)}
                     </optgroup>)}
                 </select> : <button className="model-button" onClick={openSettings}>连接模型<ChevronRight size={12} /></button>}
-                <ReasoningControls profile={globalModel?.modelReasoning?.[globalModel.model]}
+                <ReasoningControls profile={selectedModel?.modelReasoning?.[selectedModel.model]}
                   disabled={opening || modelChanging || !!active?.busy || !!runningWorkers || !!runningCommands}
                   change={value => void selectReasoning(value)} />
                 {active?.loaded.length ? (
@@ -887,8 +891,8 @@ export default function App() {
       </div>}
       {panelOpen && (
         <div className="inspector-shell">
-        <PanelResizer width={clampPanelWidth(panelWidth, viewport, effectiveSidebarWidth)} viewport={viewport} sidebarWidth={effectiveSidebarWidth} change={setPanelWidth}
-          save={(inspectorWidth) => { void window.xuloom.invoke("layout.save", { inspectorWidth }).catch(onError); }} />
+        <PanelResizer width={clampPanelWidth(filePreview ? filePanelWidth : panelWidth, viewport, effectiveSidebarWidth)} viewport={viewport} sidebarWidth={effectiveSidebarWidth} change={filePreview ? setFilePanelWidth : setPanelWidth}
+          save={(width) => { void window.xuloom.invoke("layout.save", { [filePreview ? "filePreviewWidth" : "inspectorWidth"]: width }).catch(onError); }} />
         {filePreview && active ? <FilePreview sessionId={activeId} project={active.project}
           treeWidth={reviewTreeWidth} setTreeWidth={setReviewTreeWidth}
           saveTreeWidth={(value) => { void window.xuloom.invoke("layout.save", { reviewTreeWidth: value }).catch(onError); }}
@@ -909,7 +913,8 @@ export default function App() {
       {settingsOpen && (
         <SettingsDialog
           key={activeId}
-          config={globalModel || active?.config}
+          config={selectedModel || active?.config}
+          targetLabel={active?.remote ? "SSH · " + active.remote.host : undefined}
           catalog={catalog}
           workspaceAction={workspaceAction}
           defaultDirectory={defaultDirectory}
@@ -924,11 +929,10 @@ export default function App() {
           extensions={active ? { busy: active.busy || !!runningWorkers || !!runningCommands, invoke, changed: (capabilities) => update({ capabilities }), openMcp: () => { setSettingsOpen(false); setMcpOpen(true); } } : undefined}
           deleteConnection={async (connectionId) => {
             const config = await invoke("config.delete", { connectionId, confirm: true });
-            setGlobalModel(config);
-            setSessions((previous) => previous.map((session) => ({ ...session, config })));
+            applyModel(config);
             return config;
           }}
-          discoverModels={(value) => window.xuloom.invoke("config.models", value)}
+          discoverModels={(value) => invoke("config.models", value)}
         />
       )}
       {attachmentPreview && <AttachmentPreview image={attachmentPreview} close={() => setAttachmentPreview(undefined)} />}

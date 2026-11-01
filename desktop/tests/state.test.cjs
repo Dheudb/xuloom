@@ -121,6 +121,19 @@ test("worker completion preserves task identity and model", async () => {
   assert.equal(session.workers[0].result, "done");
 });
 
+test("engine loss clears live worker spinners without changing completed results", async () => {
+  const { createSession, applyEvent } = await state;
+  const previous = { ...createSession(initial), busy: true, workers: [
+    { agent_id: "live", status: "running" }, { agent_id: "waiting", status: "queued" },
+    { agent_id: "done", status: "completed", result: "kept" }], commands: { shell: { id: "shell", status: "running", owner: "main" } } };
+  const result = applyEvent(previous, { session: "one", type: "engine_exit", message: "SSH result unconfirmed" });
+  assert.deepEqual(result.workers.map(worker => worker.status), ["interrupted", "interrupted", "completed"]);
+  assert.equal(result.workers[2].result, "kept");
+  assert.equal(result.commands.shell.status, "interrupted");
+  assert.equal(result.busy, false);assert.equal(previous.workers[0].status, "running");
+  assert.equal(applyEvent(previous, { session: "one", type: "turn_error", message: "parent turn failed" }).workers, previous.workers);
+});
+
 test("activity handles out-of-order events and identical child tool IDs", async () => {
   const { createSession, applyEvent } = await state;
   let session = createSession(initial);

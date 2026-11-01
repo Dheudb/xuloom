@@ -79,6 +79,7 @@ export type Attachment = { id: string; name: string; path: string; size: number;
 export type HistoryItem = { id?: string; role: "user" | "assistant"; text: string; trace?: TurnTrace; attachments?: Attachment[] };
 export type SavedSession = { id: string; title: string; updated: number };
 export type CatalogSession = SavedSession & {
+  remote?: RemoteLocation;
   scope?: "project" | "standalone";
   permissionMode: PermissionMode;
   sessionId: string;
@@ -91,6 +92,7 @@ export type CatalogSession = SavedSession & {
   draftAttachments?: string[];
 };
 export type CatalogProject = {
+  remote?: RemoteLocation;
   path: string;
   name: string;
   open: boolean;
@@ -107,6 +109,7 @@ export type SessionCatalog = {
   view: { sort: "recent" | "oldest" | "name" | "created" };
 };
 export type InitialSession = {
+  remote?: RemoteLocation;
   executionMode?: "host" | "workspace";
   collaborationMode?: "solo" | "auto" | "ultra";
   fileChanges?: FileChange[];
@@ -126,6 +129,7 @@ export type InitialSession = {
   activity?: ToolActivity[];
   workers?: Worker[];
 };
+export type RemoteLocation = { connectionId: string; host: string; name: string; key: string; hostname?: string };
 export type EngineEvent = { session: string; type: string; [key: string]: any };
 export type Worker = {
   agent_id: string;

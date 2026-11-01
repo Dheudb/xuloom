@@ -19,6 +19,7 @@ else:
 from xuloom.remote.config import validate_profile, save, profiles, remove
 from xuloom.remote.ssh import SSHClient, RemoteDisconnected, RemoteRequestError, ssh_argv
 from xuloom.remote.cli import dispatch as remote_dispatch
+from xuloom.remote.proxy import SSHBridge
 
 
 class SSHConfigTests(unittest.TestCase):
@@ -126,6 +127,22 @@ class SSHWireTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await client.request("files.read", {"path": "note.txt"}))["content"], "remote source 你好")
         self.assertTrue(any(row["name"] == "note.txt" for row in (await client.request("files.list"))["entries"]))
         self.assertEqual((await client.request("git.status"))["code"], "not_repository")
+        self.assertEqual(self.local.records, [])
+
+    async def test_desktop_proxy_refuses_changed_binding_before_ssh_and_mismatched_machine_before_history(self):
+        events = []
+        changed = {**self.profile, "cwd": str(self.root)}
+        bridge = SSHBridge("test", self.profile, None, events.append)
+        with patch("xuloom.remote.proxy.resolve", return_value=changed):
+            with self.assertRaisesRegex(ValueError, "目标已更改"):
+                await bridge.dispatch("remote.connection", {})
+        self.assertEqual(self.server.commands, [])
+        bridge = SSHBridge("test", self.profile, {"hostname": "different-machine", "platform": "unknown", "cwd": str(self.remote)}, events.append)
+        with patch("xuloom.remote.proxy.resolve", return_value=self.profile):
+            with self.assertRaisesRegex(ValueError, "机器或目录"):
+                await bridge.dispatch("initialize", {"sessionId": "never-opened"})
+        self.assertIsNone(bridge.client)
+        self.assertFalse((self.root/"remote-data/history").exists())
         self.assertEqual(self.local.records, [])
 
     async def test_formal_cli_uses_remote_key_and_history_not_local_config(self):

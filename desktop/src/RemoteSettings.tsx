@@ -4,9 +4,10 @@ import { Server, Plus } from "lucide-react";
 type Profile = { id: string; name: string; host: string; port: number | null; cwd: string; python: string; platform: "posix" | "windows"; ssh_config: string };
 const empty = (): Profile => ({ id: "", name: "", host: "", port: null, cwd: "", python: "python3", platform: "posix", ssh_config: "" });
 
-export default function RemoteSettings() {
+export default function RemoteSettings({ open }: { open: (id: string, sessionId?: string) => Promise<void> }) {
   const [rows, setRows] = useState<Profile[]>([]), [form, setForm] = useState<Profile>(empty);
   const [editing, setEditing] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(""), [status, setStatus] = useState("");
+  const [history, setHistory] = useState<Record<string, { id: string; title: string; updated: number }[]>>({});
   async function refresh() { const value = await window.xuloom.invoke("remote.profiles"); setRows(value.connections); }
   useEffect(() => { void refresh().catch(e => setError(String(e))); }, []);
   async function action(work: () => Promise<void>) { setBusy(true); setError(""); setStatus(""); try { await work(); } catch (error) { setError(String(error)); } finally { setBusy(false); } }
@@ -18,7 +19,10 @@ export default function RemoteSettings() {
     {rows.map(row => <section className="extension-row" key={row.id}>
       <strong>{row.name}</strong><small>{row.host} · {row.platform === "windows" ? "Windows" : "Linux / macOS"}</small><p className="extension-path">{row.cwd}</p>
       <div className="actions"><button disabled={busy} onClick={() => { setForm(row); setEditing(true); }}>编辑连接</button><button disabled={busy} onClick={() => void action(async () => { const info = await window.xuloom.invoke("remote.check", { id: row.id }); setStatus(`连接成功：${info.hostname} · ${info.cwd} · Xuloom ${info.version}`); })}>测试 SSH 连接</button>
+        <button disabled={busy} onClick={() => void action(() => open(row.id))}>新建远程会话</button>
+        <button disabled={busy} onClick={() => void action(async () => { const value = await window.xuloom.invoke("remote.history", { id: row.id }); setHistory(previous => ({ ...previous, [row.id]: value })); })}>查看远端会话</button>
         <button disabled={busy} onClick={() => void action(async () => { await window.xuloom.invoke("remote.remove", { id: row.id }); await refresh(); if (form.id === row.id) setEditing(false); setStatus("SSH 连接配置已删除；远端文件与历史未删除"); })}>删除连接配置</button></div>
+      {history[row.id] && <div className="remote-history">{history[row.id].length ? history[row.id].map(chat => <button disabled={busy} key={chat.id} onClick={() => void action(() => open(row.id, chat.id))}>{chat.title || "新会话"}</button>) : <p className="fine-print">此远端目录还没有保存的会话。</p>}</div>}
     </section>)}
     {editing && <form className="extension-form" onSubmit={event => { event.preventDefault(); void action(async () => { await window.xuloom.invoke("remote.save", form); await refresh(); setEditing(false); setStatus("SSH 连接已保存；CLI 可使用相同连接 ID"); }); }}><fieldset disabled={busy}>
       <label>连接 ID<input aria-label="SSH 连接 ID" required maxLength={64} pattern="[a-zA-Z0-9][a-zA-Z0-9_-]*" value={form.id} onChange={e => setForm({ ...form, id: e.target.value })} /></label>

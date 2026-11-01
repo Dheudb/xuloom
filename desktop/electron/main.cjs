@@ -92,6 +92,16 @@ const engineMethods = new Set([
   "capabilities.example",
   "capabilities.create",
 ]);
+const remote = require("./remote-workspace.cjs").remoteWorkspaces({
+  settings, saveSettings, sessions, send, broadcast: broadcastCatalog, dispose: disposeSession, running,
+  active: () => activeSessionId, activate: value => { activeSessionId = value; }, saveWorkspace,
+  methods: engineMethods, config: globalConfig, admit: ensureCapacity,
+  transport: (connection, onEvent) => {
+    const directory = app.getPath("userData"); fs.mkdirSync(directory, { recursive: true });
+    return new EngineTransport({ python: resolveEnginePython({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, projectRoot: path.resolve(__dirname, "../..") }),
+      isolated: app.isPackaged, engineRoot: engineRoot(), project: directory, remote: connection, onEvent });
+  },
+});
 function settings() {
   return preferences.readSettings(dataRoot, path.join(app.getPath("userData"), "workbench.json"));
 }
@@ -117,7 +127,8 @@ function settingsFailure(error, prefix = "工作台设置更新失败，请检�
   });
 }
 function broadcastCatalog() {
-  const snapshot = { ...catalog.snapshot(), revision: ++catalogRevision };
+  const local = catalog.snapshot();
+  const snapshot = { ...local, projects: [...local.projects, ...remote.projects()], revision: ++catalogRevision };
   if (window && !window.isDestroyed())
     window.webContents.send("workbench:event", { type: "catalog_changed", catalog: snapshot });
   return snapshot;
@@ -126,6 +137,10 @@ function send(id, payload) {
   const source = sessions.get(id);
   // Host requests never enter the frontend or its generic respond channel.
   if (payload.type === "browser_capture") {
+    if (source?.remote) {
+      void source.transport.request("browser.capture_result", { requestId: payload.requestId, result: { error: "远端尚未连接截图渲染器；未调用本机浏览器" } }).catch(() => {});
+      return;
+    }
     if (source) browserCaptures.capture(id, source.project, payload.requestId, payload.input)
       .catch(error => ({ error: error.message }))
       .then(result => source.transport.request("browser.capture_result", { requestId: payload.requestId, result }))
@@ -134,6 +149,12 @@ function send(id, payload) {
   }
   if (payload.type === "browser_capture_cancel") { browserCaptures.cancel(id, payload.requestId); return; }
   if (payload.type === "engine_exit") browserCaptures.cancel(id);
+  if (source?.remote && payload.type === "engine_exit") {
+    source.busy = false; source.disconnected = true;
+    for (const [key, status] of source.workers) if (["running", "queued"].includes(status)) source.workers.set(key, "interrupted");
+    for (const [key, status] of source.commands || []) if (status === "running") source.commands.set(key, "interrupted");
+    void source.transport.close().catch(error => settingsFailure(error, "SSH 连接关闭未确认："));
+  }
   if (source && payload.type === "managed_turn_started") source.busy = true;
   if (source && payload.type === "turn_finished") source.busy = false;
   if (source && payload.type === "subagent_status") source.workers.set(payload.agent.agent_id, payload.agent.status);
@@ -142,13 +163,14 @@ function send(id, payload) {
     source.commands.set(payload.command.id, payload.command.status);
   }
   if (payload.type === "session_started" && sessions.has(id)) {
+    if (source.remote && payload.sessionId !== source.resumeId) { send(id, { type: "engine_exit", message: "远端会话身份发生变化，已断开连接；未切换会话", outcome_unknown: true }); return; }
     sessions.get(id).resumeId = payload.sessionId;
     try { saveWorkspace(); }
     catch (error) { settingsFailure(error); }
   }
   if (window && !window.isDestroyed())
     window.webContents.send("workbench:event", { session: id, ...payload });
-  if (payload.type === "engine_exit") sessions.delete(id);
+  if (payload.type === "engine_exit" && !source?.remote) sessions.delete(id);
   if (["session_started", "sessions_changed"].includes(payload.type)) {
     try { broadcastCatalog(); }
     catch (error) { settingsFailure(error); }
@@ -156,10 +178,13 @@ function send(id, payload) {
 }
 let tickingSchedules = false;
 async function tickSchedules() {
-  if (tickingSchedules || quitting || !uiReady || !restoration || !fs.existsSync(path.join(dataRoot, "schedules.json"))) return;
+  if (tickingSchedules || quitting || !uiReady || !restoration) return;
   tickingSchedules = true;
   try {
     await restoration;
+    try { await remote.tickSchedules(); }
+    catch (error) { settingsFailure(error, "远端定时消息等待核对："); }
+    if (!fs.existsSync(path.join(dataRoot, "schedules.json"))) return;
     const due = await globalConfig().request("schedule.due");
     for (const job of due) {
       if (quitting) break;
@@ -189,8 +214,8 @@ function saveWorkspace() {
   const before = settings();
   saveSettings({
     ...before,
-    activeConversation: active ? { project: active.project, resumeId: active.resumeId, scope: active.scope } : null,
-    workspace: [...sessions.entries()].map(([id, session]) => ({
+    activeConversation: active?.remote ? { remoteId: activeSessionId } : active ? { project: active.project, resumeId: active.resumeId, scope: active.scope } : null,
+    workspace: [...sessions.entries()].map(([id, session]) => session.remote ? { remoteId: id, active: id === activeSessionId } : ({
       project: session.project,
       resumeId: session.resumeId,
       scope: session.scope,
@@ -220,6 +245,11 @@ async function restoreWorkspace() {
   const restored = [], errors = [...upgradeErrors];
   for (const entry of entries.slice(0, 8)) {
     try {
+      if (entry.remoteId) {
+        const initial = await remote.openRow(remote.find(entry.remoteId));
+        if (initial.id) restored.push(initial);
+        continue;
+      }
       if (entry.scope !== "standalone" && catalog.snapshot().projects.some((project) => projectKey(project.path) === projectKey(entry.project) && project.archived)) continue;
       let resumeId = entry.resumeId;
       if (resumeId && (!/^[a-zA-Z0-9_-]+$/.test(resumeId) ||
@@ -232,7 +262,7 @@ async function restoreWorkspace() {
       restored.push(initial);
       activeSessionId = initial.id;
     } catch {
-      errors.push("无法恢复项目：" + entry.project);
+      errors.push("无法恢复" + (entry.remoteId ? " SSH 会话；请检查连接后重新选择会话。" : "项目：" + entry.project));
     }
   }
   activeSessionId ||= restored[0]?.id;
@@ -272,11 +302,7 @@ async function createSession(project, resumeId) {
     if (previous.closed || previous.closeError) await disposeSession(id);
     else return { existingId: id };
   }
-  if (sessions.size >= 8) {
-    const idle = [...sessions.entries()].find(([key, source]) => key !== activeSessionId && !running(source));
-    if (!idle) throw new Error("已有 8 个运行中的会话，请先停止一个任务");
-    await disposeSession(idle[0]);
-  }
+  await ensureCapacity();
   const transport = new EngineTransport({
     python: resolveEnginePython({
       packaged: app.isPackaged,
@@ -306,6 +332,13 @@ async function createSession(project, resumeId) {
   }
 }
 
+async function ensureCapacity() {
+  if (sessions.size < 8) return;
+  const idle = [...sessions.entries()].find(([key, source]) => key !== activeSessionId && !running(source));
+  if (!idle) throw new Error("已有 8 个运行中的会话，请先停止一个任务");
+  await disposeSession(idle[0]);
+}
+
 async function mutateSessions(spec) {
   return globalConfig().request("storage.mutate", spec);
 }
@@ -326,6 +359,7 @@ async function disposeSession(id) {
   if (window && !window.isDestroyed()) window.webContents.send("workbench:event", { type: "session_unloaded", session: id });
 }
 async function selectRow(row) {
+  if (remote.remoteId(row.id)) return remote.openRow(remote.find(row.id));
   if (row.archived || row.scope !== "standalone" && catalog.snapshot().projects.some((project) => projectKey(project.path) === projectKey(row.project) && project.archived))
     throw new Error("请先在设置的已归档会话页面恢复此会话");
   if (row.scope !== "standalone") catalog.updateProject(row.project, { open: true });
@@ -349,6 +383,8 @@ async function fallback(project, excluded = [], scope = "project") {
 }
 async function invoke(method, params) {
   if (method === "app.ready") { uiReady = true; deliverLinks(); return true; }
+  const routed = await remote.handle(method, params);
+  if (routed.handled) return routed.value;
   if (method === "chat.copy") {
     const row = catalog.find(params.id);
     const url = chatLink(row.id);
@@ -724,7 +760,7 @@ app.whenReady().then(() => {
     if (typeof method !== "string" || !params || typeof params !== "object")
       throw new Error("Invalid request");
     if (quitting) throw new Error("正在保存并退出，请稍候");
-    if (/^(app\.initialize|chat\.(open|copy)|layout\.save|attachments\.import|execution\.set|collaboration\.set|permissions\.set|config\.(save|select|delete|reasoning)|workspace\.save|archive\.restore|project\.(open|update|close|remove|delete)|session\.(open|new|select|update|fork|move|delete|close|activate)|catalog\.)/.test(method)) {
+    if (/^(remote\.open|app\.initialize|chat\.(open|copy)|layout\.save|attachments\.import|execution\.set|collaboration\.set|permissions\.set|config\.(save|select|delete|reasoning)|workspace\.save|archive\.restore|project\.(open|update|close|remove|delete)|session\.(open|new|select|update|fork|move|delete|close|activate)|catalog\.)/.test(method)) {
       const operation = workspaceQueue.then(() => invoke(method, params));
       workspaceQueue = operation.catch(() => {});
       return operation;
@@ -739,6 +775,10 @@ app.whenReady().then(() => {
     let saved = false;
     try {
       for (const draft of drafts) {
+        if (remote.remoteId(draft.id)) {
+          remote.update(draft.id, { draft: String(draft.draft || ""), draftEditId: draft.draftEditId || "", draftAttachments: draft.draftAttachments || [] });
+          continue;
+        }
         let row; try { row = catalog.find(draft.id); } catch { continue; }
         catalog.update(row, { draft: String(draft.draft || ""), draftEditId: draft.draftEditId || "", draftAttachments: draft.draftAttachments || [] });
       }

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Archive, ChevronDown, ChevronRight, Copy, Folder, FolderOpen,
   LoaderCircle, MessageSquare, MoreHorizontal, Pencil, Pin, Plus, RefreshCw, Search,
-  Trash2, X, CheckSquare, LogOut, FolderInput, Link2 } from "lucide-react";
+  Trash2, X, CheckSquare, LogOut, FolderInput, Link2, Server } from "lucide-react";
 import type { CatalogProject, CatalogSession, SessionCatalog, SessionView } from "./types";
 
 type Menu = { kind: "session"; row: CatalogSession } | { kind: "project"; row: CatalogProject };
@@ -117,14 +117,14 @@ export default function SessionSidebar({ catalog, activeId, live, opening, actio
         buttons[next]?.focus();
       }}>
       {value.kind === "session" ? <>
-        <button role="menuitem" onClick={() => run("chat.copy", { id: value.row.id })}><Link2 size={14} />复制聊天链接</button>
+        <button role="menuitem" disabled={!!value.row.remote} title={value.row.remote ? "SSH 会话深链接正在接入" : undefined} onClick={() => run("chat.copy", { id: value.row.id })}><Link2 size={14} />复制聊天链接</button>
         <button role="menuitem" onClick={() => { setRename(value); setName(value.row.title); setMenu(null); setError(""); }}><Pencil size={14} />重命名会话</button>
         <button role="menuitem" onClick={() => run("session.update", { id: value.row.id, patch: { pinned: !value.row.pinned } })}><Pin size={14} />{value.row.pinned ? "取消置顶" : "置顶会话"}</button>
         <button role="menuitem" onClick={() => run("session.update", { id: value.row.id, patch: { archived: true } })}>
           <Archive size={14} />归档会话</button>
         <button role="menuitem" disabled={busy(value.row.id)} onClick={() => run("session.fork", { id: value.row.id })}><Copy size={14} />复制为新会话</button>
-        <button role="menuitem" disabled={busy(value.row.id) || !projects.some((project) => value.row.scope === "standalone" || project.path !== value.row.project)}
-          onClick={() => { setMove(value.row); setDestination(projects.find((project) => value.row.scope === "standalone" || project.path !== value.row.project)?.path || ""); setMenu(null); setError(""); }}><FolderInput size={14} />移动到项目…</button>
+        <button role="menuitem" disabled={!!value.row.remote || busy(value.row.id) || !projects.some((project) => !project.remote && (value.row.scope === "standalone" || project.path !== value.row.project))}
+          onClick={() => { setMove(value.row); setDestination(projects.find((project) => !project.remote && (value.row.scope === "standalone" || project.path !== value.row.project))?.path || ""); setMenu(null); setError(""); }}><FolderInput size={14} />移动到项目…</button>
         <button role="menuitem" className="danger" onClick={() => requestDelete([value.row])}><Trash2 size={14} />
           {armed === value.row.id ? (busy(value.row.id) ? "确认停止并删除" : "确认删除会话") : (busy(value.row.id) ? "停止并删除会话" : "删除会话")}</button>
       </> : <>
@@ -133,15 +133,15 @@ export default function SessionSidebar({ catalog, activeId, live, opening, actio
         <button role="menuitem" onClick={() => run("project.update", { path: value.row.path, patch: { pinned: !value.row.pinned } })}><Pin size={14} />{value.row.pinned ? "取消置顶" : "置顶项目"}</button>
         <button role="menuitem" onClick={() => run("project.update", { path: value.row.path, patch: { archived: true } })}><Archive size={14} />归档项目</button>
         {value.row.open && <button role="menuitem" onClick={() => run("project.close", { path: value.row.path })}><LogOut size={14} />关闭项目</button>}
-        <button role="menuitem" onClick={() => { setRemove({ row: value.row, deleteHistory: false }); setMenu(null); setError(""); }}><X size={14} />从列表移除项目</button>
-        <button role="menuitem" className="danger" onClick={() => { setRemove({ row: value.row, deleteHistory: true }); setMenu(null); setError(""); }}><Trash2 size={14} />删除项目会话记录</button>
+        <button role="menuitem" disabled={!!value.row.remote} onClick={() => { setRemove({ row: value.row, deleteHistory: false }); setMenu(null); setError(""); }}><X size={14} />从列表移除项目</button>
+        <button role="menuitem" className="danger" disabled={!!value.row.remote} onClick={() => { setRemove({ row: value.row, deleteHistory: true }); setMenu(null); setError(""); }}><Trash2 size={14} />删除项目会话记录</button>
       </>}
     </div>, document.body);
   }
   function renderSession(row: CatalogSession) {
     return <div className={"session-item " + (row.id === activeId ? "active " : "") + (row.archived ? "archived " : "") + (dragging === row.id ? "dragging" : "")}
-      data-session-id={row.id} key={row.id} draggable={!opening && !busy(row.id)}
-      title={busy(row.id) ? "先停止会话和子代理任务，再拖动到其他项目" : "拖动到项目以切换工作目录"}
+      data-session-id={row.id} key={row.id} draggable={!row.remote && !opening && !busy(row.id)}
+      title={row.remote ? "SSH · " + row.remote.host : busy(row.id) ? "先停止会话和子代理任务，再拖动到其他项目" : "拖动到项目以切换工作目录"}
       onDragStart={(event) => { if (opening || busy(row.id)) { event.preventDefault(); return; }
         event.dataTransfer.setData("application/x-xuloom-session", row.id); event.dataTransfer.effectAllowed = "move";
         setDragging(row.id); setMenu(null); }}
@@ -184,7 +184,7 @@ export default function SessionSidebar({ catalog, activeId, live, opening, actio
           (!needle || projectMatches || row.title.toLocaleLowerCase().includes(needle))));
         if (needle && !projectMatches && !rows.length) return null;
         const dragged = allRows.find((row) => row.id === dragging);
-        const acceptsDrop = !!dragged && !opening && (dragged.scope === "standalone" || dragged.project !== project.path);
+        const acceptsDrop = !!dragged && !dragged.remote && !project.remote && !opening && (dragged.scope === "standalone" || dragged.project !== project.path);
         return <section className={"project-group " + (!project.open ? "closed " : "") + (dropTarget === project.path ? "drop-target" : "")} key={project.path} data-project={project.path}
           onDragOver={(event) => { if (acceptsDrop) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; setDropTarget(project.path); } }}
           onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(""); }}
@@ -196,7 +196,7 @@ export default function SessionSidebar({ catalog, activeId, live, opening, actio
               onClick={() => run("project.update", { path: project.path, patch: { collapsed: !project.collapsed } })}>
               {project.collapsed || !project.open ? <ChevronRight size={13} /> : <ChevronDown size={13} />}</button>
             <button className="project-item" aria-label={"打开项目 " + project.name} title={project.path} disabled={opening} onClick={() => openProject(project.path)}>
-              {project.open ? <FolderOpen size={14} /> : <Folder size={14} />}<span>{project.name}</span>
+              {project.remote ? <Server size={14} /> : project.open ? <FolderOpen size={14} /> : <Folder size={14} />}<span>{project.name}</span>
               {project.pinned && <Pin size={11} />}{project.archived && <Archive size={11} />}<small>{project.open ? rows.length : "已关闭"}</small>
             </button>
             <button className="icon-button project-new" aria-label={"在项目 " + project.name + " 中新建会话"} title="在此项目中新建会话" disabled={opening} onClick={() => run("session.new", { path: project.path })}><Plus size={14} /></button>
@@ -216,7 +216,7 @@ export default function SessionSidebar({ catalog, activeId, live, opening, actio
       <section className="dialog" role="dialog" aria-modal="true" aria-label={move ? "移动会话" : rename ? "重命名" : "移除项目"} onClick={(e) => e.stopPropagation()}>
         <header><h2>{move ? "移动会话" : rename ? "重命名" : remove?.deleteHistory ? "删除项目会话记录" : "从列表移除项目"}</h2></header>
         {move && <><p>{move.title}</p><label>目标项目<select aria-label="目标项目" value={destination} onChange={(event) => setDestination(event.target.value)}>
-          {projects.filter((project) => move.scope === "standalone" || project.path !== move.project).map((project) => <option key={project.path} value={project.path}>{project.name}</option>)}
+          {projects.filter((project) => !project.remote && (move.scope === "standalone" || project.path !== move.project)).map((project) => <option key={project.path} value={project.path}>{project.name}</option>)}
         </select></label><p className="fine-print">保留历史和草稿，后续任务使用目标项目的目录、Skill、子代理和 MCP 配置。</p></>}
         {rename && <label>名称<input autoFocus aria-label="新名称" value={name} maxLength={rename.kind === "session" ? 200 : 100} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && name.trim() && !working) void submitDialog(); }} /></label>}
         {remove && <><p>{remove.row.name}</p><p>{remove.deleteHistory ? `将永久删除此项目的 ${remove.row.sessions.length} 个会话和对话记录。` : "项目会从侧边栏移除，已有会话记录会保留，重新打开目录即可找回。"}</p>

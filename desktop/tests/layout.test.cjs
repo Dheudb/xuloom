@@ -10,6 +10,7 @@ test('saving either panel width preserves the other preference', () => {
   assert.deepEqual(updateLayout(undefined, { sidebarWidth: 300.4 }), { sidebarWidth: 300 });
   assert.equal(updateLayout(previous, { inspectorWidth: 1000 }).inspectorWidth, 1000);
   assert.equal(updateLayout(previous, { reviewTreeWidth: 180 }).reviewTreeWidth, 180);
+  assert.deepEqual(updateLayout(previous, { filePreviewWidth: 760 }), { ...previous, filePreviewWidth: 760 });
   for (const patch of [{}, { sidebarWidth: 100 }, { sidebarWidth: Infinity }, { inspectorWidth: 13000 }, { reviewTreeWidth: 50 }, { sidebarWidth: '300' }])
     assert.throws(() => updateLayout(previous, patch));
 });

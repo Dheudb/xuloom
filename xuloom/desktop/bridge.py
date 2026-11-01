@@ -861,13 +861,13 @@ class DesktopBridge:
                     await self.engine.aclose()
 
 
-async def serve():
+async def serve(bridge_factory=DesktopBridge):
     wire = sys.stdout
     sys.stdout = sys.stderr
     def emit(payload):
         wire.write(json.dumps({"event": payload}, ensure_ascii=False, default=str) + "\n")
         wire.flush()
-    bridge = DesktopBridge(emit)
+    bridge = bridge_factory(emit)
     requests = set()
     stdin_fd = sys.stdin.fileno()
     read_chunk = pipe_reader(stdin_fd)
@@ -880,6 +880,7 @@ async def serve():
             from xuloom.core.session_lock import SessionBusyError, SessionConflictError
             from xuloom.core.run_result import PersistenceError
             code = "session_busy" if isinstance(exc, SessionBusyError) else "session_conflict" if isinstance(exc, SessionConflictError) else "persistence_error" if isinstance(exc, PersistenceError) else "invalid_request" if isinstance(exc, ValueError) else "error"
+            if getattr(exc, "code", None) in {"session_busy", "session_conflict", "persistence_error", "invalid_request"}: code = exc.code
             response = {"id": request.get("id"), "error": str(exc), "errorCode": code}
         wire.write(json.dumps(response, ensure_ascii=False, default=str) + "\n")
         wire.flush()

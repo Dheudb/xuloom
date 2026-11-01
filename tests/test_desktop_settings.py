@@ -51,6 +51,21 @@ class DesktopSettingsTests(unittest.TestCase):
             self.save(before, {**before, "projectMeta": {"old": {"name": "stale rename"}}})
         self.assertEqual(self.path.read_bytes(), original)
 
+    def test_remote_navigation_merges_windows_and_does_not_resurrect_deleted_reference(self):
+        before = {"remoteChats": {"one": {"draft": "original", "pinned": False}}, "remoteProjects": {}}
+        atomic_json(self.path, before)
+        first = copy.deepcopy(before); first["remoteChats"]["two"] = {"draft": "another chat"}
+        second = copy.deepcopy(before); second["remoteChats"]["one"]["draft"] = "unsent remote draft"
+        self.save(before, first); result = self.save(before, second)
+        self.assertEqual(set(result["remoteChats"]), {"one", "two"})
+        self.assertEqual(result["remoteChats"]["one"]["draft"], "unsent remote draft")
+        removed = copy.deepcopy(result); del removed["remoteChats"]["one"]
+        self.save(result, removed)
+        stale = copy.deepcopy(result); stale["remoteProjects"]["lab"] = {"collapsed": True}
+        self.assertNotIn("one", self.save(result, stale)["remoteChats"])
+        stale["remoteChats"]["one"]["draft"] = "stale overwrite"
+        with self.assertRaises(SessionConflictError): self.save(result, stale)
+
     def test_workspace_selection_and_open_list_are_one_last_window_snapshot(self):
         before = {"activeConversation": None, "workspace": [], "layout": {"sidebarWidth": 280}}
         atomic_json(self.path, before)

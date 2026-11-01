@@ -178,7 +178,7 @@ class SessionCatalog {
       await mutate({ ...moveSpec(row, target, "standalone"), legacy_workspace: { base, id: identity } });
       const moved = this.find(sessionKey(target, row.sessionId)), before = this.readSettings(), settings = structuredClone(before);
       settings.standaloneDirectories = [...new Set([...(settings.standaloneDirectories || []), moved.project])];
-      const matches = (entry) => entry && projectKey(entry.project) === projectKey(row.project) && entry.resumeId === row.sessionId;
+      const matches = (entry) => entry && typeof entry.project === "string" && projectKey(entry.project) === projectKey(row.project) && entry.resumeId === row.sessionId;
       if (matches(settings.activeConversation)) settings.activeConversation = { ...settings.activeConversation, project: moved.project, scope: "standalone" };
       if (settings.workspace) settings.workspace = settings.workspace.map((entry) => matches(entry) ? { ...entry, project: moved.project, scope: "standalone" } : entry);
       this.writeSettings(settings, before);

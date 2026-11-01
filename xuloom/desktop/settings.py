@@ -35,7 +35,7 @@ def save_workbench(spec):
     if not isinstance(before, dict) or not isinstance(after, dict):
         raise ValueError("Desktop settings require an original snapshot and the edited snapshot")
     changed = {key for key in before.keys() | after.keys() if key not in before or key not in after or before[key] != after[key]}
-    if changed - {"projects", "projectMeta", "standaloneDirectories", "sidebar", "layout", "defaultDirectory", "workspace", "activeConversation"}:
+    if changed - {"projects", "projectMeta", "standaloneDirectories", "sidebar", "layout", "defaultDirectory", "workspace", "activeConversation", "remoteChats", "remoteProjects"}:
         raise ValueError("Unsupported desktop preference fields")
     lock = SessionLock(data_directory() / "session-locks", "preferences_workbench")
     for attempt in range(51):

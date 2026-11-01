@@ -1,0 +1,87 @@
+const {_electron: electron} = require('playwright');
+const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), assert = require('node:assert/strict');
+const {spawn} = require('node:child_process'), readline = require('node:readline');
+const {resolveEnginePython} = require('../electron/runtime.cjs');
+const root = path.resolve(__dirname, '..'), repository = path.resolve(root, '..');
+const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'xuloom-ssh-desktop-'));
+const python = resolveEnginePython({packaged:false,projectRoot:repository});
+const service = spawn(python, ['-u', path.join(repository,'tests/remote_workbench_fixture.py'), fixture], {cwd:repository,windowsHide:true,stdio:['pipe','pipe','pipe']});
+let diagnostics=''; service.stderr.on('data', chunk => diagnostics += chunk);
+const ready = new Promise((resolve,reject) => { const lines=readline.createInterface({input:service.stdout}); lines.once('line', line=>{try{resolve(JSON.parse(line));}catch(error){reject(error);}});service.once('exit',code=>reject(new Error('fixture exited '+code+' '+diagnostics))); });
+let app, page;
+(async()=>{try{
+ const info=await ready;
+ const env={...process.env,HOME:path.join(fixture,'local-home'),USERPROFILE:path.join(fixture,'local-home'),XULOOM_USER_DATA:path.join(fixture,'local-data'),XULOOM_DATA_DIR:path.join(fixture,'local-data'),XULOOM_CONFIG_DIR:info.config,XULOOM_TEST_HEADLESS:'1',XULOOM_SKILLS_PATHS:''};
+ for(const key of ['ELECTRON_RUN_AS_NODE','XULOOM_DEV_URL','OPENAI_API_KEY','OPENAI_MODEL','OPENAI_BASE_URL','XULOOM_MODEL_PROVIDER'])delete env[key];
+ async function launch(){app=await electron.launch({executablePath:process.env.XULOOM_TEST_EXECUTABLE,args:process.env.XULOOM_TEST_EXECUTABLE?[]:[root],env});page=await app.firstWindow();page.setDefaultTimeout(45000);await page.waitForFunction(()=>!document.querySelector('.new-task')?.disabled);}
+ async function send(text){await page.getByRole('textbox',{name:'任务输入'}).fill(text);await page.getByRole('textbox',{name:'任务输入'}).press('Enter');}
+ async function idle(){await page.waitForFunction(()=>!document.querySelector('.send-button.stop'));}
+ async function menu(id){await page.locator(`.session-item[data-session-id="${id}"]`).click({button:'right'});}
+ await launch();
+ await page.getByRole('button',{name:'设置与模型',exact:true}).click();await page.getByRole('tab',{name:'SSH 远程',exact:true}).click();
+ await page.getByRole('button',{name:'新建远程会话',exact:true}).click();
+ await page.locator('.session-item.active[data-session-id^="ssh:"]').waitFor();
+ assert((await page.locator('.local-tag').innerText()).includes('SSH'));
+ await page.getByRole('button',{name:'Git 状态',exact:true}).filter({hasText:'remote-main'}).waitFor();
+ const first=await page.locator('.session-item.active').getAttribute('data-session-id');
+ assert.equal(await page.getByRole('combobox',{name:'选择模型'}).inputValue(),JSON.stringify(['remote-models','remote-a']));
+ await page.getByRole('textbox',{name:'任务输入'}).fill('hello remote');await page.getByRole('textbox',{name:'任务输入'}).press('Enter');
+ await page.getByText('REMOTE_REPLY_remote-a',{exact:true}).waitFor();
+ await page.getByRole('combobox',{name:'选择模型'}).selectOption(JSON.stringify(['remote-models','remote-b']));
+ await page.getByRole('combobox',{name:'访问权限'}).selectOption('full');
+ await page.getByRole('textbox',{name:'任务输入'}).fill('write report');await page.getByRole('textbox',{name:'任务输入'}).press('Enter');
+ await page.getByText('REMOTE_REPLY_remote-b',{exact:true}).waitFor();
+ assert(fs.readFileSync(path.join(info.remote,'generated.md'),'utf8').includes('REMOTE_WRITTEN_ARTIFACT'));
+ await page.getByRole('button',{name:'展开能力面板',exact:true}).click();
+ const panelWidth=await page.getByRole('separator',{name:'调整右侧面板宽度',exact:true}).getAttribute('aria-valuenow');
+ await page.getByRole('button',{name:'打开文件 generated.md',exact:true}).first().click();
+ await page.getByRole('tab',{name:'源码',exact:true}).click();await page.getByText('REMOTE_WRITTEN_ARTIFACT',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'关闭文件预览',exact:true}).click();
+ assert.equal(await page.getByRole('separator',{name:'调整右侧面板宽度',exact:true}).getAttribute('aria-valuenow'),panelWidth,'Closing file preview restores ordinary sidebar width');
+ await idle();await send('choose remote');
+ const question=page.getByRole('region',{name:'待处理请求'});
+ await question.getByText('Remote choice?',{exact:true}).waitFor();
+ assert(await question.getByRole('button',{name:'提交回答',exact:true}).isDisabled());
+ await question.getByRole('button',{name:'Choice B',exact:false}).click();await question.getByRole('button',{name:'提交回答',exact:true}).click();
+ await idle();
+ if(!process.env.XULOOM_TEST_EXECUTABLE)await page.screenshot({path:path.join(root,'build/remote-workbench.png')});
+ await page.getByRole('textbox',{name:'任务输入'}).fill('remote draft persisted');
+ await app.close();app=null;await launch();
+ await page.locator(`.session-item.active[data-session-id="${first}"]`).waitFor();
+ assert.equal(await page.getByRole('textbox',{name:'任务输入'}).inputValue(),'remote draft persisted');
+ await page.locator('.new-task').click();await page.locator('.session-item.active:not([data-session-id^="ssh:"])').waitFor();
+ assert.equal(await page.getByRole('combobox',{name:'选择模型'}).inputValue(),JSON.stringify(['local-models','local-a']));
+ const wire=fs.readFileSync(path.join(fixture,'wire.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
+ for(const record of wire.filter(record=>record.path.startsWith('/remote-models/')))assert.equal(record.key,'Bearer remote-key');
+ assert.equal(JSON.parse(fs.readFileSync(path.join(info.config,'config.json'),'utf8')).model_connections[0].model,'local-a');
+ await page.locator(`.session-item[data-session-id="${first}"] .session-select`).click();
+ await menu(first);await page.getByRole('menuitem',{name:'复制为新会话',exact:true}).click();
+ await page.waitForFunction(id=>{const current=document.querySelector('.session-item.active')?.getAttribute('data-session-id');return current?.startsWith('ssh:')&&current!==id;},first);
+ const fork=await page.locator('.session-item.active').getAttribute('data-session-id');
+ await menu(fork);await page.getByRole('menuitem',{name:'归档会话',exact:true}).click();
+ await page.locator(`.session-item[data-session-id="${fork}"]`).waitFor({state:'detached'});
+ await page.getByRole('button',{name:'设置与模型',exact:true}).click();await page.getByRole('tab',{name:'已归档会话',exact:true}).click();
+ await page.locator(`[data-archived-session="${fork}"]`).getByRole('button',{name:/恢复会话/}).click();
+ await page.getByRole('button',{name:'关闭设置',exact:true}).click();
+ await page.locator(`.session-item[data-session-id="${fork}"] .session-select`).click();
+ await menu(fork);await page.getByRole('menuitem',{name:'删除会话',exact:true}).click();await page.getByRole('menuitem',{name:'确认删除会话',exact:true}).click();
+ await page.locator(`.session-item[data-session-id="${fork}"]`).waitFor({state:'detached'});
+ await page.locator(`.session-item[data-session-id="${first}"] .session-select`).click();
+ await send('hold remote once');await page.locator('.send-button.stop').waitFor();
+ let seen=false;
+ for(let attempt=0;attempt<150;attempt++){
+  seen=fs.readFileSync(path.join(fixture,'wire.jsonl'),'utf8').trim().split('\n').map(JSON.parse).some(row=>row.body.stream&&JSON.stringify(row.body.messages.at(-1)?.content).includes('hold remote once'));
+  if(seen)break;await new Promise(resolve=>setTimeout(resolve,100));
+ }
+ assert(seen,'The remote server must receive the original request before transport loss');
+ service.stdin.write(JSON.stringify({action:'disconnect'})+'\n');
+ await page.getByText(/SSH connection ended/).last().waitFor();
+ await idle();service.stdin.write(JSON.stringify({action:'release'})+'\n');
+ await page.locator(`.session-item[data-session-id="${first}"] .session-select`).click();
+ await page.waitForFunction(()=>!document.querySelector('.new-task')?.disabled);
+ assert(['','hold remote once'].includes(await page.getByRole('textbox',{name:'任务输入'}).inputValue()),'Only the original draft may be restored, never a synthetic continuation');
+ const finalWire=fs.readFileSync(path.join(fixture,'wire.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
+ assert.equal(finalWire.filter(row=>row.body.stream&&JSON.stringify(row.body.messages.at(-1)?.content).includes('hold remote once')).length,1,'Disconnect must not replay the prompt');
+ assert(finalWire.some(row=>row.body.messages.some(message=>message.role==='tool'&&JSON.stringify(message.content).includes('Choice B'))));
+ console.log('Remote workbench E2E passed: encrypted SSH chat, model/key routing, files, Git branch, real user choice, restart/draft, local separation, fork/archive/restore/delete, active disconnect/reconnect without replay');
+}catch(error){if(page)console.error((await page.locator('body').innerText()).slice(-5000));console.error(diagnostics);throw error;}finally{if(app)await app.close();service.stdin.end(JSON.stringify({action:'stop'})+'\n');}})().catch(error=>{console.error(error);process.exitCode=1;});

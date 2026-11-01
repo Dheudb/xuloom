@@ -20,6 +20,7 @@ export function SettingsDialog({
   discoverModels,
   deleteConnection,
   extensions,
+  targetLabel,
 }: {
   config?: ModelConfig;
   close: () => void;
@@ -32,6 +33,7 @@ export function SettingsDialog({
   discoverModels: (value: Record<string, unknown>) => Promise<{ models: string[] }>;
   deleteConnection: (connectionId: string) => Promise<ModelConfig>;
   extensions?: { busy: boolean; invoke: (method: string, params?: Record<string, unknown>) => Promise<any>; changed: (value: Capabilities) => void; openMcp: () => void };
+  targetLabel?: string;
 }) {
   const [tab, setTab] = useState("model");
   const dialogRef = useRef<HTMLElement>(null);
@@ -105,7 +107,7 @@ export function SettingsDialog({
         <header>
           <div>
             <span className="eyebrow">WORKBENCH SETTINGS</span>
-            <h2>设置</h2>
+            <h2>设置{targetLabel ? " · " + targetLabel : ""}</h2>
           </div>
           <button className="icon-button" aria-label="关闭设置" onClick={close}>
             <X size={18} />
@@ -125,7 +127,7 @@ export function SettingsDialog({
                 onClick={(event) => { setTab(id); setError(""); event.currentTarget.focus(); }}><Icon size={16} />{label}</button>)}
           </nav>
           <div className="settings-content">
-        {tab === "remote" && <div role="tabpanel" id="settings-panel-remote" aria-labelledby="settings-tab-remote"><RemoteSettings /></div>}
+        {tab === "remote" && <div role="tabpanel" id="settings-panel-remote" aria-labelledby="settings-tab-remote"><RemoteSettings open={async (id, sessionId) => { await workspaceAction("remote.open", { id, sessionId }); close(); }} /></div>}
         {["skills", "agents", "mcp"].includes(tab) && <div role="tabpanel" id={"settings-panel-" + tab} aria-labelledby={"settings-tab-" + tab}>
           {!extensions ? <p>请先新建或打开一个会话，再管理扩展；无需配置模型或打开代码仓库。</p> : tab === "mcp" ? <><h3>MCP 服务</h3><p>连接外部工具。支持本地 stdio 与远程 Streamable HTTP，可浏览市场、自定义服务、测试连接及启停。</p><p>配置保存在当前工作区的 .xuloom/mcp_servers.json；API Key 与本地运行环境由服务提供方决定。</p><button onClick={extensions.openMcp}>打开 MCP 管理</button></> : <ExtensionSettings key={tab} kind={tab as "skills" | "agents"} {...extensions} />}
         </div>}
