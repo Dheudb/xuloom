@@ -149,6 +149,18 @@ class TaskTests(unittest.IsolatedAsyncioTestCase):
 
 
 class EngineSubagentTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        # Minimal legacy tool contexts still discover native roles. Never let
+        # that discovery consult a developer's personal mounts or configuration.
+        scratch = tempfile.TemporaryDirectory(prefix="xuloom-transient-agents-")
+        self.addCleanup(scratch.cleanup)
+        root = Path(scratch.name)
+        environment = patch.dict(os.environ, {"HOME": str(root / "home"),
+            "USERPROFILE": str(root / "home"), "XULOOM_CONFIG_DIR": str(root / "config"),
+            "XULOOM_DATA_DIR": str(root / "data"), "XULOOM_SKILLS_PATHS": ""})
+        environment.start()
+        self.addCleanup(environment.stop)
+
     async def test_one_call_starts_ten_before_any_reply(self):
         from xuloom.agents.agent_tool import AgentTool
         tool = AgentTool()
