@@ -54,8 +54,8 @@ class AgentRegistry:
                     location = executor(metadata.get("executor"))
                     backend = metadata.get("backend", "native")
                     program = metadata.get("backend_program")
-                    if backend not in {"native", "claude", "pi", "codex"}:
-                        raise ValueError("backend must be native, claude, pi or codex (an installed CLI)")
+                    if backend not in {"native", "claude", "pi", "codex", "dsh"}:
+                        raise ValueError("backend must be native, claude, pi, codex or dsh (an installed CLI)")
                     if program is not None and (backend == "native" or not isinstance(program, str) or not program.strip()):
                         raise ValueError("backend_program requires an external backend and an absolute installed path")
                     if type(readonly) is not bool:

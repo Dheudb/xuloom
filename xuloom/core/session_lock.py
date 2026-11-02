@@ -1,7 +1,7 @@
 """An OS-owned writer lease. The marker remains; closing the handle releases ownership."""
 import json
 import os
-from pathlib import Path
+from xuloom.core.storage import IOPath
 import re
 import time
 
@@ -18,7 +18,7 @@ class SessionLock:
     def __init__(self, directory, identity):
         if not isinstance(identity, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", identity):
             raise ValueError("Invalid session identity")
-        self.path = Path(directory) / (identity + ".lock")
+        self.path = IOPath(directory) / (identity + ".lock")
         self.identity = identity
         self.handle = None
 

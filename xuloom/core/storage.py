@@ -125,7 +125,7 @@ def migrate_project(cwd=None):
     from contextlib import ExitStack
     from xuloom.core.session_lock import SessionLock
     project = Path(os.path.realpath(cwd or os.getcwd()))
-    legacy, target = project / ".xuloom", history_root(project)
+    legacy, target = IOPath(project / ".xuloom"), IOPath(history_root(project))
     kinds = ("sessions", "session-index.json", "tool-results", "browser", "shell-tasks", "vcr", "notebooks")
     with ExitStack() as stack:
         if any((legacy / kind).exists() for kind in kinds):
@@ -146,7 +146,7 @@ def migrate_project(cwd=None):
 
 
 def _migrate_project(cwd=None):
-    project = Path(os.path.realpath(cwd or os.getcwd())); target = history_root(project); legacy = project / ".xuloom"
+    project = Path(os.path.realpath(cwd or os.getcwd())); target = IOPath(history_root(project)); legacy = IOPath(project / ".xuloom")
     journal_path = target / "migration.json"
     journal = json.loads(journal_path.read_text(encoding="utf-8")) if journal_path.exists() else {}
     artifacts = legacy / "tool-results"
@@ -197,7 +197,7 @@ def _migrate_project(cwd=None):
     target.mkdir(parents=True, exist_ok=True)
     manifest = target / "project.json"
     if not manifest.exists(): atomic_json(manifest, {"version": 1, "project": str(project)})
-    return target
+    return logical_path(target)
 
 
 def session_directory(cwd=None):
@@ -209,7 +209,7 @@ def artifact_directory(cwd=None):
 
 
 def migrate_user_file(old, new):
-    old, new = Path(old), Path(new)
+    old, new = IOPath(old), IOPath(new)
     if old.is_file() and not old.is_symlink():
         if not new.exists():
             new.parent.mkdir(parents=True, exist_ok=True)

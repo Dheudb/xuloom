@@ -26,6 +26,7 @@ class LocalHost:
         self.execution_lock = asyncio.Lock()
         self.stopping, self.on_interrupt = False, None
         self.started_calls, self.receipts = set(), {}
+        self.result_projection = None
         self.failure = None
         self.failed = asyncio.Event()
         self.usage = {name: 0 for name in ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")}
@@ -121,7 +122,17 @@ class LocalHost:
             if before != set(self.catalog()):
                 await self.mcp.request_context.session.send_tool_list_changed()
             from .runtime import tool_result_digest
-            self.receipts[identity] = (name, tool_result_digest([item.model_dump() for item in content], result.get("is_error", False)))
+            blocks, failed = [item.model_dump() for item in content], result.get("is_error", False)
+            if self.result_projection:
+                try:
+                    blocks, digest = self.result_projection(name, blocks, failed)
+                    content = [types.TextContent(**block) if block['type'] == 'text' else types.ImageContent(**block) for block in blocks]
+                except Exception:
+                    self.fail('external_content_error')
+                    raise
+            else:
+                digest = tool_result_digest(blocks, failed)
+            self.receipts[identity] = (name, digest)
             return types.CallToolResult(content=content, isError=result.get("is_error", False))
 
         manager = StreamableHTTPSessionManager(self.mcp, json_response=False, stateless=False,

@@ -10,8 +10,7 @@ import asyncio
 import copy
 import hashlib
 import json
-import os
-from xuloom.core.storage import atomic_text, data_directory, migrate_user_file
+from xuloom.core.storage import atomic_text, data_directory, migrate_user_file, IOPath
 import time
 from pathlib import Path
 from typing import Optional
@@ -91,7 +90,7 @@ class SessionMemoryManager:
     Manages a rolling session memory file for the current conversation.
 
     The memory is stored at:
-      ~/.xuloom/sessions/<session_id>/session-memory/summary.md
+      <Xuloom data>/memory/sessions/<session_id>/summary.md
 
     It is updated periodically when token/tool-call thresholds are met,
     using a lightweight LLM summarisation call.
@@ -123,7 +122,7 @@ class SessionMemoryManager:
         if self._memory_path is None:
             home = str(Path.home())
             session_dir = str(data_directory() / "memory/sessions" / self.session_id)
-            os.makedirs(session_dir, exist_ok=True)
+            IOPath(session_dir).mkdir(parents=True, exist_ok=True)
             self._memory_path = str(migrate_user_file(Path(home) / ".xuloom/sessions" / self.session_id / "session-memory/summary.md", Path(session_dir) / "summary.md"))
         return self._memory_path
 
@@ -202,21 +201,20 @@ class SessionMemoryManager:
 
     def _read_current_notes(self) -> str:
         try:
-            with open(self.memory_path, "r", encoding="utf-8") as f:
+            with IOPath(self.memory_path).open("r", encoding="utf-8") as f:
                 return f.read()
         except FileNotFoundError:
             return DEFAULT_SESSION_MEMORY_TEMPLATE
 
     def _write_notes(self, content: str):
-        os.makedirs(os.path.dirname(self.memory_path), exist_ok=True)
         atomic_text(self.memory_path, content)
 
     def get_memory_content(self) -> Optional[str]:
         """Read the current session memory for use in compaction."""
-        if not os.path.exists(self.memory_path):
+        if not IOPath(self.memory_path).exists():
             return None
         try:
-            with open(self.memory_path, "r", encoding="utf-8") as f:
+            with IOPath(self.memory_path).open("r", encoding="utf-8") as f:
                 content = f.read().strip()
             if content == DEFAULT_SESSION_MEMORY_TEMPLATE.strip():
                 return None

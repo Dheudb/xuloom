@@ -9,6 +9,40 @@ from xuloom.core.storage import session_directory, history_root, atomic_text
 
 
 class StorageTests(unittest.TestCase):
+    def test_deep_central_data_directory_preserves_sessions_memory_and_writer_lock(self):
+        import shutil
+        from xuloom.core.storage import IOPath
+        from xuloom.core.session_lock import SessionBusyError
+        from xuloom.memory.session_memory import SessionMemoryManager
+        with tempfile.TemporaryDirectory(prefix='xuloom-deep-central-') as temp:
+            root = Path(temp); workspace = root / 'workspace'; workspace.mkdir()
+            manager = None
+            try:
+                with patch.dict(os.environ, {'XULOOM_DATA_DIR': str(root / ('a' * 100) / ('b' * 100)), 'HOME': str(root), 'USERPROFILE': str(root)}):
+                    manager = SessionManager(cwd=workspace)
+                    self.assertGreater(len(manager.session_dir), 260)
+                    self.assertTrue(manager.save_session_state('owned-session', [{'role': 'user', 'content': 'full history'}]), manager.last_save_error)
+                    self.assertTrue(manager.save_subagent_transcript('owned-child', {'session_id': 'owned-session', 'messages': ['full result']}), manager.last_save_error)
+                    self.assertEqual(manager.load_subagent_transcript('owned-child')['messages'], ['full result'])
+                    self.assertEqual(manager.list_session_ids(), ['owned-session'])
+                    self.assertIn('owned-session', manager.get_recent_sessions())
+                    self.assertEqual(os.fspath(session_directory(workspace)), str(session_directory(workspace)))
+                    from xuloom.features.session_summary import read_summary
+                    self.assertEqual(read_summary(workspace, 'owned-session')['sessionId'], 'owned-session')
+                    second = SessionManager(cwd=workspace)
+                    self.assertEqual(second.load_session('owned-session')[0]['content'], 'full history')
+                    with self.assertRaises(SessionBusyError): second.acquire_writer('owned-session')
+                    manager.release_writer(); second.acquire_writer('owned-session'); second.release_writer()
+                    memory = SessionMemoryManager('owned-session')
+                    memory._write_notes('Preserve the user goal and evidence.')
+                    self.assertEqual(memory.get_memory_content(), 'Preserve the user goal and evidence.')
+                    self.assertTrue(manager.delete_session('owned-session'))
+                    self.assertFalse(IOPath(manager.get_subagent_transcript_path('owned-child')).exists())
+            finally:
+                if manager: manager.release_writer()
+                self.assertEqual(root.resolve().parent, Path(tempfile.gettempdir()).resolve())
+                shutil.rmtree(IOPath(root))
+
     def test_long_history_paths_are_read_copied_and_deleted_without_hidden_files(self):
         from xuloom.core.storage import IOPath, atomic_copy, atomic_text, file_hash
         from xuloom.core import session_mutation as actor

@@ -1,9 +1,10 @@
 const {_electron:electron}=require('playwright');
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),assert=require('node:assert/strict');
 const {spawn}=require('node:child_process'),readline=require('node:readline');
-const {resolveEnginePython}=require('../electron/runtime.cjs'),{atomicJSON,SessionCatalog}=require('../electron/catalog.cjs');
+const {resolveEnginePython}=require('../electron/runtime.cjs'),{atomicJSON}=require('../electron/catalog.cjs');
 const root=path.resolve(__dirname,'..'),repository=path.dirname(root);
-if(!process.env.XULOOM_TEST_PI_PROGRAM){console.log('External discovery UI skipped: installed Pi required');process.exit(0);}
+const backend=process.env.XULOOM_TEST_DISCOVERY_BACKEND||'pi',program=process.env['XULOOM_TEST_'+backend.toUpperCase()+'_PROGRAM'];
+if(!program){console.log('External discovery UI skipped: installed '+backend+' required');process.exit(0);}
 const bootstrap=fs.mkdtempSync(path.join(os.tmpdir(),'xuloom-discovery-bootstrap-'));
 const serviceEnv={...process.env,HOME:bootstrap,USERPROFILE:bootstrap,XULOOM_DATA_DIR:path.join(bootstrap,'data'),XULOOM_CONFIG_DIR:path.join(bootstrap,'config'),
   XULOOM_SKILLS_PATHS:'',OPENAI_API_KEY:'fixture-only',ANTHROPIC_API_KEY:'fixture-only',OPENAI_BASE_URL:'http://127.0.0.1:1/v1',ANTHROPIC_BASE_URL:'http://127.0.0.1:1',HTTP_PROXY:'',HTTPS_PROXY:'',ALL_PROXY:'',NO_PROXY:'*'};
@@ -39,15 +40,37 @@ const ready=new Promise((resolve,reject)=>{
   const workers=await page.evaluate(()=>window.xuloom.invoke('agents.list',{session:document.querySelector('.session-item.active').dataset.sessionId}));
   const worker=workers.agents.find(worker=>worker.agent_id===info.workerId);
   assert.equal(worker.turn,2);assert.equal(worker.status,'completed',worker.result);
+  assert.equal(worker.backend,backend);
+  if(backend==='dsh'){
+    await page.locator('.worker-model').filter({hasText:'DSH'}).waitFor();
+    await page.getByRole('button',{name:'设置与模型',exact:true}).click();
+    await page.getByRole('tab',{name:'Subagents',exact:true}).click();
+    await page.getByRole('button',{name:'新建 Subagent',exact:true}).click();
+    await page.getByLabel('代理后端',{exact:true}).selectOption('dsh');
+    await page.getByLabel('代理程序路径',{exact:true}).fill(program);
+    await page.getByLabel('扩展名称',{exact:true}).fill('dsh-from-settings');
+    await page.getByLabel('扩展描述',{exact:true}).fill('Review independent evidence');
+    await page.getByLabel('代理工具',{exact:true}).fill('Read');
+    await page.getByLabel('扩展指令',{exact:true}).fill('Read the supplied evidence.');
+    await page.evaluate(()=>document.activeElement?.blur());
+    await page.getByLabel('代理后端',{exact:true}).evaluate(element=>element.scrollIntoView({block:'center'}));
+    const image=await app.evaluate(async({BrowserWindow})=>{
+      const web=BrowserWindow.getAllWindows()[0].webContents;
+      await web.capturePage(undefined,{stayHidden:true,stayAwake:true});
+      await new Promise(resolve=>setTimeout(resolve,100));
+      return(await web.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG().toString('base64');
+    });
+    fs.writeFileSync(path.join(root,'test-results/dsh-settings.png'),Buffer.from(image,'base64'));
+    await page.getByRole('button',{name:'保存 Subagent',exact:true}).click();
+    await page.getByRole('status').filter({hasText:'Subagent 已保存并加载'}).waitFor();
+    await page.getByRole('button',{name:'关闭设置',exact:true}).click();
+    const caps=await page.evaluate(()=>window.xuloom.invoke('capabilities.list',{session:document.querySelector('.session-item.active').dataset.sessionId}));
+    const role=caps.agents.find(role=>role.name==='dsh-from-settings');assert(role.valid);assert.equal(role.backend,'dsh');
+  }
   assert.deepEqual(errors,[]);
 }catch(error){
   console.error('App assertion failed:',error);
   if(page)console.error('App alerts:',await page.locator('.session-error').allTextContents());
-  if(info){
-    const raw=JSON.parse(fs.readFileSync(new SessionCatalog(info.data).file(info.project,info.sessionId),'utf8'));
-    console.error('App execution:',{baseMatches:raw.metadata?.model_runtime?.api_base_url===info.baseUrl,
-      provider:raw.metadata?.model_runtime?.provider,reason:raw.metadata?.last_run_result?.reason});
-  }
   throw error;
 }finally{
   if(app)await app.close();
@@ -57,5 +80,5 @@ const ready=new Promise((resolve,reject)=>{
     service.once('exit',code=>{clearTimeout(timeout);code===0?resolve():reject(new Error('Fixture failed '+code+' '+diagnostics.slice(-3000)));});
   });
 }
-console.log('External discovery App + formal CLI passed: actual Pi tools, same worker after restarts, one discovery and three native list receipts, unselected tools stay hidden');
+console.log('External discovery App + formal CLI passed: actual '+backend+' tools, same worker after restarts, one discovery and three native list receipts, unselected tools stay hidden');
 })().catch(error=>{console.error(error);process.exitCode=1;});

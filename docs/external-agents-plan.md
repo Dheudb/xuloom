@@ -1,6 +1,6 @@
 # 外部 Agent 后端：核对与接入约束
 
-2026-11-02。此计划属于持续目标。[可选外部后端](external-agents.md) 已接入共享角色与现有 Runtime：Claude Code 使用受控 MCP/stream-json，Pi 使用 RPC，Codex 使用 App Server/Responses。Codex 当前专项见 [验证记录](codex-backend-validation-2026-11-02.md)；DSH 仍待单独实现和验收。现有原生角色可绑定不同模型连接并派发到 SSH 主机，不将其算作全部外部 Agent 已完成。
+2026-11-02。此计划属于持续目标。[可选外部后端](external-agents.md) 已接入共享角色与现有 Runtime：Claude Code 使用受控 MCP/stream-json，Pi 使用 RPC，Codex 使用 App Server/Responses。Codex 当前专项见 [验证记录](codex-backend-validation-2026-11-02.md)；DSH 的最小 headless 接入已开始独立验证，见 [专项记录](dsh-backend-validation-2026-11-02.md)。现有原生角色可绑定不同模型连接并派发到 SSH 主机，不将其算作全部外部 Agent 已完成。
 
 ## 已核对的 Codex 接口
 
@@ -51,3 +51,7 @@ App 和 CLI 共享角色配置、连接与回执；缺少程序、错误协议�
 上述前置核对后，App Server / Responses 适配已实现；实际 `0.156.1` 通过了独立回环 SSE/MCP 的正常执行、相同线程续聊和故障检查，源码 App 与正式 CLI 的跨进程恢复也已通过。当前实施、验收与安装状态集中记录于 [Codex 验证](codex-backend-validation-2026-11-02.md)。实现采用已有受控 MCP，不增加 dynamicTools 回调层；目录过滤之外也对完整工具调用做授权和身份校验。
 
 DSH 仍需独立适配。其公开 [Agent API](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/core/agent/README.md) 区分进程内 initiator、Agent handle 和可替换 driver；跨进程传递所有权不能只依赖其进程内归属。接入时继续保留 Xuloom 的父子身份、原生回执和权限，不能仅启动命令后把退出码当成任务完成。
+
+## DSH 实现进展（0.1.16）
+
+上述 DSH 待适配项已按独立 headless 协议推进：使用已安装的 `0.2.1-rc.5`，最小显式 profile 只加载必要核心与受控 MCP，不挂载 base bundle、个人配置或遥测。正常跟进以真实 Session、v4 JSONL、已确认前缀与原生回执为依据；异常中断不自动重放。源码 App／正式 CLI 和故障专项已通过，最终全量、原安装与公开发行分别记录于 [本轮验证](dsh-backend-validation-2026-11-02.md)。此处保留前期依据，不将进程内 Agent API 冒充跨进程协议。

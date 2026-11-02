@@ -3,11 +3,12 @@ import asyncio
 import copy
 import hashlib
 import json
+import os
 from types import SimpleNamespace
 import uuid
 
 from xuloom.core.run_result import PersistenceError
-from xuloom.core.storage import artifact_directory, atomic_text
+from xuloom.core.storage import artifact_directory, atomic_text, IOPath
 from .program import resolve, verify
 
 
@@ -38,12 +39,12 @@ def recovery_status(state):
 
 def configure(engine, definition):
     backend = definition.get("backend", "native")
-    if backend not in {"native", "claude", "pi", "codex"}:
+    if backend not in {"native", "claude", "pi", "codex", "dsh"}:
         raise ValueError("Unsupported external agent backend: " + str(backend))
     if backend == "native":
         engine.tool_context.pop("external_backend", None)
         return
-    providers = {"openai"} if backend == "codex" else {"anthropic", "openai"} if backend == "pi" else {"anthropic"}
+    providers = {"openai"} if backend == "codex" else {"anthropic", "openai"} if backend in {"pi", "dsh"} else {"anthropic"}
     if engine.model_provider not in providers:
         raise ValueError("The external backend does not support this configured model protocol")
     if backend == "codex" and engine.reasoning_profile is not None and engine.reasoning_profile.get("adapter") != "openai":
@@ -62,7 +63,7 @@ def configure(engine, definition):
 def restore(engine, metadata):
     state = copy.deepcopy(metadata.get("external_agent"))
     if state is not None:
-        if not isinstance(state, dict) or state.get("backend") not in {"claude", "pi", "codex"} or state.get("phase") not in {"idle", "running", "interrupted"}:
+        if not isinstance(state, dict) or state.get("backend") not in {"claude", "pi", "codex", "dsh"} or state.get("phase") not in {"idle", "running", "interrupted"}:
             raise ValueError("Invalid external execution checkpoint")
         if str(uuid.UUID(state["session_id"])) != state["session_id"] or not isinstance(state.get("seen_tool_ids"), list):
             raise ValueError("Invalid external session identity")
@@ -74,6 +75,13 @@ def restore(engine, metadata):
                 raise ValueError("Invalid Codex history checkpoint")
         if type(state.get("message_cursor")) is not int or state["message_cursor"] < 0:
             raise ValueError("Invalid external message checkpoint")
+        if state['backend'] == 'dsh' and state.get('dsh_session_id') is not None:
+            from .dsh_history import identity
+            identity(state['dsh_session_id'])
+            if type(state.get('dsh_turn', 0)) is not int or state.get('dsh_turn', 0) < 0:
+                raise ValueError('Invalid DSH turn checkpoint')
+        if state['backend'] == 'dsh' and state.get('has_session') and (not state.get('dsh_session_id') or type(state.get('dsh_next_seq')) is not int or state['dsh_next_seq'] <= 0):
+            raise ValueError('Invalid DSH history checkpoint')
         if any(key in state for key in ("history_sha256", "history_offset", "entry_cursor")):
             digest = state.get("history_sha256", "")
             if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest) or type(state.get("history_offset")) is not int or state["history_offset"] <= 0 or not isinstance(state.get("entry_cursor"), str) or not state["entry_cursor"]:
@@ -88,7 +96,7 @@ def response(text, usage):
         usage=SimpleNamespace(**usage))
 
 
-async def prepare(engine, *, system_prompt, api_messages, model_name):
+async def prepare(engine, *, system_prompt, api_messages, model_name, input_types=None):
     from xuloom.core.model_inputs import validate_media, validate_transport
     validate_media(api_messages, engine._input_contract(model_name))
     validate_transport(api_messages, engine.model_provider)
@@ -118,8 +126,15 @@ async def prepare(engine, *, system_prompt, api_messages, model_name):
     content = []
     for value in inputs:
         content.extend(value if isinstance(value, list) else [{"type": "text", "text": value}])
+    if input_types is not None and any(block.get('type') not in input_types for block in content):
+        raise ExternalExecutionError('external_input_unsupported', 'This installed backend accepts text task input only; no media was discarded and no model request was started')
     owner = (engine.tool_context.get("delegation") or {}).get("owner_session_id") or engine.session_id
-    home = artifact_directory(engine.session_cwd) / owner / "external" / state["session_id"]
+    home = IOPath(artifact_directory(engine.session_cwd) / owner / "external" / state["session_id"])
+    # CreateProcess's current-directory limit is independent of filesystem long-path IO.
+    if os.name == 'nt' and binding['backend'] == 'dsh' and len(str(home)) >= 260:
+        raise ExternalExecutionError('external_directory_unsupported',
+            'DSH requires an owned execution directory shorter than 260 characters on Windows. '
+            'Choose a shorter XULOOM_DATA_DIR; no external process or model request was started')
     home.mkdir(parents=True, exist_ok=True)
     atomic_text(home / "instructions.txt", system_prompt)
     state.pop("result", None)
@@ -135,7 +150,7 @@ async def cleanup(engine, state, process, tasks, files):
     for task in tasks:
         if not task.done(): task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
-    for path in files: path.unlink(missing_ok=True)
+    for path in files: IOPath(path).unlink(missing_ok=True)
     if state["phase"] == "running":
         state["phase"] = "interrupted"
         if not engine.persist_session_state():
@@ -143,7 +158,9 @@ async def cleanup(engine, state, process, tasks, files):
 
 
 async def sample(engine, **kwargs):
-    if engine.tool_context["external_backend"]["backend"] == "codex":
+    if engine.tool_context["external_backend"]["backend"] == "dsh":
+        from .dsh import sample as execute
+    elif engine.tool_context["external_backend"]["backend"] == "codex":
         from .codex import sample as execute
     elif engine.tool_context["external_backend"]["backend"] == "pi":
         from .pi import sample as execute

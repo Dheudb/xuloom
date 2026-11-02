@@ -11,7 +11,11 @@ import tempfile
 REQUIRED = {"claude": ("--restricted", "--bare", "--tools", "--strict-mcp-config", "--input-format",
             "--output-format", "--include-partial-messages", "--system-prompt", "--session-id", "--resume", "--permission-prompts", "--setting-sources"),
     "pi": ("--mode", "--no-builtin-tools", "--no-extensions", "--no-approve", "--offline", "--no-context-files", "--session", "--session-id", "--session-dir"),
-    "codex": ("app-server", "--config", "--disable")}
+    "codex": ("app-server", "--config", "--disable"),
+    "dsh": ("--profile", "--dump-config")}
+PACKAGES = {"claude": "@anthropic-ai/claude-code", "pi": "@earendil-works/pi-coding-agent",
+    "codex": "@openai/codex", "dsh": "@deepseek-ai/dsh"}
+ENTRIES = {"pi": "dist/bundle/cli.js", "dsh": "lib/bin.js"}
 _probes = {}
 
 
@@ -47,12 +51,12 @@ def resolve(path=None, *, backend="claude", workspace=None):
             raise ValueError(backend + " is not installed; install it separately or choose native execution")
         candidate = Path(found)
         if os.name == "nt" and candidate.suffix.lower() in {".cmd", ".ps1"}:
-            package = candidate.parent / {"claude":"node_modules/@anthropic-ai/claude-code/package.json", "pi":"node_modules/@earendil-works/pi-coding-agent/package.json", "codex":"node_modules/@openai/codex/package.json"}[backend]
+            package = candidate.parent / ("node_modules/" + PACKAGES[backend] + "/package.json")
             try:
                 metadata = json.loads(package.read_text(encoding="utf-8"))
                 binary = metadata["bin"][backend]
-                expected = {"claude":"@anthropic-ai/claude-code", "pi":"@earendil-works/pi-coding-agent", "codex":"@openai/codex"}[backend]
-                allowed = {"claude":{"bin/claude.exe", "cli.js"}, "pi":{"dist/bundle/cli.js"}, "codex":{"bin/codex.js"}}[backend]
+                expected = PACKAGES[backend]
+                allowed = {"claude":{"bin/claude.exe", "cli.js"}, "pi":{ENTRIES["pi"]}, "codex":{"bin/codex.js"}, "dsh":{ENTRIES["dsh"]}}[backend]
                 if metadata["name"] != expected or binary not in allowed:
                     raise ValueError("Unknown installed agent launcher")
                 candidate = package.parent / binary
@@ -69,21 +73,32 @@ def resolve(path=None, *, backend="claude", workspace=None):
     candidate = candidate.resolve(strict=True)
     if not path and candidate.is_relative_to(workspace):
         raise ValueError("An implicit agent program cannot come from the task workspace")
-    if backend == "pi":
+    if backend in ENTRIES:
         try:
-            package = candidate.parents[2]
+            entry = ENTRIES[backend]
+            package = candidate.parents[len(Path(entry).parts) - 1]
             metadata = json.loads((package / "package.json").read_text(encoding="utf-8"))
-            if metadata["name"] != "@earendil-works/pi-coding-agent" or metadata["bin"]["pi"] != "dist/bundle/cli.js" or candidate != (package / metadata["bin"]["pi"]).resolve():
-                raise ValueError("Unknown Pi package entry")
+            if metadata["name"] != PACKAGES[backend] or metadata["bin"][backend] != entry or candidate != (package / entry).resolve():
+                raise ValueError("Unknown installed package entry")
             if not isinstance(metadata.get("version"), str) or not metadata["version"]:
-                raise ValueError("Pi package version is missing")
+                raise ValueError("Installed package version is missing")
+            if backend == "dsh" and metadata["version"] != "0.2.1-rc.5":
+                raise ValueError("This DSH version has not been verified against the controlled headless protocol")
             node = Path(shutil.which("node") or "").resolve(strict=True)
             if not node.is_file() or node.suffix.lower() not in {"", ".exe"} or node.is_relative_to(workspace):
-                raise ValueError("Pi requires an installed Node executable outside the task workspace")
+                raise ValueError("The backend requires an installed Node executable outside the task workspace")
         except (OSError, KeyError, ValueError, IndexError) as error:
-            raise ValueError("Select the installed Pi package's dist/bundle/cli.js and install Node >=22.19") from error
-        return {"backend": backend, "program": str(candidate), "sha256": _hash(candidate), "runtime": str(node), "runtime_sha256": _hash(node),
+            raise ValueError("Select the installed " + backend + " package's " + ENTRIES[backend] + " and a compatible Node runtime: " + str(error)) from error
+        result = {"backend": backend, "program": str(candidate), "sha256": _hash(candidate), "runtime": str(node), "runtime_sha256": _hash(node),
             "package_sha256": _hash(package / "package.json"), "version": str(metadata["version"])}
+        if backend == "dsh":
+            headless = package.parent / "dsh-headless"
+            headless_metadata = json.loads((headless / "package.json").read_text(encoding="utf-8"))
+            if headless_metadata.get("name") != "@deepseek-ai/dsh-headless" or headless_metadata.get("version") != metadata["version"]:
+                raise ValueError("DSH and its headless runtime versions must match")
+            result["headless_sha256"] = _hash(headless / "lib/index.js")
+            result["headless_package_sha256"] = _hash(headless / "package.json")
+        return result
     if candidate.suffix.lower() in {".cmd", ".bat", ".ps1", ".js"} or not candidate.is_file():
         raise ValueError("Select an installed executable, not a workspace command or shell script")
     return {"backend": backend, "program": str(candidate), "sha256": _hash(candidate)}
@@ -92,11 +107,11 @@ def resolve(path=None, *, backend="claude", workspace=None):
 async def verify(binding, *, workspace=None):
     if resolve(binding["program"], backend=binding["backend"], workspace=workspace) != binding:
         raise ValueError("External program changed; inspect it before creating a new worker")
-    cache = (binding["backend"], binding["sha256"], binding.get("runtime_sha256"), binding.get("package_sha256"))
+    cache = (binding["backend"], binding["sha256"], binding.get("runtime_sha256"), binding.get("package_sha256"), binding.get("headless_sha256"), binding.get("headless_package_sha256"))
     if cache in _probes:
         return _probes[cache]
     with tempfile.TemporaryDirectory(prefix="xuloom-program-probe-") as directory:
-        args = [binding["program"], "--help"] if binding["backend"] in {"claude", "codex"} else [binding["runtime"], binding["program"], "--no-approve", "--no-extensions", "--no-context-files", "--offline", "--help"]
+        args = [binding["program"], "--help"] if binding["backend"] in {"claude", "codex"} else [binding["runtime"], binding["program"], *([] if binding["backend"] == "dsh" else ["--no-approve", "--no-extensions", "--no-context-files", "--offline"]), "--help"]
         process = await asyncio.create_subprocess_exec(*args, cwd=directory,
             env=environment(Path(directory)), stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -109,7 +124,7 @@ async def verify(binding, *, workspace=None):
     text = stdout.decode("utf-8", errors="replace")
     if process.returncode or not supports(text, REQUIRED[binding["backend"]]):
         raise ValueError("This installed agent lacks the required controlled streaming interface")
-    _probes[cache] = {"controlled_tools": True, "stream_json": binding["backend"] == "claude", "rpc": binding["backend"] in {"pi", "codex"}}
+    _probes[cache] = {"controlled_tools": True, "stream_json": binding["backend"] in {"claude", "dsh"}, "rpc": binding["backend"] in {"pi", "codex"}}
     return _probes[cache]
 
 

@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import re
 
-from xuloom.core.storage import data_directory, history_root
+from xuloom.core.storage import data_directory, history_root, IOPath, logical_path
 
 _ID = r"[A-Za-z0-9_-]{1,128}"
 _LINK = re.compile(r"xuloom://chat/v1/([0-9a-f]{16})/(" + _ID + r")", re.ASCII)
@@ -41,7 +41,8 @@ def _read(path, root):
     # History may be removed while resolving. Never follow an address to a file
     # outside central storage, including Windows directory junctions.
     try:
-        path.resolve().relative_to(root.resolve())
+        path, root = IOPath(logical_path(path)), IOPath(logical_path(root))
+        logical_path(path.resolve()).relative_to(logical_path(root.resolve()))
         probe = path
         while probe != root:
             if probe.is_symlink() or getattr(probe, "is_junction", lambda: False)():

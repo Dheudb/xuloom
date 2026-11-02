@@ -1,4 +1,4 @@
-"""Own localhost service for App and formal CLI resuming an actual Pi worker."""
+"""Own localhost service for App and formal CLI resuming an installed worker."""
 import asyncio
 import json
 import os
@@ -18,9 +18,11 @@ from xuloom.core.config import save_config
 async def main():
     fixture = fixtures.ExternalFixture(); await fixture.asyncSetUp()
     try:
-        program = os.environ["XULOOM_TEST_PI_PROGRAM"]
+        backend = os.environ.get('XULOOM_TEST_DISCOVERY_BACKEND', 'pi')
+        if backend not in {'pi', 'dsh'}: raise ValueError('Unsupported discovery fixture backend')
+        program = os.environ['XULOOM_TEST_' + backend.upper() + '_PROGRAM']
         folder = fixture.root / ".xuloom/agents"; folder.mkdir(parents=True)
-        (folder / "discoverer.md").write_text("---\nname: discoverer\ndescription: inspect background tasks\nbackend: pi\nbackend_program: "
+        (folder / "discoverer.md").write_text("---\nname: discoverer\ndescription: inspect background tasks\nbackend: " + backend + "\nbackend_program: "
             + program.replace("\\", "/") + "\ntools: ['*']\n---\nComplete the assigned task.\n", encoding="utf8")
         model = CatalogModel(); phase, worker_id = "bootstrap", None
         parent_counts = {"bootstrap": 0, "app": 0, "cli": 0}

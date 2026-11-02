@@ -173,7 +173,7 @@ class MemoryLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unreadable_existing_summary_never_calls_model_or_overwrites_old_notes(self):
         Path(self.summary.memory_path).write_text('ORIGINAL EVIDENCE', encoding='utf-8')
-        with patch('xuloom.memory.session_memory.open', side_effect=PermissionError('controlled read failure'), create=True):
+        with patch('xuloom.memory.session_memory.IOPath.open', side_effect=PermissionError('controlled read failure')):
             with patch.object(self.summary, '_call_llm_for_update', AsyncMock(return_value='UNWANTED REPLACEMENT')) as call:
                 job = await self.job(self.summary); await job
                 call.assert_not_awaited()

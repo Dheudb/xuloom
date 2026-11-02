@@ -1,4 +1,4 @@
-# 可选外部 Agent：Claude Code / Pi / Codex
+# 可选外部 Agent：Claude Code / Pi / Codex / DSH
 
 Xuloom 的默认后端仍是原生 QueryEngine。`backend: claude` 让已有角色通过用户安装的 Claude Code 执行任务，继续使用 Xuloom 的队列、身份、工具授权、结果记录与取消入口；不会下载或捆绑另一个 Agent、模型权重或供应商 SDK。当前实际验收版本为 Windows Claude Code `2.1.267`，本地 HTTP/SSE 与实际 CLI 联动；没有调用真实供应商或使用个人登录。
 
@@ -66,6 +66,20 @@ Pi 需由用户另外安装，要求 Node 至少 `22.19`。程序路径留空时
 
 OpenAI Chat 使用模型真实 ID；“兼容”接口仍须遵守工具调用和流结束协议。这里只接入 Chat Completions，不假称支持 OpenAI Responses、Google 或所有供应商私有参数。用户已配置的 Thinking / effort 使用 Xuloom 原有参数适配器；明确关闭思考时不会再同时发送开启强度。模型输入能力已知时按声明限制，未知时保留原生透传，不在 CLI 内静默丢弃图片。
 
+### DSH 角色
+
+同一表单选择 **DSH · 已安装 CLI**，或在上述角色文件填写 `backend: dsh`。使用 **Anthropic Messages / OpenAI Chat Completions** 连接；不是 Responses 后端。当前核对的实际程序是 `@deepseek-ai/dsh 0.2.1-rc.5`、同版本 headless 包及 Node `24.14.0`。路径可留空在 PATH 查找，或填写已安装包 `lib/bin.js` 的绝对路径。未知协议版本在启动前拒绝，不自动下载 CLI，不使用个人 DSH 登录。
+
+Windows 文件存储支持长路径；进程的当前目录另受系统限制。DSH 所属执行目录达到 260 字符时，启动前明确报错，不发起模型请求；可将 `XULOOM_DATA_DIR` 设置为较短的绝对目录。该限制不等于历史文件不能超过 260 字符：原生历史的长目录仍用完整内容核对、保存及清理。
+
+DSH 每次调用使用自己的正式 headless 驱动与原生 Session。Xuloom 只组合所需核心、压缩、存储和 MCP 服务，不加载 DSH 的整个 base preset：文件、命令、子代理、Skill、插件管理、凭据和遥测插件均不自动启用。完整系统指令通过 DSH 的字面量 section 传入，保留 `{{...}}` 原文，不追加默认编程身份或额外规划请求。
+
+执行主机的模型 Key 留在 Xuloom 客户端。DSH 只获得本次有效的回环令牌，并在所属中央产物目录启动；因此不会由启动器读取项目 `.env`。MCP 的文件和命令仍在角色的实际工作目录执行。其独立配置、v4 原生 JSONL、完整输出、诊断和工具回执保存在同一个 worker 的中央历史中；正常跟进须核对真实 Session、历史位置、完整文件哈希及已确认前缀。
+
+DSH 已发布版的 JSON 过程事件有长度限制，不能直接作为完整结果。完成必须同时满足匹配的 session/turn 事件、`completed` 原生结束原因、正常进程退出、落盘历史与最终文字一致，以及全部原生工具回执对账。历史校验流式读取，不额外累积整份历史的工具正文。保存失败、外部工具调用变化或历史篡改不能显示 completed；无法确认的中断不自动重发任务。
+
+当前 DSH headless 的初始任务接口只接受文本；直接传入图片会在模型请求前明确拒绝，不能丢掉图片后继续。工具返回的图片可进入其原生模型上下文：受控 MCP 在发送前显式转换为 8-bit RGB/RGBA PNG，保留像素尺寸，随后核对实际不可变图像对象与回执哈希；原工具产物仍沿用 Xuloom 存档。单张最多 20 MB、4000 万像素，任一边最多 16384；无损转换超出限制会报错，不悄悄缩小后冒充原图。见 [DSH 专项验收](dsh-backend-validation-2026-11-02.md)。
+
 ## 权限、身份与输出
 
 - Claude 的原生执行工具关闭，用户/项目的 Claude 设置、插件和 Hook 不自动发现。只连接本任务拥有的本地 MCP 服务；安全的内部工具发现/结束控制不获得文件或命令权限。
@@ -91,7 +105,7 @@ OpenAI Chat 使用模型真实 ID；“兼容”接口仍须遵守工具调用�
 
 进程崩溃、停止确认被再次中断、结果未被外部历史完整接收、文件遭修改或保存失败，均不能变成可恢复成功；保留已有记录并拒绝自动重发。`external_recovery.resumable: false` 需先核对副作用。Claude 和 Codex 的异常中断仍采用此保守边界，不能从 Pi 的确认式停止推断其他后端也可恢复。Codex 正常完成后的续聊会校验实际 rollout 文件所属位置和 SHA256；缺失、变更或另一条线程不能变成空白恢复。相关本机实程序、故障及 App/CLI 检查见 [停止与恢复验证](external-recovery-validation-2026-11-02.md)和 [Codex 验证](codex-backend-validation-2026-11-02.md)。
 
-当前系统隔离后端不支持此外部进程时，在执行前拒绝，不退回宿主运行。工具授权也不等于对可信第三方程序本身建立 OS 沙箱。Linux/macOS 原生 CLI、不同安装版本、外部 SSH、工作区移动后的恢复和长时间真实模型仍需专项验收；DSH 尚未接入，不假装共用一种协议。完整外部中间对话已保存原始 JSONL，但尚未全部映射进子代理历史界面。
+当前系统隔离后端不支持此外部进程时，在执行前拒绝，不退回宿主运行。工具授权也不等于对可信第三方程序本身建立 OS 沙箱。Linux/macOS 原生 CLI、不同安装版本、外部 SSH、工作区移动后的恢复和长时间真实模型仍需专项验收。DSH 与 Claude／Codex 的未知中断也不自动重放，不能从 Pi 的确认式停止推断其他后端都可恢复。完整外部中间对话已保存原始 JSONL，但尚未全部映射进子代理历史界面。
 
 实现依据为 [Claude Code CLI 官方参数](https://code.claude.com/docs/en/cli-reference)。可选本地实程序检查通过 `XULOOM_TEST_CLAUDE_PROGRAM` 指定已安装二进制，运行 `tests/test_external_agents.py`；请求只访问测试回环接口，既不是模拟 CLI，也不是一次真实供应商验收。
 

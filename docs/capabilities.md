@@ -125,7 +125,7 @@ tools: [Read, Grep, Glob]
 
 相同地址和模型名也可能属于不同账户；worker 使用所选账户的能力声明，不猜另一账户，不继承主代理的思考强度或其他供应商的 fallback。跟进、排队、取消、保存与权限继续使用现有生命周期，不增加第二套调度器。Solo 仍不能启动这些角色。
 
-此能力是“原生子代理选择不同模型连接”。原生角色还可使用下面的 SSH 执行位置；已安装的 Claude Code/Pi/Codex 可通过[外部 CLI 后端](external-agents.md)接入，DSH 仍待适配；外部执行与模型连接选择是不同维度。
+此能力是“原生子代理选择不同模型连接”。原生角色还可使用下面的 SSH 执行位置；已安装的 Claude Code/Pi/Codex/DSH 可通过[外部 CLI 后端](external-agents.md)接入；外部执行与模型连接选择是不同维度。
 
 本地验收（2026-11-01）：最终源码 Python 3.12 全量 421 项（420 通过、1 跳过），桌面逻辑 55 项通过；源码和原 EXE 的扩展设置 E2E 通过。构建 `20261101-120609` 的包内 Python 异构/生命周期/正式 CLI 共 24 项通过。协议请求均发往隔离本地服务，不调用真实供应商或消耗用户额度；私人 Skill 不参与打包。
 
@@ -145,7 +145,7 @@ tools: [Read, Grep, Glob]
 
 ## 远端原生子代理
 
-原生角色可配置 `executor: ssh:连接ID` 使用另一执行主机。设置中选择 SSH 位置后读取该主机的模型列表，Skills/MCP 也在主机解析，不复制本机凭据和文件。派发、跟进、消息、取消和容量仍用现有生命周期。完整示例与恢复边界见 [原生 SSH 子代理](distributed-workers-plan.md)。本机 Claude Code/Pi/Codex 已有[可选后端](external-agents.md)；DSH 和外部 CLI 经 SSH 的完整联动仍待单独验收。
+原生角色可配置 `executor: ssh:连接ID` 使用另一执行主机。设置中选择 SSH 位置后读取该主机的模型列表，Skills/MCP 也在主机解析，不复制本机凭据和文件。派发、跟进、消息、取消和容量仍用现有生命周期。完整示例与恢复边界见 [原生 SSH 子代理](distributed-workers-plan.md)。本机 Claude Code/Pi/Codex/DSH 已有[可选后端](external-agents.md)；外部 CLI 经 SSH 的全部组合仍待单独验收。
 
 ## 向用户提问
 

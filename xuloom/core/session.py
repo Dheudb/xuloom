@@ -3,7 +3,7 @@ import json
 import time
 import hashlib
 from pathlib import Path
-from xuloom.core.storage import session_directory, data_directory
+from xuloom.core.storage import session_directory, data_directory, IOPath
 from xuloom.core.session_lock import SessionLock, SessionBusyError, SessionConflictError
 
 class SessionManager:
@@ -14,7 +14,7 @@ class SessionManager:
     def __init__(self, session_dir=None, cwd=None):
         self.cwd = os.path.realpath(cwd or os.getcwd())
         self.session_dir = str(session_dir if session_dir is not None else session_directory(cwd))
-        os.makedirs(self.session_dir, exist_ok=True)
+        IOPath(self.session_dir).mkdir(parents=True, exist_ok=True)
         self.last_save_error = ""
         self.last_save_path = ""
         self.last_save_ok = True
@@ -57,7 +57,7 @@ class SessionManager:
     @staticmethod
     def _version(path):
         try:
-            raw = Path(path).read_bytes()
+            raw = IOPath(path).read_bytes()
         except FileNotFoundError:
             return (0, None)
         payload = json.loads(raw)
@@ -86,7 +86,7 @@ class SessionManager:
 
     def load_subagent_transcript(self, agent_id):
         path = self.get_subagent_transcript_path(agent_id)
-        data = Path(path).read_bytes()
+        data = IOPath(path).read_bytes()
         payload = json.loads(data)
         self._versions[path] = (payload.get("revision", 0), hashlib.sha256(data).hexdigest())
         return payload
@@ -145,10 +145,10 @@ class SessionManager:
             
     def load_session_state(self, session_id: str) -> dict:
         path = os.path.join(self.session_dir, f"{session_id}.json")
-        if not os.path.exists(path):
+        if not IOPath(path).exists():
             return {"messages": [], "metadata": {}}
         try:
-            data = Path(path).read_bytes()
+            data = IOPath(path).read_bytes()
             payload = json.loads(data)
             self._versions[path] = (payload.get("revision", 0) if isinstance(payload, dict) else 0, hashlib.sha256(data).hexdigest())
             if isinstance(payload, list):
@@ -168,7 +168,7 @@ class SessionManager:
 
     def save_subagent_transcript(self, agent_id: str, payload: dict):
         subagent_dir = os.path.join(self.session_dir, "subagents")
-        os.makedirs(subagent_dir, exist_ok=True)
+        IOPath(subagent_dir).mkdir(parents=True, exist_ok=True)
         path = os.path.join(subagent_dir, f"{agent_id}.json")
         try:
             owner = payload.get("session_id") or payload.get("metadata", {}).get("delegation", {}).get("owner_session_id") or agent_id
@@ -185,29 +185,29 @@ class SessionManager:
 
     def get_subagent_transcript_path(self, agent_id: str) -> str:
         subagent_dir = os.path.join(self.session_dir, "subagents")
-        os.makedirs(subagent_dir, exist_ok=True)
+        IOPath(subagent_dir).mkdir(parents=True, exist_ok=True)
         return os.path.join(subagent_dir, f"{agent_id}.json")
             
     def get_recent_sessions(self) -> str:
         """Returns string representation of the last 5 sessions."""
         try:
-            files = [f for f in os.listdir(self.session_dir) if f.endswith('.json')]
+            files = [f for f in os.listdir(IOPath(self.session_dir)) if f.endswith('.json')]
             if not files:
                 return "No existing sessions found."
                 
             sorted_files = sorted(
                 files, 
-                key=lambda x: os.path.getmtime(os.path.join(self.session_dir, x)),
+                key=lambda x: IOPath(self.session_dir, x).stat().st_mtime,
                 reverse=True
             )
             
             out = "[bold cyan]Active Sessions Cache[/bold cyan]\n"
             for f in sorted_files[:5]:
                 sid = f.replace('.json', '')
-                mtime = os.path.getmtime(os.path.join(self.session_dir, f))
+                mtime = IOPath(self.session_dir, f).stat().st_mtime
                 time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(mtime))
                 # Listing history must not replace the loaded execution snapshot's revision.
-                state = json.loads(Path(self.session_dir, f).read_bytes())
+                state = json.loads(IOPath(self.session_dir, f).read_bytes())
                 if not isinstance(state, dict):
                     state = {}
                 metadata = state.get("metadata", {})
@@ -230,13 +230,13 @@ class SessionManager:
         self.acquire_writer(session_id)
         try:
             path = os.path.join(self.session_dir, f"{session_id}.json")
-            found = os.path.exists(path)
+            found = IOPath(path).exists()
             if self.central:
                 from xuloom.core.session_mutation import mutate
                 mutate({"action": "delete", "sessions": [{"project": self.cwd, "session_id": session_id}]}, held=self._writers)
             else:
                 if found:
-                    os.unlink(path)
+                    IOPath(path).unlink()
                 self._cleanup_subagents_for_session(session_id)
             self._cleanup_plan_files_for_session(session_id)
             self._versions.pop(path, None)
@@ -248,17 +248,17 @@ class SessionManager:
     def _cleanup_subagents_for_session(self, session_id: str):
         """Remove subagent transcripts that belong to the given session."""
         subagent_dir = os.path.join(self.session_dir, "subagents")
-        if not os.path.isdir(subagent_dir):
+        if not IOPath(subagent_dir).is_dir():
             return
-        for fname in os.listdir(subagent_dir):
+        for fname in os.listdir(IOPath(subagent_dir)):
             if not fname.endswith(".json"):
                 continue
             fpath = os.path.join(subagent_dir, fname)
             try:
-                with open(fpath, "r", encoding="utf-8") as f:
+                with IOPath(fpath).open("r", encoding="utf-8") as f:
                     data = json.load(f)
                 if isinstance(data, dict) and data.get("session_id") == session_id:
-                    os.unlink(fpath)
+                    IOPath(fpath).unlink()
             except Exception:
                 pass
 
@@ -285,10 +285,10 @@ class SessionManager:
 
     def list_session_ids(self) -> list:
         try:
-            files = [f for f in os.listdir(self.session_dir) if f.endswith('.json')]
+            files = [f for f in os.listdir(IOPath(self.session_dir)) if f.endswith('.json')]
             return [f.replace('.json', '') for f in sorted(
                 files,
-                key=lambda x: os.path.getmtime(os.path.join(self.session_dir, x)),
+                key=lambda x: IOPath(self.session_dir, x).stat().st_mtime,
                 reverse=True,
             )]
         except Exception:
