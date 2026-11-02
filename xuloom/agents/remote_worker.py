@@ -36,6 +36,7 @@ class RemoteWorker:
         self.opened = False
         self.proven_closed = False
         self.submitted = False
+        self.receipt_bound = False
 
     def row(self):
         return self.tool._worker(self.identity)
@@ -46,6 +47,31 @@ class RemoteWorker:
         if spec["open"]["owner"]["parent_session_id"] != self.tool.context["session_id"] or spec["open"]["owner"]["agent_id"] != self.identity:
             raise ValueError("Remote worker does not belong to this native conversation")
         return spec
+
+    def _bind_receipt(self):
+        """Restore the local checkpoint once under its parent writer lease."""
+        manager = self.tool.context.get('session_manager')
+        if manager is None:
+            raise PersistenceError('Remote worker receipt storage is unavailable')
+        manager.acquire_writer(self.tool.context['session_id'])
+        if self.receipt_bound:
+            manager.check_subagent_current(self.identity)
+            return
+        try:
+            saved = manager.load_subagent_transcript(self.identity)
+        except FileNotFoundError:
+            if self.row()['dispatch'].get('resume'):
+                raise PersistenceError('The previous remote worker receipt is missing; no continuation was started') from None
+        except (OSError, ValueError, TypeError, AttributeError) as error:
+            raise PersistenceError('The remote worker receipt could not be loaded; existing records were preserved') from error
+        else:
+            if not isinstance(saved, dict) or saved.get('session_id') != self.tool.context['session_id'] or saved.get('agent_id') != self.identity:
+                raise PersistenceError('The remote worker receipt belongs to a different owner; existing records were preserved')
+            reference = saved.get('remote_reference')
+            if reference is not None and (not isinstance(reference, dict) or
+                    reference.get('session_id') != wire.session_id(self.specification()['open']['owner'])):
+                raise PersistenceError('The remote worker receipt identity changed; existing records were preserved')
+        self.receipt_bound = True
 
     def snapshot(self, value, *, current=True):
         spec = self.specification()
@@ -106,6 +132,7 @@ class RemoteWorker:
             pass  # No replay. A disconnected host cannot receive this grant.
 
     async def connect(self):
+        self._bind_receipt()
         spec = self.specification()
         if self.client is None or self.client.closed:
             if self.client is not None:
@@ -180,6 +207,7 @@ class RemoteWorker:
         self.leases.clear()
 
     async def finish(self, snapshot=None, *, unknown=False, text="", cancelled=False):
+        self._bind_receipt()
         row = self.row()
         if snapshot is not None:
             snapshot = self.snapshot(snapshot)

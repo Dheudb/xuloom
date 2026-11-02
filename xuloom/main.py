@@ -233,7 +233,6 @@ def print_welcome_screen():
     )
     lower_table.add_row("", "", "", "")
 
-    protocols = ["anthropic", "openai", "local"]
     def _p_indicator(name):
         if display_provider and name.startswith(display_provider):
             return f"[green]● {name}[/green]"

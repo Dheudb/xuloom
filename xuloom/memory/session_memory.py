@@ -8,10 +8,7 @@ then used during context compaction to preserve important session state.
 
 import asyncio
 import copy
-import hashlib
-import json
 from xuloom.core.storage import atomic_text, data_directory, migrate_user_file, IOPath
-import time
 from pathlib import Path
 from typing import Optional
 

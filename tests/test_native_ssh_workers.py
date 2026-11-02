@@ -9,6 +9,7 @@ from unittest.mock import patch
 from tests import test_remote_ssh as remote, ssh_fixture
 from xuloom.agents.registry import AgentRegistry
 from xuloom.core.engine import QueryEngine
+from xuloom.core.storage import IOPath
 
 
 @unittest.skipUnless(ssh_fixture.paramiko is not None and shutil.which("ssh"), "Development SSH fixture and OpenSSH required")
@@ -37,6 +38,62 @@ class NativeSSHTests(unittest.IsolatedAsyncioTestCase):
     async def spawn(self, **kwargs):
         return json.loads(await self.tool.execute(prompt="Say hello from your execution host", subagent_type="remote-review",
             response_format="json", **kwargs))
+
+    async def restore_controller(self):
+        identity = self.engine.session_id
+        await self.engine.aclose()
+        self.engine = QueryEngine(model='replacement-parent', model_provider='openai',
+            api_key='replacement-key-never-transfer', api_base_url=self.fixture.local.base + '/parent/v1', cwd=self.root)
+        self.assertTrue(self.engine.load_session(identity))
+        self.tool = self.engine.available_tools['agent_tool']
+
+    async def test_restored_controller_saves_the_same_remote_worker_receipt(self):
+        row = (await self.spawn(run_in_background=False))['agents'][0]
+        self.assertEqual(row['status'], 'completed', row)
+        before = self.tool._worker(row['agent_id'])['remote_reference']
+        await self.restore_controller()
+        result = json.loads(await self.tool.execute(action='followup', agent_id=row['agent_id'], prompt='Continue', response_format='json'))
+        self.assertEqual(result['status'], 'completed', result)
+        self.assertEqual(result['remote_reference']['session_id'], before['session_id'])
+        saved = self.engine.session_manager.load_subagent_transcript(row['agent_id'])
+        self.assertEqual(saved['status'], 'completed')
+        self.assertGreater(saved['revision'], 1)
+        self.assertEqual(len(self.fixture.local.records), 2)
+
+    async def test_foreign_local_receipt_is_not_overwritten_or_used_to_start_remote_work(self):
+        row = (await self.spawn(run_in_background=False))['agents'][0]
+        path = IOPath(self.engine.session_manager.get_subagent_transcript_path(row['agent_id']))
+        await self.restore_controller()
+        saved = json.loads(path.read_text(encoding='utf-8')); saved['session_id'] = 'another-parent'
+        preserved = json.dumps(saved).encode(); path.write_bytes(preserved)
+        channels, requests = len(self.fixture.server.commands), len(self.fixture.local.records)
+        result = json.loads(await self.tool.execute(action='followup', agent_id=row['agent_id'], prompt='Must not run', response_format='json'))
+        self.assertEqual(result['status'], 'crashed', result)
+        self.assertEqual(path.read_bytes(), preserved)
+        self.assertEqual((len(self.fixture.server.commands), len(self.fixture.local.records)), (channels, requests))
+
+    async def test_missing_local_receipt_is_not_recreated_to_continue_a_previous_worker(self):
+        row = (await self.spawn(run_in_background=False))['agents'][0]
+        path = IOPath(self.engine.session_manager.get_subagent_transcript_path(row['agent_id']))
+        await self.restore_controller(); path.unlink()
+        channels, requests = len(self.fixture.server.commands), len(self.fixture.local.records)
+        result = json.loads(await self.tool.execute(action='followup', agent_id=row['agent_id'], prompt='Must not run', response_format='json'))
+        self.assertEqual(result['status'], 'crashed', result)
+        self.assertFalse(path.exists())
+        self.assertEqual((len(self.fixture.server.commands), len(self.fixture.local.records)), (channels, requests))
+
+    async def test_changed_local_remote_identity_is_preserved_before_connecting(self):
+        row = (await self.spawn(run_in_background=False))['agents'][0]
+        path = IOPath(self.engine.session_manager.get_subagent_transcript_path(row['agent_id']))
+        await self.restore_controller()
+        saved = json.loads(path.read_text(encoding='utf-8'))
+        saved['remote_reference']['session_id'] = '00000000-0000-0000-0000-000000000001'
+        preserved = json.dumps(saved).encode(); path.write_bytes(preserved)
+        channels, requests = len(self.fixture.server.commands), len(self.fixture.local.records)
+        result = json.loads(await self.tool.execute(action='followup', agent_id=row['agent_id'], prompt='Must not run', response_format='json'))
+        self.assertEqual(result['status'], 'crashed', result)
+        self.assertEqual(path.read_bytes(), preserved)
+        self.assertEqual((len(self.fixture.server.commands), len(self.fixture.local.records)), (channels, requests))
 
     async def test_native_role_uses_host_key_and_saved_remote_history_for_followup(self):
         answer = await self.spawn(run_in_background=False)

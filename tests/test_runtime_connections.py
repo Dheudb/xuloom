@@ -66,7 +66,10 @@ class RuntimeConnectionTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await asyncio.gather(*(engine.aclose() for engine in self.engines))
         await asyncio.to_thread(self.server.shutdown); self.server.server_close(); self.thread.join(timeout=5)
-        self.tokens.stop(); self.env.stop(); self.temp.cleanup()
+        self.tokens.stop(); self.env.stop()
+        from tests.owned_cleanup import remove_fixture
+        remove_fixture(self.root, 'xuloom connections ')
+        self.temp.cleanup()
 
     def engine(self, label, provider="openai", key=None, mode="direct"):
         engine = QueryEngine(model="opaque-model", model_provider=provider, api_base_url=self.base + "/" + label + ("/v1" if provider == "openai" else ""),

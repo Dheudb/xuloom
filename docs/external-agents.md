@@ -105,7 +105,7 @@ DSH 已发布版的 JSON 过程事件有长度限制，不能直接作为完整�
 
 进程崩溃、停止确认被再次中断、结果未被外部历史完整接收、文件遭修改或保存失败，均不能变成可恢复成功；保留已有记录并拒绝自动重发。`external_recovery.resumable: false` 需先核对副作用。Claude 和 Codex 的异常中断仍采用此保守边界，不能从 Pi 的确认式停止推断其他后端也可恢复。Codex 正常完成后的续聊会校验实际 rollout 文件所属位置和 SHA256；缺失、变更或另一条线程不能变成空白恢复。相关本机实程序、故障及 App/CLI 检查见 [停止与恢复验证](external-recovery-validation-2026-11-02.md)和 [Codex 验证](codex-backend-validation-2026-11-02.md)。
 
-当前系统隔离后端不支持此外部进程时，在执行前拒绝，不退回宿主运行。工具授权也不等于对可信第三方程序本身建立 OS 沙箱。Linux/macOS 原生 CLI、不同安装版本、外部 SSH、工作区移动后的恢复和长时间真实模型仍需专项验收。DSH 与 Claude／Codex 的未知中断也不自动重放，不能从 Pi 的确认式停止推断其他后端都可恢复。完整外部中间对话已保存原始 JSONL，但尚未全部映射进子代理历史界面。
+当前系统隔离后端不支持此外部进程时，在执行前拒绝，不退回宿主运行。工具授权也不等于对可信第三方程序本身建立 OS 沙箱。四个后端经加密回环 SSH 的基础检查及成品控制端恢复见[专项记录](external-ssh-validation-2026-11-02.md)。Linux/macOS 原生、不同安装版本、其余外部 SSH 故障组合、工作区移动后的恢复和长时间真实模型仍需专项验收。DSH 与 Claude／Codex 的未知中断也不自动重放，不能从 Pi 的确认式停止推断其他后端都可恢复。完整外部中间对话已保存原始 JSONL，但尚未全部映射进子代理历史界面。
 
 实现依据为 [Claude Code CLI 官方参数](https://code.claude.com/docs/en/cli-reference)。可选本地实程序检查通过 `XULOOM_TEST_CLAUDE_PROGRAM` 指定已安装二进制，运行 `tests/test_external_agents.py`；请求只访问测试回环接口，既不是模拟 CLI，也不是一次真实供应商验收。
 

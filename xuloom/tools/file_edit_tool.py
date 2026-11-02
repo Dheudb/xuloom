@@ -4,7 +4,7 @@ import re
 from pydantic import BaseModel, Field
 from xuloom.tools.base import BaseAgenticTool
 from xuloom.context.tool_results import build_tool_result
-from xuloom.features.file_changes import record_written_file, read_snapshot, check_observed_file, write_file_text
+from xuloom.features.file_changes import record_written_file, check_observed_file, write_file_text
 
 class FileEditToolInput(BaseModel):
     file_path: str = Field(..., description="The absolute path to the file to modify")
@@ -22,8 +22,6 @@ class FileEditTool(BaseAgenticTool):
     def _cache(self):
         return self.context.get("file_state_cache")
 
-    def _artifact_tracker(self):
-        return self.context.get("artifact_tracker")
 
     def _write_queue(self):
         return self.context.get("incremental_write_queue")
@@ -166,9 +164,6 @@ class FileEditTool(BaseAgenticTool):
         abs_path = os.path.abspath(file_path)
         file_exists = os.path.exists(abs_path)
         cache = self._cache()
-        tracker = self._artifact_tracker()
-        agent_id = self.context.get("agent_id")
-        session_id = self.context.get("session_id")
         
         # 1. THE BLIND-EDIT LOCK CHECK (Prior Read Required unless constructing new)
         has_read = bool(

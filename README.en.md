@@ -10,7 +10,7 @@ Download the Windows x64 ZIP from Releases, extract the whole directory, and run
 
 Open **Settings → Model connections**, enter your API endpoint, protocol, model ID and key. A connection can list multiple models; multiple providers are supported. OpenAI-compatible Chat Completions and Anthropic Messages are supported. Local model servers must expose a supported interface. Text completion alone does not establish compatibility with tools or images.
 
-Choose **New conversation** to get an independent working directory, or open an existing folder. A Git repository is not required. Source version: **v0.1.16**; see Releases for currently published binaries and checksums. macOS/Linux desktop distributions are not available.
+Choose **New conversation** to get an independent working directory, or open an existing folder. A Git repository is not required. Source version: **v0.1.17**; see Releases for currently published binaries and checksums. macOS/Linux desktop distributions are not available.
 
 SSH conversations can preview remote workspace HTML and its relative assets through the existing encrypted connection. There is no webpage port forwarding, local-path fallback or model request. `xuloom remote preview <connection> <HTML path> --json` queries the same authorized resource; optional bounded chunks support programmatic clients. Both endpoints need this protocol. See [remote HTML](docs/remote.md#网页预览与资源读取).
 

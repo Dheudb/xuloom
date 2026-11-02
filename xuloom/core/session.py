@@ -81,6 +81,12 @@ class SessionManager:
 
     def check_current(self, session_id):
         path = os.path.join(self.session_dir, f"{session_id}.json")
+        self._check_current_path(path)
+
+    def check_subagent_current(self, agent_id):
+        self._check_current_path(self.get_subagent_transcript_path(agent_id))
+
+    def _check_current_path(self, path):
         if self._version(path) != self._versions.get(path, (0, None)):
             raise SessionConflictError("Session changed since it was loaded. Reload before executing; the existing checkpoint was preserved.")
 

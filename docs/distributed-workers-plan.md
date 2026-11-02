@@ -1,10 +1,10 @@
 # 原生 SSH 子代理
 
-v0.1.6 源码已把现有子代理队列接到 SSH 执行主机。App 与正式 CLI 的加密回环端到端检查已通过；最终全量、原安装与发布状态见[验证记录](distributed-workers-validation-2026-11-01.md)。源码通过不等于安装包已经发布。Codex、Claude Code、Pi、DSH 外部 CLI 仍按[独立后端计划](external-agents-plan.md)接入，不能把原生 SSH worker 当成它们已完成。
+v0.1.6 源码已把现有子代理队列接到 SSH 执行主机。App 与正式 CLI 的加密回环端到端检查已通过；最终全量、原安装与发布状态见[验证记录](distributed-workers-validation-2026-11-01.md)。源码通过不等于安装包已经发布。Codex、Claude Code、Pi、DSH 外部 CLI 已使用同一 worker 入口接入；具体加密回环、控制端恢复与成品检查见[外部 SSH 专项](external-ssh-validation-2026-11-02.md)，其余故障和跨平台范围仍按[后端计划](external-agents-plan.md)验收。
 
 ## 配置和使用
 
-1. 两端安装兼容的 Xuloom v0.1.6。使用系统 OpenSSH，先在终端登录并确认主机密钥；框架不保存密码或私钥。
+1. 两端安装兼容的 Xuloom，建议使用同一发行版本；启动时会检查实际 worker 协议，不静默降级。使用系统 OpenSSH，先在终端登录并确认主机密钥；框架不保存密码或私钥。
 2. 在**设置 → SSH 远程**配置连接、远端绝对工作目录、Python 路径和平台。模型 Key、Skills、MCP 在执行主机配置。
 3. 在**设置 → Subagents → 新建**选择执行位置。选择 SSH 后，连接和模型列表从该主机读取；保存定义不请求聊天模型。
 4. 填写角色描述、任务指令、需要的技能和工具。所需 Skill 必须存在于执行主机，不自动复制本机私人文件。
@@ -63,4 +63,4 @@ xuloom exec "使用 lab-review 复核指定资料，再汇总结果" --cwd /path
 
 已经检查真实加密回环 SSH、真实 SDK 到本地 HTTP/SSE、排队、异构绑定、权限拒绝、限额、跟进、消息/取消、只读历史和 App/CLI。开发用 Paramiko 不进入运行依赖。
 
-两台物理主机、macOS/Linux 原生、真实供应商长任务和外部 CLI 仍单列验证，没有把本地协议检查当成生产成熟证明。[完整持续目标](product-roadmap.md)继续有效。
+四种外部 CLI 已加入[加密 SSH 与成品控制端专项](external-ssh-validation-2026-11-02.md)。两台物理主机、macOS/Linux 原生、真实供应商长任务及其余中断／磁盘故障仍单列验证，没有把本地协议检查当成生产成熟证明。[完整持续目标](product-roadmap.md)继续有效。

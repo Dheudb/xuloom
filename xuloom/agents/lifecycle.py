@@ -5,7 +5,6 @@ import json
 import re
 import time
 import uuid
-from pathlib import Path
 
 
 def concurrency_limit(context):
@@ -85,7 +84,6 @@ class AgentLifecycle:
         manager = self.context.get("session_manager")
         if manager is None:
             raise ValueError("Subagent transcript storage is unavailable")
-        path = Path(manager.get_subagent_transcript_path(row["agent_id"]))
         raw = manager.load_subagent_transcript(row["agent_id"])
         if not isinstance(raw, dict) or not isinstance(raw.get("messages"), list):
             raise ValueError("Invalid subagent transcript")
