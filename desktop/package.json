@@ -1,6 +1,6 @@
 {
   "name": "xuloom-desktop",
-  "version": "0.1.20",
+  "version": "0.1.21",
   "private": true,
   "type": "module",
   "description": "Xuloom desktop workbench",
@@ -17,6 +17,7 @@
     "test:preferences": "node tests/preferences.e2e.cjs",
     "test:shutdown": "node tests/shutdown.e2e.cjs",
     "test:goals": "node tests/goals.e2e.cjs",
+    "test:pipeline": "node tests/pipeline.e2e.cjs",
     "test:collaboration": "node tests/collaboration.e2e.cjs",
     "test:message-actions": "node tests/message-actions.e2e.cjs",
     "test:composer": "node tests/composer.e2e.cjs",

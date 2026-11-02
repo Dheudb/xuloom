@@ -49,7 +49,7 @@ def parser():
     mode.add_argument("--resolve", metavar="URL")
     link.add_argument("--remote", metavar="CONNECTION_ID", help="Verify an existing SSH session and create its link")
     link.add_argument("--json", action="store_true")
-    for name in ("exec", "goal", "schedule"):
+    for name in ("exec", "goal", "schedule", "pipeline"):
         item = sub.add_parser(name)
         item.add_argument("--cwd", default=os.getcwd())
         item.add_argument("--session", help="Existing session ID; required for resume/control or scheduling an existing conversation")
@@ -62,7 +62,11 @@ def parser():
                           help="Delegation policy, independent of reasoning and permissions; resume keeps the saved mode unless supplied")
         item.add_argument("--effort", choices=("default", *EFFORTS), help="Model reasoning effort, independent of collaboration")
         item.add_argument("--thinking", choices=("default", "enabled", "disabled"), help="Requires the model's declared Thinking parameter format")
-        if name == "exec": item.add_argument("prompt", nargs="?", help="Task text, or - to read UTF-8 stdin")
+        if name == "pipeline":
+            item.add_argument("action", choices=("start", "resume", "tree"))
+            item.add_argument("--run-id", help="Stable run identity; required for start/resume")
+            item.add_argument("--spec", help="UTF-8 JSON file containing items and stages (start only)")
+        elif name == "exec": item.add_argument("prompt", nargs="?", help="Task text, or - to read UTF-8 stdin")
         else:
             item.add_argument("action", choices=("start", "run", "pause", "resume", "cancel", "accept", "status") if name == "goal" else ("add", "list", "pause", "resume", "cancel", "serve"))
             item.add_argument("prompt", nargs="?", help="Goal objective or scheduled message")
@@ -139,6 +143,10 @@ async def open_engine(args, emit):
 
 
 async def dispatch(args, emit):
+    if args.command == "pipeline" and args.action == "tree":
+        from xuloom.agents.pipeline import read_tree
+        if not args.session: raise ValueError("--session is required")
+        return {"ok": True, "reason": "completed", **read_tree(args.cwd, args.session, args.run_id)}
     if args.command == "transcript":
         from xuloom.features.agent_history import inspect
         return {"ok": True, "reason": "completed", "transcript": await inspect(args.cwd, args.session,
@@ -218,9 +226,20 @@ async def dispatch(args, emit):
             await asyncio.sleep(5)
     if args.command == "goal" and args.action != "start" and not args.session:
         raise ValueError("--session is required")
+    if args.command == "pipeline":
+        if not args.run_id: raise ValueError("--run-id is required")
+        if args.action == "resume" and not args.session: raise ValueError("--session is required for resume")
+        if args.action == "start" and not args.spec: raise ValueError("--spec is required for start")
     engine = await open_engine(args, emit)
     try:
-        if args.command == "exec":
+        if args.command == "pipeline":
+            spec = json.loads(Path(args.spec).read_text(encoding="utf-8")) if args.action == "start" else {}
+            if not isinstance(spec, dict) or set(spec) != {"items", "stages"} and args.action == "start":
+                raise ValueError("Pipeline spec must contain only items and stages")
+            receipt = await engine.agents("pipeline", run_id=args.run_id, **spec)
+            complete = receipt["ok"] and receipt["data"]["runs"][0]["status"] == "completed"
+            result = {"ok": bool(complete), "reason": "completed" if complete else "blocked", "receipt": receipt}
+        elif args.command == "exec":
             prompt = sys.stdin.read() if args.prompt == "-" or args.prompt is None and not sys.stdin.isatty() else args.prompt
             if not prompt or not prompt.strip(): raise ValueError("Task text is required")
             result = await stream(engine, prompt, args.skill, emit)

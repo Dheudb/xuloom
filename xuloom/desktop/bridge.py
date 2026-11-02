@@ -879,6 +879,15 @@ class DesktopBridge:
             if method == "agents.resume_queue":
                 return json.loads(await self.engine.available_tools["agent_tool"].execute(action="resume_queue", agent_ids=params.get("agentIds")))
             return json.loads(await self.engine.available_tools["agent_tool"].execute(action="cancel", agent_id=params["agentId"]))
+        if method == "agents.tree":
+            from xuloom.agents.pipeline import tree, read_tree
+            return tree(self.engine.tool_context, params.get("runId")) if self.engine else read_tree(str(self.cwd), self.resume_id, params.get("runId")) if self.resume_id else {"runs": []}
+        if method == "agents.pipeline":
+            self.require_idle()
+            engine = await self.ensure_engine(write=True)
+            engine.abort_event.clear()
+            self.turn_task = asyncio.create_task(self.pipeline_control(engine, params))
+            return {"started": True}
         if method in {"agents.list", "agents.capacity"}:
             await self.ensure_engine()
             return json.loads(await self.engine.available_tools["agent_tool"].execute(action=method.split(".")[1]))
@@ -910,6 +919,19 @@ class DesktopBridge:
         if method == "changes":
             return await git_changes(self.cwd)
         raise ValueError("Unknown method: " + method)
+
+    async def pipeline_control(self, engine, params):
+        self.emit({"type": "operation_started", "operation": "pipeline"})
+        try:
+            receipt = await engine.agents("pipeline", run_id=params.get("runId"), **params.get("spec", {}))
+            if not receipt["ok"] or receipt["data"]["runs"][0]["status"] != "completed":
+                self.emit({"type": "operation_error", "message": "流水线未完成，请查看运行树及子代理回执；中断操作不会自动重放。"})
+        except asyncio.CancelledError:
+            self.emit({"type": "operation_error", "message": "流水线已停止，已保存结果保留。"})
+        except Exception as error:
+            self.emit({"type": "operation_error", "message": str(error)})
+        finally:
+            self.emit({"type": "operation_finished", "operation": "pipeline"})
 
     async def media_control(self, engine, action, identity):
         self.emit({"type": "operation_started", "operation": "media", "jobId": identity})

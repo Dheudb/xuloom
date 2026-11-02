@@ -178,6 +178,7 @@ macOS/Linux 激活 `.venv/bin/activate` 后使用 `xuloom`。批处理使用 `xu
 | 模型、代理网络和接口兼容 | [模型](docs/models.md) |
 | Skills、角色字段、作用域、协作额度 | [扩展](docs/capabilities.md) |
 | 原生子代理生命周期与程序接入 | [执行接口](docs/framework.md) |
+| 任一／全部汇合、逐项流水线、运行树与恢复 | [协作组合](docs/coordination.md) |
 | 目标、非交互 CLI、定时唤醒 | [目标与调度](docs/goals-and-schedules.md) |
 | 测试、构建与项目结构 | [开发](docs/development.md) · [架构](docs/architecture.md) |
 

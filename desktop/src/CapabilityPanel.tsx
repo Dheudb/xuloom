@@ -21,6 +21,7 @@ import CapabilityGuide from "./CapabilityGuide";
 import ActivityPanel from "./ActivityPanel";
 import WorkspaceTree from "./WorkspaceTree";
 import WorkerHistory from "./WorkerHistory";
+import PipelineTree from "./PipelineTree";
 
 export default function CapabilityPanel({
   session,
@@ -237,6 +238,8 @@ export default function CapabilityPanel({
               </button>
               <button className="capability-guide-link" onClick={() => setGuide("agents")}>Subagent 怎么配置？查看目录和示例</button>
               <div className="panel-scroll">
+                <PipelineTree sessionId={session.id} busy={session.busy || !!session.controlledExecution} invoke={invoke} onError={onError}
+                  onHistory={(id, name) => setHistoryWorker({ id, name })} />
                 {session.workers.length > 0 && (
                   <>
                     <span className="section-label">会话任务</span>

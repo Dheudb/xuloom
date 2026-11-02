@@ -87,6 +87,8 @@ const engineMethods = new Set([
   "agents.cancel",
   "agents.list",
   "agents.capacity",
+  "agents.tree",
+  "agents.pipeline",
   "config.save",
   "config.select",
   "config.reasoning",

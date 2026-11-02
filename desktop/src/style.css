@@ -1955,3 +1955,17 @@ body.panel-resizing iframe { pointer-events: none; }
 .history-image { display: block; max-width: 100%; max-height: 65vh; object-fit: contain; }
 .worker-history-footer { display: flex; justify-content: center; padding: 22px 0 0; color: var(--muted); font-size: 12px; }
 .worker-history-error { color: #b44832; overflow-wrap: anywhere; }
+/* A projection of worker records, rather than a second task dashboard. */
+.pipeline-tree { padding: 12px 0 18px; border-bottom: 1px solid var(--border, #e5e9ed); margin-bottom: 16px; }
+.pipeline-tree > small, .pipeline-run > small { display: block; color: var(--muted, #718096); margin-top: 8px; line-height: 1.6; }
+.pipeline-tree .card-heading { margin-bottom: 6px; }
+.pipeline-tree .card-heading .icon-button { margin-left: auto; }
+.pipeline-run { margin-top: 12px; }
+.pipeline-run summary { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px 0; font-size: 12px; }
+.pipeline-run summary > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pipeline-run small { color: var(--muted, #718096); font-size: 11px; }
+.pipeline-run > details { margin-left: 10px; padding-left: 10px; border-left: 1px solid var(--border, #e5e9ed); }
+.pipeline-stage { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 3px 0 3px 10px; }
+.pipeline-stage > small { margin-left: auto; }
+.pipeline-stage > .bad { flex-basis: 100%; overflow-wrap: anywhere; }
+.pipeline-run details[open] > summary > .pipeline-chevron, .pipeline-run[open] > summary > .pipeline-chevron { transform: rotate(90deg); }

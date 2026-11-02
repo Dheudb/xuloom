@@ -99,7 +99,7 @@ class AgentLifecycle:
             raise ValueError("Worker transcript does not match its frozen model")
         return raw
 
-    async def _manage_worker(self, action, agent_id, prompt, timeout_ms, agent_ids, run_in_background):
+    async def _manage_worker(self, action, agent_id, prompt, timeout_ms, agent_ids, run_in_background, wait_for="any"):
         tasks = self.context["subagent_tasks"]
         encode = lambda data: json.dumps(data, ensure_ascii=False)
         if action == "capacity":
@@ -113,15 +113,41 @@ class AgentLifecycle:
         if action == "resume_queue":
             return await self._resume_queue(agent_ids)
         if action == "wait":
-            ids = agent_ids or ([agent_id] if agent_id else list(tasks.tasks))
+            if wait_for not in {"any", "all"}:
+                raise ValueError("wait_for must be any or all")
+            registered = "subagent_registry" in self.context
+            ids = list(dict.fromkeys(agent_ids if agent_ids is not None else ([agent_id] if agent_id else
+                [r["agent_id"] for r in self._inventory()] if registered else list(tasks.tasks))))
             for identity in ids:
-                self._worker(identity)
+                if registered:
+                    self._worker(identity)
+                elif identity not in tasks.tasks:
+                    raise ValueError("Unknown background subagent")
             live = [tasks.tasks[i] for i in ids if i in tasks.tasks and not tasks.tasks[i].done()]
-            if live:
-                await asyncio.wait(live, timeout=timeout_ms / 1000, return_when=asyncio.FIRST_COMPLETED)
-            rows = [r for r in self._inventory() if r["agent_id"] in ids]
+            def snapshot():
+                if registered:
+                    inventory = {r["agent_id"]: r for r in self._inventory()}
+                else:
+                    # Legacy standalone tools can own only transient task records.
+                    # Never use this fallback to bypass a session's worker registry.
+                    inventory = {i: {"agent_id": i, "status": "running", **tasks.results.get(i, {}),
+                        "pending": not tasks.tasks[i].done(), "executing": i in tasks.running} for i in ids}
+                return [inventory[i] for i in ids]
+            def finished(row):
+                return row["status"] not in {"queued", "running"} and not row["pending"]
+            def met(rows):
+                return all(map(finished, rows)) if wait_for == "all" else any(map(finished, rows))
+            rows = snapshot()
+            if live and not met(rows):
+                await asyncio.wait(live, timeout=timeout_ms / 1000,
+                    return_when=asyncio.ALL_COMPLETED if wait_for == "all" else asyncio.FIRST_COMPLETED)
+            rows = snapshot()
             tasks.delivered.update(r["agent_id"] for r in rows if r["status"] not in {"queued", "running"})
-            return encode({"agents": rows, "timed_out": bool(live) and all(not t.done() for t in live)})
+            return encode({"agents": rows, "wait_for": wait_for, "condition_met": met(rows),
+                "finished_agent_ids": [r["agent_id"] for r in rows if finished(r)],
+                "pending_agent_ids": [r["agent_id"] for r in rows if not finished(r)],
+                "timed_out": not met(rows) and any(not t.done() for t in live),
+                "awaiting_resume": any(r.get("phase") == "awaiting_resume" for r in rows)})
         row = self._worker(agent_id)
         active = tasks.tasks.get(agent_id)
         running = bool(active and not active.done())

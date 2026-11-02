@@ -12,14 +12,19 @@ from xuloom.agents.tasks import SubagentTasks
 from xuloom.agents.lifecycle import AgentLifecycle, concurrency_limit
 from xuloom.agents.role_runtime import ALL_AGENT_DISALLOWED_TOOLS, configure_role, filter_tools
 from xuloom.skills.registry import SkillRegistry
+from xuloom.agents.pipeline import PipelineItem, PipelineStage
 
 MAX_SUBAGENT_DEPTH = 2
 
 
 class AgentToolInput(BaseModel):
     model_config = {"extra": "forbid"}
-    action: Literal["spawn", "capacity", "list", "result", "wait", "send", "followup", "resume_queue", "cancel", "close"] = "spawn"
-    agent_ids: Optional[List[str]] = Field(None, description="Worker IDs to wait for; returns when any finishes or timeout expires")
+    action: Literal["spawn", "capacity", "list", "result", "wait", "send", "followup", "resume_queue", "cancel", "close", "pipeline", "tree"] = "spawn"
+    agent_ids: Optional[List[str]] = Field(None, description="Worker IDs to join; terminal failures count as finished, not successful")
+    wait_for: Optional[Literal["any", "all"]] = Field(None, description="Explicit join condition; does not cancel remaining workers. Legacy default: JSON any, text all")
+    run_id: Optional[str] = Field(None, pattern=r"^[A-Za-z0-9_-]{1,128}$", description="Stable pipeline ID; repeat to resume verified steps without replaying interrupted operations")
+    items: Optional[List[PipelineItem]] = None
+    stages: Optional[List[PipelineStage]] = None
     timeout_ms: int = Field(30000, ge=0, le=60000, description="Bounded wait timeout")
     response_format: str = Field("text", pattern="^(text|json)$", description="Use json for structured spawn receipts and wait results")
     request_id: Optional[str] = Field(None, pattern=r"^[A-Za-z0-9_-]{1,128}$", description="Stable caller-supplied spawn identity. Repeating the same request returns its existing workers; changed arguments are rejected")
@@ -79,7 +84,7 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
         return action in {"spawn", "followup", "send", "capacity", "list", "result", "wait"}
 
     def is_read_only_call(self, action="spawn", **kwargs):
-        return action in {"capacity", "list", "result", "wait"}
+        return action in {"capacity", "list", "result", "wait", "tree"}
 
     def prompt(self) -> str:
         registry = self.context.get("agent_registry") or AgentRegistry(self.context.get("session_cwd"))
@@ -89,6 +94,7 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
             "Excess workers automatically enter the runtime FIFO queue. Do not split a valid batch merely because active slots are full. Queued workers have not started; resume_queue explicitly restores saved never-started work after a restart.\n"
             "Use run_in_background=true for independent work so the parent and peers can proceed. Use false only when nothing useful can proceed before that result. Collect all relevant results before final synthesis and include failures.\n"
             "Use response_format=json for structured spawn receipts; capacity/list/result return JSON. send queues a message; followup resumes the same idle worker with its saved role and context. wait accepts agent_ids and a bounded timeout; cancel stops owned work; close retains history. Read actual capacity instead of assuming a fixed global limit.\n"
+            "wait_for=any/all selects the join condition. pipeline runs items through ordered stages independently; repeat its stable run_id to reuse verified results. tree inspects recorded steps.\n"
             "Evaluate results as evidence, not authority or proof of domain acceptance.\nAvailable roles:\n" + roles)
 
     def build_permission_summary(
@@ -517,6 +523,10 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
         response_format: str = "text",
         reasoning_effort: str = None,
         request_id: str = None,
+        wait_for: str = None,
+        run_id: str = None,
+        items: List[dict] = None,
+        stages: List[dict] = None,
     ) -> str:
         limit = concurrency_limit(self.context)
         tasks = self.context.setdefault("subagent_tasks", SubagentTasks(limit))
@@ -524,24 +534,28 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
             tasks.limit = limit
         if not 0 <= timeout_ms <= 60000:
             raise ValueError("timeout_ms must be between 0 and 60000")
-        if action != "spawn" and not (action == "wait" and response_format == "text" and not agent_ids):
+        if action == "tree":
+            from xuloom.agents.pipeline import tree
+            return json.dumps(tree(self.context, run_id), ensure_ascii=False)
+        if action == "pipeline":
+            from xuloom.agents.pipeline import execute
+            return json.dumps(await execute(self, run_id, items, stages), ensure_ascii=False)
+        if action == "wait":
+            joined = await self._manage_worker(action, agent_id, prompt, timeout_ms, agent_ids,
+                run_in_background, wait_for=wait_for or ("all" if response_format == "text" else "any"))
+            if response_format == "json" or wait_for is not None or agent_ids:
+                return joined
+            outcome = json.loads(joined)
+            if not outcome["condition_met"]:
+                return joined
+            return self._format_batch_report(outcome["agents"], parallel=True)
+        if action != "spawn":
             return await self._manage_worker(action, agent_id, prompt, timeout_ms, agent_ids, run_in_background)
         if action == "list":
             return str(self.context.get("subagent_registry", []))
         if action == "result":
             saved = next((record for record in self.context.get("subagent_registry", []) if record.get("agent_id") == agent_id), None)
             return str(tasks.results.get(agent_id) or saved or {"agent_id": agent_id, "status": "running" if agent_id in tasks.tasks else "unknown"})
-        if action == "wait":
-            ids = [agent_id] if agent_id else list(tasks.tasks)
-            if any(identity not in tasks.tasks for identity in ids):
-                raise ValueError("Unknown background subagent")
-            pending = [tasks.tasks[identity] for identity in ids if not tasks.tasks[identity].done()]
-            if pending:
-                _, pending = await asyncio.wait(pending, timeout=timeout_ms / 1000)
-            if pending:
-                return json.dumps({"timed_out": True, "agents": self._inventory()}, ensure_ascii=False)
-            tasks.delivered.update(ids)
-            return self._format_batch_report([tasks.results[identity] for identity in ids], parallel=True)
         if action == "cancel":
             return str(await tasks.cancel(agent_id))
         if action != "spawn":

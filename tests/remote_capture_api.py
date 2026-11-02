@@ -35,7 +35,7 @@ class CaptureModel:
             return self.reply(handler,body,name='browser_tool',values=values,identity=identity)
         images=[part for row in after if isinstance(row.get('content'),list) for part in row['content'] if isinstance(part,dict) and part.get('type')=='image_url']
         if mode in {'FILE','URL'}:
-            assert images,'The remote screenshot did not reach the configured vision input'
+            assert images, 'The remote screenshot did not reach the configured vision input: ' + str(tools[-1].get('content', ''))[:2000]
             data=base64.b64decode(images[0]['image_url']['url'].split(',',1)[1])
             with Image.open(io.BytesIO(data)) as image:
                 assert image.size==(800,600),image.size

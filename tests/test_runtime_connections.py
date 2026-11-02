@@ -42,7 +42,7 @@ class RuntimeConnectionTests(unittest.IsolatedAsyncioTestCase):
                 self.send_error(404)
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-                owner.records.append({"path": self.path, "headers": dict(self.headers), "body": body})
+                owner.records.append({"path": self.path, "headers": {key.lower(): value for key, value in self.headers.items()}, "body": body})
                 custom = getattr(owner, "response_handler", None)
                 if custom is not None and custom(self, body): return
                 if self.path.startswith("/redirect/"):

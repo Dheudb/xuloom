@@ -356,6 +356,9 @@ class QueryEngine:
             "session_manager": self.session_manager,
             "hook_manager": self.hook_manager,
             "subagent_registry": self.subagent_registry,
+            "pipelines": {},
+            "coordinate_agents": self.agents,
+            "persist_pipeline": self.persist_session_state,
             "register_subagent_record": self.register_subagent_record,
             "subagent_state_lock": self.subagent_state_lock,
             "team_manager": self.team_manager,
@@ -2733,6 +2736,7 @@ class QueryEngine:
             if loaded_mode_overrides:
                 self.mode_thinking_overrides = loaded_mode_overrides
             self.subagent_registry = metadata.get("subagents", [])
+            self.tool_context["pipelines"] = copy.deepcopy(metadata.get("pipelines", {}))
             for worker in self.subagent_registry:
                 if worker.get("status") == "running":
                     worker["status"] = "interrupted"
@@ -2795,6 +2799,7 @@ class QueryEngine:
                 "explicit": self._thinking_config_explicit,
             },
             "subagents": self.subagent_registry,
+            "pipelines": copy.deepcopy(self.tool_context.get("pipelines", {})),
             "delegation": self.tool_context.get("delegation", {}),
             "turn_traces": self.turn_traces,
             "team": self.team_manager.export_state(),
