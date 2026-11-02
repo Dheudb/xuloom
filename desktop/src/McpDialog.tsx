@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   X,
   Search,
@@ -23,6 +23,8 @@ type Config = {
   label?: string;
   catalogId?: string;
   savedUrlQuery?: boolean;
+  auth?: { type: "oauth"; client_metadata_url?: string; client_id?: string; issuer?: string; redirect_uri?: string; client_secret?: string; token_endpoint_auth_method?: string };
+  oauth?: { status: string };
 };
 type Entry = {
   id: string;
@@ -48,6 +50,7 @@ type Server = Config & {
 };
 type Snapshot = {
   servers: Server[];
+  configurationIssues?: { skill: string; path: string; name?: string; error: string }[];
   runtime: {
     available: boolean;
     python: string;
@@ -67,12 +70,22 @@ type Editor = {
   url: string;
   pairs: { key: string; value: string }[];
   values: Record<string, string>;
+  oauth: boolean;
+  clientMetadataUrl: string;
+  registration: string;
+  clientId: string;
+  issuer: string;
+  redirectUri: string;
+  clientSecret: string;
+  clearClientSecret: boolean;
+  clientAuth: string;
 };
 const statusText: Record<string, string> = {
   connected: "已连接",
   disabled: "已停用",
   pending: "下次任务连接",
   error: "连接失败",
+  invalid: "配置需修复",
 };
 
 export default function McpDialog({
@@ -102,6 +115,9 @@ export default function McpDialog({
     Record<string, { status: string; error?: string; tools?: string[] }>
   >({});
   const [removing, setRemoving] = useState("");
+  const [authorization, setAuthorization] = useState<{name: string; url: string; callback: string} | null>(null);
+  const [callbackUrl, setCallbackUrl] = useState("");
+  const signingIn = useRef("");
   const locked = busy || !!working;
 
   useEffect(() => {
@@ -113,10 +129,13 @@ export default function McpDialog({
     const unsubscribe = window.xuloom.onEvent((event) => {
       if (event.session === sessionId && event.type === "mcp_changed")
         setSnapshot(event.snapshot);
+      if (event.session === sessionId && event.type === "mcp_oauth_authorize")
+        setAuthorization({ name: event.name, url: event.url, callback: event.callback });
     });
     return () => {
       alive = false;
       unsubscribe();
+      if (signingIn.current) void invoke("mcp.oauth.cancel", { name: signingIn.current }).catch(() => {});
     };
   }, [sessionId]);
 
@@ -161,6 +180,15 @@ export default function McpDialog({
       command: config?.command || "",
       args: JSON.stringify(config?.args || []),
       url: config?.url || "",
+      oauth: config?.auth?.type === "oauth",
+      clientMetadataUrl: config?.auth?.client_metadata_url || "",
+      registration: config?.auth?.client_id ? "fixed" : "automatic",
+      clientId: config?.auth?.client_id || "",
+      issuer: config?.auth?.issuer || "",
+      redirectUri: config?.auth?.redirect_uri || "",
+      clientSecret: "",
+      clearClientSecret: false,
+      clientAuth: config?.auth?.token_endpoint_auth_method || "auto",
       pairs: Object.entries(
         config?.type === "stdio" ? config.env || {} : config?.headers || {},
       ).map(([key, value]) => ({ key, value })),
@@ -239,6 +267,11 @@ export default function McpDialog({
           headers: mapping,
           savedUrlQuery: editor.server?.savedUrlQuery,
         });
+      if (editor.type === "http" && editor.oauth) {
+        config.auth = editor.registration === "fixed" ? { type: "oauth", client_id: editor.clientId.trim(), issuer: editor.issuer.trim(), redirect_uri: editor.redirectUri.trim(), token_endpoint_auth_method: editor.clientAuth,
+          ...(editor.clientSecret ? { client_secret: editor.clientSecret } : !editor.clearClientSecret && editor.server?.auth?.client_secret !== undefined ? { client_secret: "" } : {})
+        } : { type: "oauth", ...(editor.clientMetadataUrl.trim() ? { client_metadata_url: editor.clientMetadataUrl.trim() } : {}) };
+      }
       await action(
         "mcp.save",
         { name: editor.name, config, existing: !!editor.server },
@@ -247,6 +280,18 @@ export default function McpDialog({
     } catch {
       setError('启动参数必须是 JSON 字符串数组，例如 ["-y", "包名"]。');
     }
+  }
+
+  async function authorize(name: string, signOut = false) {
+    setWorking((signOut ? "oauth-logout:" : "oauth:") + name); setError(""); setMessage("");
+    if (!signOut) signingIn.current = name;
+    try {
+      const result = await invoke(signOut ? "mcp.oauth.logout" : "mcp.oauth.login", { name });
+      setSnapshot(result.snapshot);
+      setTests(old => { const next = { ...old }; delete next[name]; return next; });
+      setMessage(result.status === "authorized" ? "授权已保存，下次连接会使用此账号。" : result.status === "cancelled" ? "已取消等待，账号状态以列表为准；如需清除授权，请退出登录。" : result.revocation === "failed" ? "已清除本地授权；服务端撤销失败，可到服务的账号页面撤销。" : "已清除本地授权。服务端是否撤销以该服务的支持范围为准。");
+    } catch (e) { setError(String(e)); }
+    finally { signingIn.current = ""; setAuthorization(null); setCallbackUrl(""); setWorking(""); }
   }
 
   return (
@@ -273,6 +318,15 @@ export default function McpDialog({
             <X size={18} />
           </button>
         </header>
+        {working.startsWith("oauth:") && <section className="form-section" aria-label="MCP OAuth 登录">
+          <p role="status">{authorization ? "请在服务的授权页面确认账号及权限。" : "正在连接授权服务…"}</p>
+          {authorization && <><button onClick={() => void window.xuloom.invoke("external.open", { url: authorization.url }).catch(e => setError(String(e)))}>打开授权页面</button>
+            <details><summary>SSH / 手动完成回调</summary><p className="mcp-footnote">远端登录时，可将浏览器地址栏的完整回调地址粘贴到这里。授权码不会进入聊天或模型上下文。</p>
+              <label>完整回调地址<input aria-label="OAuth 回调地址" type="password" autoComplete="off" value={callbackUrl} onChange={e => setCallbackUrl(e.target.value)} /></label>
+              <button disabled={!callbackUrl} onClick={() => void invoke("mcp.oauth.callback", { name: authorization.name, url: callbackUrl }).then(() => setCallbackUrl("")).catch(e => setError(String(e)))}>提交授权回调</button>
+            </details></>}
+          {signingIn.current && <button onClick={() => void invoke("mcp.oauth.cancel", { name: signingIn.current }).catch(e => setError(String(e)))}>取消登录</button>}
+        </section>}
         <div className="mcp-toolbar">
           <div className="mcp-tabs">
             <button
@@ -443,6 +497,14 @@ export default function McpDialog({
                     配置已改变，下一次任务会重新连接；也可点击刷新连接立即应用到当前会话。
                   </p>
                 )}
+                {!!snapshot?.configurationIssues?.length && (
+                  <div className="notice" role="status">
+                    <strong>部分 Skill 的 MCP 配置未加载，其他服务可继续使用。</strong>
+                    {snapshot.configurationIssues.map((issue, index) => (
+                      <p key={index}><span>{issue.skill}{issue.name ? ` / ${issue.name}` : ""}：{issue.error}</span><br /><code>{issue.path}</code></p>
+                    ))}
+                  </div>
+                )}
                 {!snapshot?.servers.length && (
                   <div className="instruction-empty">
                     <Plug size={28} />
@@ -477,6 +539,9 @@ export default function McpDialog({
                               : server.name)}
                       </p>
                       <div className="mcp-card-actions">
+                        {server.auth?.type === "oauth" && <><span className="mcp-footnote">{server.oauth?.status === "authorized" ? "已授权" : server.oauth?.status === "unavailable" ? "授权不可用" : "未登录"}</span>
+                          <button disabled={locked || !snapshot.runtime.available} onClick={() => void authorize(server.name)}>{server.oauth?.status === "authorized" ? "重新登录" : "登录"}</button>
+                          <button disabled={locked || !snapshot.runtime.available} onClick={() => void authorize(server.name, true)}>退出登录</button></>}
                         <button
                           disabled={locked}
                           onClick={() => edit(undefined, server)}
@@ -626,7 +691,7 @@ export default function McpDialog({
                       </select>
                     </label>
                     {editor.type === "http" ? (
-                      <label>
+                      <><label>
                         服务地址
                         <input
                           aria-label="MCP 服务地址"
@@ -636,7 +701,20 @@ export default function McpDialog({
                             setEditor({ ...editor, url: e.target.value })
                           }
                         />
-                      </label>
+                      </label><label>认证方式<select aria-label="MCP 认证方式" value={editor.oauth ? "oauth" : "headers"} onChange={e => setEditor({ ...editor, oauth: e.target.value === "oauth" })}><option value="headers">无需登录 / 手动请求头</option><option value="oauth">OAuth · 浏览器登录</option></select></label>
+                        {editor.oauth && <><p className="mcp-footnote">保存后点击“登录”。授权令牌仅保存在系统保护的本机存储中，不发送给聊天模型。不能同时填写 Authorization 请求头。</p>
+                          <label>客户端注册<select aria-label="OAuth 客户端注册" value={editor.registration} onChange={e => setEditor({ ...editor, registration: e.target.value })}><option value="automatic">自动注册 / 客户端元数据文档</option><option value="fixed">使用已有 Client ID</option></select></label>
+                          {editor.registration === "fixed" ? <>
+                            <label>Client ID<input aria-label="OAuth Client ID" value={editor.clientId} onChange={e => setEditor({ ...editor, clientId: e.target.value })} /></label>
+                            <label>授权服务器 Issuer<input aria-label="OAuth Issuer" placeholder="服务公布的授权服务器标识" value={editor.issuer} onChange={e => setEditor({ ...editor, issuer: e.target.value })} /></label>
+                            <label>已注册的回调地址<input aria-label="OAuth 注册回调地址" placeholder="http://127.0.0.1:端口/回调路径" value={editor.redirectUri} onChange={e => setEditor({ ...editor, redirectUri: e.target.value })} /></label>
+                            <label>Client Secret（可选）<input aria-label="OAuth Client Secret" type="password" autoComplete="new-password" placeholder={!editor.clearClientSecret && editor.server?.auth?.client_secret !== undefined ? "已保存；留空保留" : "仅在服务方提供时填写"} value={editor.clientSecret} onChange={e => setEditor({ ...editor, clientSecret: e.target.value, clearClientSecret: false, clientAuth: e.target.value && editor.clientAuth === "none" ? "auto" : editor.clientAuth })} /></label>
+                            {editor.server?.auth?.client_secret !== undefined && <button type="button" onClick={() => setEditor({ ...editor, clearClientSecret: !editor.clearClientSecret, clientSecret: "", clientAuth: "auto" })}>{editor.clearClientSecret ? "保留已保存 Secret" : "清除已保存 Secret"}</button>}
+                            <details><summary>客户端认证（高级）</summary><label>Token 端点认证<select aria-label="OAuth Token 认证" value={editor.clientAuth} onChange={e => setEditor({ ...editor, clientAuth: e.target.value })}><option value="auto">自动 · 使用服务公布的方式</option><option value="none">公开客户端 · 无 Secret</option><option value="client_secret_basic">Client Secret Basic</option><option value="client_secret_post">Client Secret POST</option></select></label></details>
+                            <p className="mcp-footnote">Issuer 与回调地址应与服务方登记一致；回调只支持本机 127.0.0.1。端口占用时会停止登录，不会另选地址或重新注册。</p>
+                          </> : <details><summary>客户端元数据（可选）</summary><label>HTTPS 客户端元数据地址<input aria-label="OAuth 客户端元数据地址" value={editor.clientMetadataUrl} onChange={e => setEditor({ ...editor, clientMetadataUrl: e.target.value })} /></label></details>}
+                        </>}
+                      </>
                     ) : (
                       <>
                         <label>

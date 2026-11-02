@@ -1,13 +1,15 @@
 import type { ToolActivity } from "./types";
 
-export type ToolKind = "image" | "edit" | "terminal" | "search" | "file" | "web" | "agent" | "skill" | "tool";
+export type ToolKind = "sequence" | "image" | "edit" | "terminal" | "search" | "file" | "web" | "agent" | "skill" | "tool";
 const basename = (value: unknown) => String(value || "").split(/[\\/]/).pop() || "";
 const imagePath = /\.(png|jpe?g|webp|gif|bmp)(?:$|[?#])/i;
 export function toolPresentation(tool: Pick<ToolActivity, "name" | "status" | "input" | "media">): { kind: ToolKind; title: string; brief: string } {
   const input = tool.input || {}, name = tool.name;
   const done = tool.status === "completed", failed = ["error", "crashed", "interrupted"].includes(tool.status);
   let kind: ToolKind = "tool", action = "调用工具", brief = String(input.description || input.action || name);
-  if (name === "media_tool") {
+  if (name === "tool_sequence") {
+    kind = "sequence"; action = "执行工具序列"; brief = `${Array.isArray(input.steps) ? input.steps.length : 0} 个已确定步骤`;
+  } else if (name === "media_tool") {
     kind = "image"; action = ({ submit: "提交媒体生成", status: "查询生成任务", cancel: "提交取消请求", capabilities: "查看生成连接", list: "查看生成记录" } as Record<string, string>)[String(input.action)] || "媒体生成";
     brief = String(input.model || input.job_id || "");
   } else if (name === "browser_tool" && ["render", "screenshot"].includes(String(input.action))) {

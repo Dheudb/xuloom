@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Capabilities, ModelConnection } from "./types";
 
 export default function ExtensionSettings({ kind, busy, invoke, changed }: {
@@ -7,7 +7,9 @@ export default function ExtensionSettings({ kind, busy, invoke, changed }: {
   changed: (value: Capabilities) => void;
 }) {
   const [data, setData] = useState<Capabilities>(), [pending, setPending] = useState(false), [error, setError] = useState(""), [notice, setNotice] = useState("");
-  const [creating, setCreating] = useState(false), [preview, setPreview] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [preview, setPreview] = useState<{ key: string; content: string } | null>(null);
+  const previewRef = useRef<HTMLPreElement>(null);
   const [connections, setConnections] = useState<ModelConnection[]>([]);
   const [hosts, setHosts] = useState<{ id: string; name: string; host: string }[]>([]), [loadingModels, setLoadingModels] = useState(false);
   const [form, setForm] = useState({ name: "", description: "", prompt: "", scope: "global", executor: "local", backend: "native", backend_program: "", connection: "", model: "inherit", tools: "", skills: "" });
@@ -22,6 +24,7 @@ export default function ExtensionSettings({ kind, busy, invoke, changed }: {
     finally { setPending(false); }
   }
   useEffect(() => { void action("capabilities.list"); }, []);
+  useEffect(() => { previewRef.current?.scrollIntoView({ block: "nearest" }); }, [preview]);
   useEffect(() => { if (kind === "agents") { let active = true; void invoke("remote.profiles").then(value => { if (active) setHosts(value.connections || []); }).catch(e => { if (active) setError(String(e)); }); return () => { active = false; }; } }, [kind]);
   useEffect(() => { if (kind === "agents") {
     let active = true; setLoadingModels(true); setConnections([]); setError("");
@@ -36,7 +39,7 @@ export default function ExtensionSettings({ kind, busy, invoke, changed }: {
   return <div className="extension-settings">
     <h3>{kind === "skills" ? "Skills · 可复用工作流程" : "Subagents · 独立任务角色"}</h3>
     <p className="fine-print">{kind === "skills" ? "导入已有 SKILL.md 目录，或直接编写一个新技能。有效技能默认可用，输入 $ 选择。" : "导入 Markdown 定义目录，或新建角色。定义角色不会启动任务；委派沿用会话的权限和协作档位。"}</p>
-    <div className="actions"><button disabled={busy || pending} onClick={() => { setCreating(!creating); setPreview(""); }}>新建 {label}</button><button disabled={busy || pending} onClick={() => void action("capabilities.import", { kind })}>导入目录</button><button disabled={pending} onClick={() => void action("capabilities.list")}>刷新列表</button></div>
+    <div className="actions"><button disabled={busy || pending} onClick={() => { setCreating(!creating); setPreview(null); }}>新建 {label}</button><button disabled={busy || pending} onClick={() => void action("capabilities.import", { kind })}>导入目录</button><button disabled={pending} onClick={() => void action("capabilities.list")}>刷新列表</button></div>
     {busy && <p className="notice">任务运行中可以查看配置，停止任务后才能新增或导入。</p>}
     {creating && <form className="extension-form" onSubmit={async e => { e.preventDefault(); const value = await action("capabilities.create", { kind, ...form }); if (value) { setCreating(false); setNotice(`${label} 已保存并加载`); } }}>
       <fieldset disabled={busy || pending}>
@@ -58,8 +61,20 @@ export default function ExtensionSettings({ kind, busy, invoke, changed }: {
       </fieldset>
     </form>}
     {error && <p role="alert" className="error">{error}</p>}{notice && <p role="status">{notice}</p>}
-    {entries.map((item, index) => <section className="extension-row" key={item.name + index}><strong>{item.name}</strong><small>{item.scope === "builtin" ? "内置" : item.scope === "global" ? "全局" : item.scope === "project" ? "当前工作区" : item.scope === "imported" ? "导入" : item.scope} · {!item.valid ? "格式错误" : item.shadowed ? "被同名配置覆盖" : "可用"}</small><p>{item.description}</p>{item.error && <p className="error">{item.error}</p>}<button disabled={pending || !item.valid || item.shadowed} onClick={async () => { const value = await action(kind === "skills" ? "skills.read" : "agents.read", { name: item.name }); if (value) setPreview(String(value)); }}>查看指令</button></section>)}
-    {preview && <pre className="extension-preview">{preview}</pre>}
+    {entries.map((item, index) => {
+      const id = `extension-${kind}-${index}`;
+      const key = JSON.stringify([item.name, item.path, item.scope]);
+      const expanded = preview?.key === key;
+      return <section className="extension-row" key={item.name + index}>
+        <strong>{item.name}</strong><small>{item.scope === "builtin" ? "内置" : item.scope === "global" ? "全局" : item.scope === "project" ? "当前工作区" : item.scope === "imported" ? "导入" : item.scope} · {!item.valid ? "格式错误" : item.shadowed ? "被同名配置覆盖" : "可用"}</small><p>{item.description}</p>{item.error && <p className="error">{item.error}</p>}
+        <button disabled={pending || !item.valid || item.shadowed} aria-expanded={expanded} aria-controls={expanded ? id : undefined} onClick={async () => {
+          if (expanded) { setPreview(null); return; }
+          const value = await action(kind === "skills" ? "skills.read" : "agents.read", { name: item.name });
+          if (typeof value === "string") setPreview({ key, content: value });
+        }}>{expanded ? "收起指令" : "查看指令"}</button>
+        {expanded && <pre ref={previewRef} id={id} role="region" aria-label={`${item.name} 指令`} tabIndex={0} className="extension-preview">{preview.content || "暂无指令内容"}</pre>}
+      </section>;
+    })}
     <div className="actions"><button disabled={pending} onClick={() => void action("capabilities.directory", { kind, scope: "global" })}>打开全局目录</button><button disabled={pending} onClick={() => void action("capabilities.directory", { kind, scope: "project" })}>打开当前工作区目录</button></div>
   </div>;
 }

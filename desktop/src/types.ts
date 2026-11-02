@@ -52,6 +52,8 @@ export type ModelConfig = {
   model: string;
   baseUrl: string;
   hasKey: boolean;
+  credentialUnavailable?: boolean;
+  credentialStorage?: { mode: string; unavailable: string[] };
   networkMode?: "direct" | "system";
   models?: string[];
   modelInputs?: Record<string, ("text" | "image" | "document")[]>;
@@ -168,7 +170,7 @@ export type ToolActivity = {
   waitingRequestId?: string;
 };
 export type SessionView = InitialSession & {
-  goal?: { objective: string; status: string; elapsed_seconds?: number; round_started_at?: number; phase?: string; budget?: { seconds: number } } | null;
+  goal?: { id?: string; objective: string; status: string; accepted_by?: string; reason?: string; check_results?: { kind: string; path: string; passed: boolean }[]; elapsed_seconds?: number; round_started_at?: number; phase?: string; budget?: { seconds: number } } | null;
   goalMode?: boolean;
   collaborationMode: "solo" | "auto" | "ultra";
   permissionMode: PermissionMode;

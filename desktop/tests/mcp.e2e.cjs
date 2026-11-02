@@ -176,6 +176,35 @@ async function main() {
     await page.getByRole("button", { name: "MCP 市场", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "MCP 市场" });
     await dialog.getByText("Exa Search", { exact: true }).waitFor();
+    // A malformed mounted extension and a hand-edited invalid server must be
+    // visible and repairable without preventing the rest of the settings UI.
+    const ownedSkill = path.join(project, ".xuloom", "skills", "owned-config-check");
+    fs.mkdirSync(ownedSkill, { recursive: true });
+    fs.writeFileSync(path.join(ownedSkill, "SKILL.md"), "---\nname: owned-config-check\ndescription: Local configuration error fixture\n---\nOwned fixture.\n");
+    fs.writeFileSync(path.join(ownedSkill, "mcp_servers.json"), "{not-json");
+    const settingsPath = path.join(project, ".xuloom", "mcp_servers.json");
+    fs.writeFileSync(settingsPath, JSON.stringify({ mcpServers: { invalid_config: { type: [], enabled: "false", command: "owned-never-started", headers: { Authorization: "owned-do-not-display" } } } }));
+    await dialog.getByRole("button", { name: /我的服务/ }).click();
+    await dialog.getByRole("button", { name: "刷新连接", exact: true }).click();
+    await dialog.getByText("部分 Skill 的 MCP 配置未加载，其他服务可继续使用。", { exact: true }).waitFor();
+    await dialog.getByText("配置需修复", { exact: true }).waitFor();
+    assert(!(await dialog.innerText()).includes("owned-do-not-display"));
+    await capture("mcp-invalid-configuration.png");
+    const invalidCard = dialog.locator(".mcp-card").filter({ hasText: "invalid_config" });
+    await invalidCard.getByRole("button", { name: "配置", exact: true }).click();
+    await dialog.getByLabel("MCP 连接方式", { exact: true }).selectOption("stdio");
+    await dialog.getByLabel("MCP 启动程序", { exact: true }).fill("owned-not-launched");
+    await dialog.getByRole("button", { name: "保存配置", exact: true }).click();
+    await dialog.getByText("已停用", { exact: true }).waitFor();
+    await invalidCard.getByRole("button", { name: "移除", exact: true }).click();
+    await dialog.getByRole("button", { name: "确认移除", exact: true }).click();
+    // Remove only the fixture created above, not an external/user Skill.
+    fs.unlinkSync(path.join(ownedSkill, "mcp_servers.json"));
+    await dialog.getByRole("button", { name: "关闭 MCP 市场", exact: true }).click();
+    await page.getByRole("button", { name: "MCP 市场", exact: true }).click();
+    await dialog.getByRole("button", { name: /我的服务/ }).click();
+    assert.equal(await dialog.getByText("部分 Skill 的 MCP 配置未加载，其他服务可继续使用。", { exact: true }).count(), 0);
+    await dialog.getByRole("button", { name: "浏览市场", exact: true }).click();
     await capture("mcp-market.png");
     // Installing a search service stores config without starting it or requiring a model.
     await dialog
@@ -235,12 +264,18 @@ async function main() {
     );
     assert(!shared.includes("fixture-secret"));
     assert(shared.includes("offline_search"));
-    assert.equal(
-      JSON.parse(
-        fs.readFileSync(path.join(project, ".xuloom", "mcp_servers.json"), "utf8"),
-      ).mcpServers.offline_search.headers.Authorization,
-      "Bearer fixture-secret",
-    );
+    const storedText = fs.readFileSync(path.join(project, ".xuloom", "mcp_servers.json"), "utf8");
+    const storedAuth = JSON.parse(storedText).mcpServers.offline_search.headers.Authorization;
+    if (process.platform === "win32") {
+      assert.equal(storedAuth.$xuloom_secret, "dpapi-v1");
+      assert(!storedText.includes("fixture-secret"));
+    } else assert.equal(storedAuth, "Bearer fixture-secret");
+    const authProof = execFileSync(python, [
+      ...(process.env.XULOOM_TEST_EXECUTABLE ? ["-I"] : []), "-c",
+      "import asyncio,sys\nfrom xuloom.protocols.mcp_bridge import MCPBridge\nasync def run():\n bridge=MCPBridge(sys.argv[1])\n try:\n  await bridge.load_and_connect(only='offline_search',include_disabled=True)\n  result=await bridge.sessions['offline_search'].call_tool('search',{'query':'__header__'})\n  assert result.content[0].text=='Bearer fixture-secret'\n finally:\n  await bridge.cleanup()\nasyncio.run(run())\nprint('OWNED_MCP_AUTH_OK')",
+      path.join(project, ".xuloom", "mcp_servers.json"),
+    ], { env, encoding: "utf8", windowsHide: true });
+    assert(authProof.includes("OWNED_MCP_AUTH_OK"));
     await dialog.getByRole("button", { name: "启用", exact: true }).click();
     await page.getByRole("button", { name: "关闭 MCP 市场" }).click();
     await page.getByRole("textbox", { name: "任务输入" }).fill("MCP 搜索验收");

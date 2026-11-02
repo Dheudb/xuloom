@@ -24,6 +24,7 @@ class MemoryCompactor:
         local_tokenizer_path: str = None,
         api_key: str = None,
         network_mode: str = None,
+        request_owner=None,
     ):
         self.provider = self._resolve_provider(provider, model)
         self.has_requested_model = bool(str(model or "").strip())
@@ -32,6 +33,7 @@ class MemoryCompactor:
         self._api_key = api_key if api_key is not None else os.environ.get(self.provider.upper() + "_API_KEY", "")
         from xuloom.core.network import model_network_mode
         self.network_mode = model_network_mode(network_mode)
+        self.request_owner = request_owner
         self.local_tokenizer_path = (
             local_tokenizer_path
             or os.environ.get("XULOOM_LOCAL_TOKENIZER_PATH", "")
@@ -70,7 +72,7 @@ class MemoryCompactor:
     def _build_client(self):
         from xuloom.core.network import create_model_client
         return create_model_client(provider=self.provider, model=self.model if self.has_requested_model else "",
-            api_base_url=self.api_base_url, api_key=self._api_key, network_mode=self.network_mode)
+            api_base_url=self.api_base_url, api_key=self._api_key, network_mode=self.network_mode, request_owner=self.request_owner)
 
     def _resolve_local_tokenizer(self):
         if not self.local_tokenizer_path:

@@ -53,23 +53,28 @@ def active_connection(cfg):
 
 
 def public_connection(item):
+    from xuloom.security.credentials import is_protected
     return {"connectionId": item["id"], "connectionName": item.get("name", item["id"]), "provider": item["provider"],
             "model": item.get("model", ""), "models": item.get("models", []), "baseUrl": item.get("base_url", ""),
-            "hasKey": bool(item.get("api_key")), "networkMode": item.get("network_mode", "direct"),
+            "hasKey": bool(item.get("api_key")) and not is_protected(item.get("api_key")),
+            "credentialUnavailable": is_protected(item.get("api_key")), "networkMode": item.get("network_mode", "direct"),
             "modelInputs": item.get("model_inputs", {}), "modelReasoning": item.get("model_reasoning", {})}
 
 
 def public_config(cfg):
+    from xuloom.security.credentials import storage_status
     active = active_connection(cfg)
-    return {**public_connection(active), "connections": [public_connection(item) for item in connections(cfg)]}
+    return {**public_connection(active), "connections": [public_connection(item) for item in connections(cfg)],
+            "credentialStorage": storage_status(cfg)}
 
 
 def apply_connection_env(item):
+    from xuloom.security.credentials import api_key as checked_key
     provider = item["provider"]
     for suffix in ("model", "base_url", "api_key"):
         variable = provider.upper() + "_" + suffix.upper()
         if item.get(suffix):
-            os.environ[variable] = item[suffix]
+            os.environ[variable] = checked_key(item[suffix]) if suffix == "api_key" else item[suffix]
         else:
             os.environ.pop(variable, None)
     os.environ["XULOOM_MODEL_PROVIDER"] = provider
@@ -112,6 +117,8 @@ def save_connection(cfg, params):
         raise ValueError("API 连接 ID 无效")
     previous = next((item for item in items if item["id"] == identity), {})
     key = params.get("apiKey") or (previous.get("api_key", "") if previous.get("provider") == provider else "")
+    from xuloom.security.credentials import api_key as checked_key
+    key = checked_key(key)
     if not key:
         raise ValueError("请填写此 API 的 Key；本地无鉴权服务可填 not-needed")
     names = model_ids(params.get("models", previous.get("models", [])))
@@ -213,6 +220,8 @@ async def discover_models(cfg, params):
         key = previous.get("api_key", "")
     if not key:
         raise ValueError("请填写 API Key；修改 API 地址后请重新填写 Key，或先保存连接")
+    from xuloom.security.credentials import api_key as checked_key
+    key = checked_key(key)
     headers = {"Authorization": "Bearer " + key} if provider == "openai" else {"x-api-key": key, "anthropic-version": "2023-06-01"}
     parsed = urlsplit(base)
     url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path.rstrip("/") + "/models", parsed.query, ""))

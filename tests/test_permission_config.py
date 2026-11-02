@@ -53,6 +53,29 @@ class PermissionConfigTests(unittest.IsolatedAsyncioTestCase):
             decision = await manager.authorize(tool, {})
         self.assertEqual(decision.behavior, "deny"); load.assert_called_once()
 
+    async def test_malformed_input_filters_never_fall_through_to_full_access(self):
+        invalid = [{"case_sensitive": value, "contains": "PRIVATE"} for value in ("false", "true", 0, 1, None, [], {})]
+        invalid += [{"path": value, "contains": "private"} for value in ([], {}, False, 1)]
+        invalid += [{"key": [] , "contains": "private"}, {"source": "classifier_inpt", "contains": "private"}, {"contains": "private", "case_sensitve": False}, {"regex": 3}, {"glob": []}, {"contains": "private", "glob": "other"}, {}, {"equals": "private", "value": "other"}]
+        invalid += [{operator: None} for operator in ("contains", "equals", "value")]
+        with tempfile.TemporaryDirectory() as directory:
+            file = Path(directory) / "policy.json"
+            for mode in ("ask", "full"):
+                prompt = AsyncMock(return_value="allow")
+                manager = PermissionManager(config_path=str(file), approval_policy=ApprovalPolicy(mode), prompt_handler=prompt)
+                for matcher in invalid:
+                    with self.subTest(mode=mode, matcher=matcher):
+                        file.write_text(json.dumps({"alwaysDeny": [{"tools": ["fixture"], "input_matches": [matcher]}]}))
+                        before = file.read_bytes()
+                        decision = await manager.authorize(NS(name="fixture", is_read_only=False), {"path": "private"})
+                        self.assertEqual(decision.behavior, "deny")
+                        self.assertEqual(decision.source, "config_error")
+                        self.assertEqual(file.read_bytes(), before)
+                prompt.assert_not_awaited()
+            for matcher in ({"contains": "PRIVATE", "case_sensitive": False}, {"regex": "PRIVATE", "case_sensitive": False}, {"glob": "*PRIVATE*", "case_sensitive": False}):
+                file.write_text(json.dumps({"alwaysDeny": [{"input_matches": [{"path": "path", **matcher}]}]}))
+                self.assertEqual((await manager.authorize(NS(name="fixture", is_read_only=False), {"path": "private"})).source, "config_rule")
+
 
 class PermissionConfigExecutionTests(unittest.IsolatedAsyncioTestCase):
     asyncSetUp = recovery.RecoveryTests.asyncSetUp
@@ -76,3 +99,24 @@ class PermissionConfigExecutionTests(unittest.IsolatedAsyncioTestCase):
             "input": {"file_path": str(target), "content": "saved"}}, lambda _: None)
         self.assertFalse(receipt["is_error"], receipt)
         self.assertEqual(target.read_text(), "saved")
+
+    async def test_invalid_filter_cannot_write_a_file_and_valid_repair_still_denies(self):
+        config = self.root / "permissions.json"
+        self.engine.permission_manager.config_path = str(config)
+        self.engine.permission_manager.approval_policy.set_mode("full")
+        target = self.root / "owned-policy-probe.txt"
+        def policy(value):
+            config.write_text(json.dumps({"alwaysDeny": [{"tools": ["file_write_tool"], "input_matches": [{"path": "file_path", "contains": target.name.upper(), "case_sensitive": value}]}]}))
+        policy("false")
+        denied = await self.engine._execute_tool_wrapper({"id": "invalid-filter", "name": "file_write_tool", "input": {"file_path": str(target), "content": "must not write"}}, lambda _: None)
+        self.assertTrue(denied["is_error"])
+        self.assertIn("invalid_permission_config", denied["content"])
+        self.assertFalse(target.exists())
+        policy(False)
+        denied = await self.engine._execute_tool_wrapper({"id": "repaired-filter", "name": "file_write_tool", "input": {"file_path": str(target), "content": "still denied"}}, lambda _: None)
+        self.assertTrue(denied["is_error"])
+        self.assertFalse(target.exists())
+        config.write_text("{}")
+        allowed = await self.engine._execute_tool_wrapper({"id": "explicitly-removed-filter", "name": "file_write_tool", "input": {"file_path": str(target), "content": "authorized"}}, lambda _: None)
+        self.assertFalse(allowed["is_error"], allowed)
+        self.assertEqual(target.read_text(), "authorized")

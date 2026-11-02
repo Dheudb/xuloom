@@ -1,6 +1,7 @@
 """Explicit model networking, shared by main agents, workers and compaction."""
 import os
 import inspect
+import uuid
 
 import httpx
 
@@ -14,9 +15,12 @@ def model_network_mode(value=None):
     return mode
 
 
-def model_http_client(client_type=None, *, network_mode=None):
+def model_http_client(client_type=None, *, network_mode=None, flow=None, request_owner=None):
     # httpx also reads the Windows registry when trust_env=True. A system
     # proxy can silently break otherwise reachable local/custom model APIs.
+    if flow is not None:
+        from xuloom.core.request_flow import http_client_type
+        client_type = http_client_type(client_type or httpx.AsyncClient, flow, request_owner or uuid.uuid4().hex)
     if client_type is not None:
         # SDK factories supply their own timeout/limits and the HTTP library
         # version they require (recent Anthropic SDKs use httpx2).
@@ -78,17 +82,21 @@ def openai_credentials(api_key, client_type):
     return options
 
 
-def create_model_client(*, provider, model, api_base_url, api_key, network_mode):
+def create_model_client(*, provider, model, api_base_url, api_key, network_mode, request_owner=None):
     """One explicit client factory for generation and context compression."""
-    key = api_key or ("not-configured" if not model else "")
+    from xuloom.security.credentials import api_key as checked_key
+    key = checked_key(api_key or ("not-configured" if not model else ""))
+    from xuloom.core.request_flow import RequestFlow, connection_id
+    default_url = "https://api.openai.com/v1" if provider == "openai" else "https://api.anthropic.com"
+    flow = RequestFlow(connection_id(api_base_url or default_url, key), lambda: load_config(decrypt_secrets=False).get("model_request_limits"))
     if provider == "openai":
         from openai import AsyncOpenAI, DefaultAsyncHttpxClient
         return AsyncOpenAI(base_url=api_base_url or "https://api.openai.com/v1",
-            http_client=model_http_client(DefaultAsyncHttpxClient, network_mode=network_mode),
+            http_client=model_http_client(DefaultAsyncHttpxClient, network_mode=network_mode, flow=flow, request_owner=request_owner),
             **openai_credentials(key, AsyncOpenAI))
     if provider in {"anthropic", ""}:
         from anthropic import AsyncAnthropic, DefaultAsyncHttpxClient
         return AsyncAnthropic(base_url=api_base_url or "https://api.anthropic.com",
-            http_client=model_http_client(DefaultAsyncHttpxClient, network_mode=network_mode),
+            http_client=model_http_client(DefaultAsyncHttpxClient, network_mode=network_mode, flow=flow, request_owner=request_owner),
             **anthropic_credentials(key))
     raise ValueError("Unsupported model provider")

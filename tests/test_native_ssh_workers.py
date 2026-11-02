@@ -175,7 +175,16 @@ class NativeSSHTests(unittest.IsolatedAsyncioTestCase):
     async def test_message_sent_during_stream_is_consumed_before_native_completion(self):
         started = self.fixture.hold_model()
         answer = await self.spawn(run_in_background=True); identity = answer["agents"][0]["agent_id"]
-        self.assertTrue(await asyncio.to_thread(started.wait, 10))
+        # Dispatch acknowledges a queued task, not a model request. Observe its
+        # real lifetime while the owned SSH/Python process starts. Do not report
+        # an inbox failure because an arbitrary ten-second startup window ended.
+        worker = self.engine.tool_context["subagent_tasks"].tasks[identity]
+        clock = asyncio.get_running_loop()
+        began, deadline = clock.time(), clock.time() + 45
+        while not started.is_set() and not worker.done() and clock.time() < deadline:
+            await asyncio.sleep(.025)
+        self.assertTrue(started.is_set(), {"worker_done": worker.done(), "worker_status": self.tool._worker(identity).get("status"), "worker_phase": self.tool._worker(identity).get("phase"), "requests": len(self.fixture.local.records)})
+        print("OWNED_SSH_MODEL_STARTED_SECONDS", round(clock.time() - began, 3))
         sent = json.loads(await self.tool.execute(action="send", agent_id=identity, prompt="HOST_MESSAGE_MUST_BE_CONSUMED"))
         self.assertEqual(sent["delivery"], "host_inbox"); self.assertFalse(sent["requires_followup"])
         self.assertEqual(len(self.tool._mailbox(identity)), 1, "Receiving a message is not consuming it")

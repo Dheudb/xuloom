@@ -27,6 +27,13 @@ class ExecutionPolicyTests(unittest.IsolatedAsyncioTestCase):
                 ExecutionSandbox(root, "invalid")
             with self.assertRaisesRegex(SandboxUnavailable, "overlaps trusted"):
                 ExecutionSandbox(Path(sys.prefix), "workspace").prepare(argv=[sys.executable, "-c", "print(1)"])
+            if os.name == "nt":
+                with patch.dict(os.environ, {"XULOOM_DATA_DIR": str(Path(root)/"data")}):
+                    for name in ("request-limits", "sandbox-cleanup", "mcp-oauth"):
+                        protected = Path(root)/"data"/name
+                        protected.mkdir(parents=True)
+                        with self.assertRaisesRegex(SandboxUnavailable, "overlaps trusted"):
+                            ExecutionSandbox(protected, "workspace").prepare(argv=[sys.executable, "-c", "print(1)"])
 
     async def test_session_setting_does_not_need_a_model(self):
         from xuloom.desktop.bridge import DesktopBridge

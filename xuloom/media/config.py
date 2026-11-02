@@ -46,7 +46,8 @@ def validate(value):
     if not isinstance(name, str) or len(name) > 160 or any(ord(c) < 32 for c in name):
         raise ValueError("Invalid media connection name")
     key = value.get("api_key", "")
-    if not isinstance(key, str) or not key.isascii() or len(key) > 8192 or any(ord(c) < 32 or ord(c) == 127 for c in key):
+    from xuloom.security.credentials import is_protected
+    if not is_protected(key) and (not isinstance(key, str) or not key.isascii() or len(key) > 8192 or any(ord(c) < 32 or ord(c) == 127 for c in key)):
         raise ValueError("Invalid media API key")
     mode = value.get("network_mode", "direct")
     if mode not in {"direct", "system"}:
@@ -106,13 +107,18 @@ def connections(cfg=None):
 
 
 def public_connections(cfg=None):
-    return [{**{key: value for key, value in row.items() if key != "api_key"}, "hasKey": bool(row["api_key"])}
+    from xuloom.security.credentials import is_protected
+    return [{**{key: value for key, value in row.items() if key != "api_key"},
+             "hasKey": bool(row["api_key"]) and not is_protected(row["api_key"]),
+             **({"credentialUnavailable": True} if is_protected(row["api_key"]) else {})}
         for row in connections(cfg)]
 
 
 def public_models(cfg=None):
+    from xuloom.security.credentials import is_protected
     return [{"connectionId": row["id"], "id": model["id"], "kind": model["kind"],
-        "model": model["model"], "base_url": row["base_url"], "hasKey": bool(row["api_key"])}
+        "model": model["model"], "base_url": row["base_url"], "hasKey": bool(row["api_key"]) and not is_protected(row["api_key"]),
+        **({"credentialUnavailable": True} if is_protected(row["api_key"]) else {})}
         for row in connections(cfg) for model in row["models"]]
 
 
@@ -216,9 +222,11 @@ def resolve(connection_id, model_id, *, frozen=None):
     binding["model"] = copy.deepcopy(model)
     if frozen is not None and binding != frozen:
         raise ValueError("Media target changed; restore the original connection/model before inspecting this task")
-    if not connection["api_key"].strip():
+    from xuloom.security.credentials import require_secret
+    key = require_secret(connection["api_key"])
+    if not key.strip():
         raise ValueError("Configure an API key for the media connection")
-    return binding, connection["api_key"]
+    return binding, key
 
 
 def revision(binding, key):

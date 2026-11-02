@@ -45,7 +45,7 @@ _PERSISTED_KEYS = {
 }
 
 
-def load_config() -> dict:
+def load_config(*, decrypt_secrets=True) -> dict:
     """Missing configuration is empty; damaged configuration must never be overwritten as empty."""
     try:
         value = json.loads(CONFIG_FILE.read_text(encoding="utf-8-sig"))
@@ -55,7 +55,8 @@ def load_config() -> dict:
         raise ValueError("无法读取模型配置；原文件已保留，请修复配置或从备份恢复。") from error
     if not isinstance(value, dict):
         raise ValueError("模型配置必须是 JSON 对象；原文件已保留。")
-    return value
+    from xuloom.security.credentials import transform
+    return transform(value, CONFIG_FILE) if decrypt_secrets else value
 
 
 def save_config(cfg: dict):
@@ -63,7 +64,8 @@ def save_config(cfg: dict):
     from xuloom.core.storage import atomic_json
     if not isinstance(cfg, dict):
         raise ValueError("Configuration must be an object")
-    atomic_json(CONFIG_FILE, cfg)
+    from xuloom.security.credentials import transform
+    atomic_json(CONFIG_FILE, transform(cfg, CONFIG_FILE, protect=True))
 
 
 def update_config(transform, timeout=10):
@@ -106,6 +108,11 @@ def load_config_into_env():
     for cfg_key, env_key in _PERSISTED_KEYS.items():
         val = cfg.get(cfg_key, "")
         if val and not os.environ.get(env_key):
+            if cfg_key.endswith("_api_key"):
+                from xuloom.security.credentials import api_key as checked_key, is_protected
+                if is_protected(val) and cfg_key != cfg.get("model_provider", "anthropic") + "_api_key":
+                    continue  # An unused provider must not block configuring the active one.
+                val = checked_key(val)
             os.environ[env_key] = str(val)
 
 

@@ -11,7 +11,7 @@ import ipaddress
 import copy
 import httpx
 
-from xuloom.protocols.mcp_config import MCPConfigStore, validate_server
+from xuloom.protocols.mcp_config import MCPConfigStore, validate_server, validate_name
 from xuloom.context.tool_results import build_tool_result
 
 try:
@@ -29,6 +29,13 @@ def runtime_info():
 
 
 def connection_error(exc):
+    from xuloom.protocols.oauth_store import OAuthRequired, OAuthFailure
+    pending=[exc]
+    for _ in range(20):
+        if not pending: break
+        item=pending.pop()
+        if isinstance(item,(OAuthRequired,OAuthFailure)): return str(item)
+        pending.extend(getattr(item,"exceptions",()))
     # SDK exceptions can contain request URLs/headers. Do not send them to the UI/model.
     if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
         return "连接超时；检查网络、启动命令及服务配置。"
@@ -126,10 +133,15 @@ class MCPBridge:
         self.sessions = {}
         self.connections = []
         self.statuses = {}
+        self.configuration_issues = []
 
     async def load_and_connect(self, only=None, include_disabled=False):
+        if type(include_disabled) is not bool:
+            raise ValueError("include_disabled must be a boolean")
         discovered = {}
-        for name, raw in self.store.read(include_skills=True)["mcpServers"].items():
+        self.configuration_issues = []
+        settings=await asyncio.to_thread(self.store.read,include_skills=True,issues=self.configuration_issues)
+        for name, raw in settings["mcpServers"].items():
             if only is not None and name != only:
                 continue
             if isinstance(raw, dict) and raw.get("enabled", True) is False and not include_disabled:
@@ -156,7 +168,11 @@ class MCPBridge:
         # connection on its own owner so one failed service cannot stop another.
         try:
             async with AsyncExitStack() as stack:
+                validate_name(name)
                 config = validate_server(raw)
+                from xuloom.security.credentials import unavailable_fields, CredentialUnavailable
+                if unavailable_fields(config):
+                    raise CredentialUnavailable()
                 if config["type"] == "stdio":
                     inherited = get_default_environment()
                     for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy"):
@@ -171,7 +187,12 @@ class MCPBridge:
                         local = ipaddress.ip_address(hostname).is_loopback
                     except ValueError:
                         local = hostname == "localhost"
-                    client = await stack.enter_async_context(httpx.AsyncClient(headers=config.get("headers", {}), timeout=httpx.Timeout(30, connect=15), trust_env=not local, follow_redirects=False))
+                    auth=None
+                    if config.get("auth",{}).get("type")=="oauth":
+                        from xuloom.protocols.mcp_oauth import MCPAuth
+                        from xuloom.protocols.oauth_store import OAuthStore
+                        auth=MCPAuth(OAuthStore(self.store,name,config))
+                    client = await stack.enter_async_context(httpx.AsyncClient(headers=config.get("headers", {}), auth=auth, timeout=httpx.Timeout(30, connect=15), trust_env=not local, follow_redirects=False))
                     channels = await stack.enter_async_context(streamable_http_client(config["url"], http_client=client))
                 session = await stack.enter_async_context(ClientSession(channels[0], channels[1], read_timeout_seconds=timedelta(seconds=config["tool_timeout_sec"])))
                 # AnyIO cancel scopes must stay on their owning task. The session owns deadlines.

@@ -59,7 +59,7 @@ let workspaceQueue = Promise.resolve();
 let catalogRevision = 0;
 const engineMethods = new Set([
   "remote.profiles", "remote.models",
-  "collaboration.get", "collaboration.set", "agents.resume_queue", "execution.get", "execution.set",
+  "collaboration.get", "collaboration.set", "agents.resume_queue", "execution.get", "execution.set", "execution.cleanup",
   "goal.get", "goal.create", "goal.run", "goal.control", "goal.update",
   "schedule.list", "schedule.add", "schedule.control",
   "prompt",
@@ -95,6 +95,7 @@ const engineMethods = new Set([
   "config.reasoning",
   "config.delete",
   "mcp.list",
+  "mcp.oauth.login", "mcp.oauth.logout", "mcp.oauth.cancel", "mcp.oauth.callback",
   "mcp.market",
   "mcp.install",
   "mcp.save",

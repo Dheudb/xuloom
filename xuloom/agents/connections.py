@@ -18,7 +18,8 @@ def resolve_connection(identity, model=None, *, frozen=None):
     model = model or item.get("model")
     if not model or model not in item["models"]:
         raise ValueError("Model is not available in connection: " + identity)
-    key = item.get("api_key")
+    from xuloom.security.credentials import api_key as checked_key
+    key = checked_key(item.get("api_key", ""))
     if not isinstance(key, str) or not key.strip():
         raise ValueError("Configure an API key for model connection: " + identity)
     provider = item["provider"]

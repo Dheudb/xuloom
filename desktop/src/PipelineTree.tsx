@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronRight, FileInput, GitBranch, RefreshCw } from "lucide-react";
 
-type Stage = { stage_id: string; status: string; agent_id?: string; error?: string };
-type Run = { run_id: string; status: string; items: { item_id: string; status: string; stages: Stage[] }[] };
+type Stage = { stage_id: string; status: string; liveness?: string; agent_id?: string; error?: string };
+type Run = { run_id: string; status: string; liveness?: string; items: { item_id: string; status: string; stages: Stage[] }[] };
 const labels: Record<string, string> = { completed: "已完成", running: "执行中", queued: "排队中", waiting: "待执行",
   blocked: "需处理", interrupted: "已中断", awaiting_resume: "等待恢复", cancelled: "已停止", crashed: "失败", closed: "已关闭" };
 
@@ -50,18 +50,18 @@ export default function PipelineTree({ sessionId, busy, invoke, onError, onHisto
     <button className="text-button" disabled={busy} onClick={() => input.current?.click()}><FileInput size={13} />导入流水线 JSON</button>
     {!runs.length && <small>每项依次推进，各项并行执行。运行状态取自实际子代理记录。</small>}
     {runs.map(run => <details className="pipeline-run" key={run.run_id} open>
-      <summary title={run.run_id}><ChevronRight className="pipeline-chevron" size={12} /><span>流水线 · {run.items.length} 项</span><small>{labels[run.status] || run.status}</small></summary>
+      <summary title={run.run_id}><ChevronRight className="pipeline-chevron" size={12} /><span>流水线 · {run.items.length} 项</span><small>{labels[run.status] || run.status}{run.liveness === "unconfirmed" && " · 存活未确认"}</small></summary>
       {run.items.map(item => <details key={item.item_id} open={item.status !== "completed"}>
         <summary><ChevronRight className="pipeline-chevron" size={12} /><span>{item.item_id}</span><small>{labels[item.status] || item.status}</small></summary>
         {item.stages.map(stage => <div className="pipeline-stage" key={stage.stage_id}>
           <button className="text-button" disabled={!stage.agent_id} title={stage.error || stage.agent_id || "尚未启动"}
             onClick={() => stage.agent_id && onHistory(stage.agent_id, item.item_id + " / " + stage.stage_id)}>{stage.stage_id}</button>
-          <small>{labels[stage.status] || stage.status}</small>
+          <small>{labels[stage.status] || stage.status}{stage.liveness === "unconfirmed" && " · 记录状态"}</small>
           {stage.error && <small className="bad">{stage.error}</small>}
         </div>)}
       </details>)}
-      {run.status !== "completed" && <button className="text-button" disabled={busy}
-        onClick={() => invoke("agents.pipeline", { runId: run.run_id }).then(() => refresh.current()).catch(onError)}>继续未完成步骤</button>}
+      {run.status !== "completed" && (run.status !== "running" || run.liveness === "unconfirmed") && <button className="text-button" disabled={busy}
+        onClick={() => invoke("agents.pipeline", { runId: run.run_id }).then(() => refresh.current()).catch(onError)}>{run.liveness === "unconfirmed" ? "核对并继续未完成步骤" : "继续未完成步骤"}</button>}
       {run.status === "blocked" && <small>已中断的步骤需先核对结果并显式继续对应子代理，不会自动重跑。</small>}
     </details>)}
   </section>;

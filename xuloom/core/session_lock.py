@@ -1,6 +1,7 @@
 """An OS-owned writer lease. The marker remains; closing the handle releases ownership."""
 import json
 import os
+import errno
 from xuloom.core.storage import IOPath
 import re
 import time
@@ -26,6 +27,33 @@ class SessionLock:
         self.path = IOPath(directory) / (identity + ".lock")
         self.identity = identity
         self.handle = None
+
+    def locked(self):
+        """Read-only OS lease probe: True/False/None (unknown), never trust a PID."""
+        if self.handle is not None:
+            return True
+        try:
+            handle = self.path.open("r+b")
+        except FileNotFoundError:
+            return False
+        except OSError:
+            return None
+        try:
+            handle.seek(0)
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                return False
+            except OSError as error:
+                return True if error.errno in {errno.EACCES, errno.EAGAIN, errno.EDEADLK} else None
+        finally:
+            handle.close()
 
     def acquire(self):
         if self.handle is not None:

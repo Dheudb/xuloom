@@ -12,7 +12,7 @@ import tempfile
 import uuid
 
 FILE_TOOLS = frozenset({"file_read_tool", "file_write_tool", "file_edit_tool", "glob_tool", "grep_tool", "notebook_edit_tool"})
-CONTROL_TOOLS = frozenset({"agent_tool", "spawn_agent", "ask_user_question_tool", "todo_write_tool", "plan_tool", "goal_report_tool",
+CONTROL_TOOLS = frozenset({"tool_sequence", "agent_tool", "spawn_agent", "ask_user_question_tool", "todo_write_tool", "plan_tool", "goal_report_tool",
     "goal_tool", "schedule_tool", "brief_tool", "tool_search_tool", "skill_tool", "send_message_tool",
     "team_create_tool", "team_delete_tool", "enter_plan_mode", "exit_plan_mode"})
 PROCESS_TOOLS = frozenset({"command_tool", "repl_tool"})
@@ -23,8 +23,10 @@ class SandboxUnavailable(RuntimeError):
 
 
 class PreparedLaunch:
-    def __init__(self, argv, directory, api=None, event=None):
+    def __init__(self, argv, directory, api=None, event=None, finished=None):
         self.argv, self.directory, self.api, self.event = argv, directory, api, event
+        self.finished = finished
+        self.cleanup_issues = []
 
     def cancel(self):
         if self.event:
@@ -37,6 +39,9 @@ class PreparedLaunch:
         if self.directory:
             self.directory.cleanup()
             self.directory = None
+        if self.finished:
+            finished, self.finished = self.finished, None
+            self.cleanup_issues = finished()
 
 
 class ExecutionSandbox:
@@ -46,6 +51,7 @@ class ExecutionSandbox:
         self.workspace = str(Path(workspace).resolve())
         self.mode = mode
         self.processes = set()
+        self.notify = None
 
     @property
     def enabled(self):
@@ -53,7 +59,9 @@ class ExecutionSandbox:
 
     def status(self):
         windows = os.name == "nt" and ctypes.sizeof(ctypes.c_void_p) == 8
+        from xuloom.security.sandbox_cleanup import pending
         return {"mode": self.mode, "available": windows, "backend": "windows-lpac" if windows else None,
+            "cleanup_issues": pending(self.workspace),
             "network": "blocked-in-tool-processes" if self.enabled else "host",
             "message": "Windows LPAC: authorized workspace, read-only runtimes, no network capabilities, owned process jobs" if windows else
                 "This platform has no validated system execution backend; workspace mode fails closed",
@@ -66,8 +74,11 @@ class ExecutionSandbox:
     def prepare(self, *, argv=None, command=None, cwd=None, timeout_ms=120000, read_roots=()):
         if not self.enabled:
             raise ValueError("A sandbox launch requires workspace execution mode")
-        if not self.status()["available"]:
-            raise SandboxUnavailable(self.status()["message"])
+        status = self.status()
+        if not status["available"]:
+            raise SandboxUnavailable(status["message"])
+        if status["cleanup_issues"]:
+            raise SandboxUnavailable("A previous isolated execution needs permission cleanup. Open execution isolation settings or run xuloom sandbox-cleanup; no new tool was started.")
         cwd = Path(cwd or self.workspace).resolve(strict=True)
         root = Path(self.workspace)
         if not cwd.is_relative_to(root):
@@ -86,7 +97,7 @@ class ExecutionSandbox:
             if (parent / "Xuloom.exe").is_file():
                 runtime_roots.append(parent)
                 break
-        sensitive = [Path(CONFIG_DIR).resolve(), data / "history", data / "session-locks", data / "schedules.json", data / "workbench.json"]
+        sensitive = [Path(CONFIG_DIR).resolve(), data / "history", data / "session-locks", data / "request-limits", data / "sandbox-cleanup", data / "mcp-oauth", data / "schedules.json", data / "workbench.json"]
         for trusted in runtime_roots + sensitive:
             if trusted.is_relative_to(root) or root.is_relative_to(trusted):
                 raise SandboxUnavailable("The writable workspace overlaps trusted runtime, credentials or session storage. Choose a separate working directory; no tool was started.")
@@ -124,7 +135,13 @@ class ExecutionSandbox:
         except BaseException:
             api.kernel.CloseHandle(event); directory.cleanup()
             raise
-        return PreparedLaunch([sys.executable, "-I", "-B", str(Path(__file__).with_name("windows_sandbox.py")), str(path)], directory, api, event)
+        return PreparedLaunch([sys.executable, "-I", "-B", str(Path(__file__).with_name("windows_sandbox.py")), str(path)], directory, api, event, self._cleanup_finished)
+
+    def _cleanup_finished(self):
+        issues = self.status()["cleanup_issues"]
+        if issues and self.notify:
+            self.notify({"type": "log", "text": "系统隔离的权限清理尚未完成；执行结果保留，未重跑任务。请在执行隔离设置中重试清理。记录：" + issues[0]["report_path"]})
+        return issues
 
     async def communicate(self, *, argv=None, command=None, cwd=None, data=None, timeout=120, read_roots=()):
         launch = self.prepare(argv=argv, command=command, cwd=cwd, timeout_ms=int(timeout * 1000), read_roots=read_roots)

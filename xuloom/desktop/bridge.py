@@ -78,6 +78,9 @@ class DesktopBridge:
         self.mcp_names = set()
         self.mcp_stamp = None
         self.mcp_testing = False
+        self.oauth_task = None
+        self.oauth_callback = None
+        self.oauth_name = None
         self.model_signature = None
         self.file_changes = []
         self.attachment_upload = None
@@ -104,20 +107,40 @@ class DesktopBridge:
     def config_stamp(self):
         try:
             stat = self.mcp_store.path.stat()
-            return (stat.st_mtime_ns, stat.st_size)
+            document=json.loads(self.mcp_store.path.read_text(encoding="utf-8"))
+            base=(stat.st_mtime_ns, stat.st_size)
         except FileNotFoundError:
+            document={};base=None
+        except (OSError,ValueError):
             return None
+        # Include only the public file identity of this project's OAuth receipts.
+        # CLI/another process can authorize a previously disconnected service;
+        # its next turn must reconnect without touching model credentials.
+        from xuloom.protocols.oauth_store import OAuthStore
+        manifests=[]
+        servers=self.mcp_store.skill_servers(manifests=manifests)
+        if isinstance(document,dict) and isinstance(document.get("mcpServers",{}),dict): servers.update(document.get("mcpServers",{}))
+        receipts=[]
+        for name,server in sorted(servers.items()):
+            if not isinstance(server,dict) or not isinstance(server.get("auth"),dict) or server["auth"].get("type")!="oauth":continue
+            path=OAuthStore(self.mcp_store,name,{}).path
+            try:
+                stat=path.stat();identity=(stat.st_mtime_ns,stat.st_size)
+            except FileNotFoundError:identity=None
+            receipts.append((name,identity))
+        return base,tuple(receipts),tuple(manifests)
 
     def mcp_snapshot(self):
         statuses = getattr(getattr(self.engine, "mcp_bridge", None), "statuses", {})
         changed = self.engine is not None and self.config_stamp() != self.mcp_stamp
         servers = []
-        for server in self.mcp_store.snapshot():
+        issues = []
+        for server in self.mcp_store.snapshot(issues=issues):
             state = statuses.get(server["name"], {}) if not changed else {}
             if self.execution_mode == "workspace":
                 state = {"status": "blocked", "error": "系统隔离模式不启动未受限的 MCP 服务"}
-            servers.append({**server, "connection": state, "status": "disabled" if server.get("enabled") is False else state.get("status", "pending")})
-        return {"servers": servers, "runtime": runtime_info(), "needsReload": changed, "builtinSearch": "DDGS 多搜索源", "project": str(self.cwd)}
+            servers.append({**server, "connection": state, "status": "invalid" if server.get("error") else "disabled" if server.get("enabled") is False else state.get("status", "pending")})
+        return {"servers": servers, "configurationIssues": issues, "runtime": runtime_info(), "needsReload": changed, "builtinSearch": "DDGS 多搜索源", "project": str(self.cwd)}
 
     async def reload_mcp(self):
         if self.protocol_task is None:
@@ -309,7 +332,7 @@ class DesktopBridge:
                     tools = await self._connect_mcp(engine)
                     self.mcp_names = engine.register_mcp_tools(tools)
                     engine.activate_tools(active_mcp.intersection(self.mcp_names))
-                    self.emit({"type": "mcp_changed", "snapshot": self.mcp_snapshot()})
+                    self.emit({"type": "mcp_changed", "snapshot": await asyncio.to_thread(self.mcp_snapshot)})
                     if not ready.done():
                         ready.set_result(True)
                 except Exception:
@@ -569,6 +592,12 @@ class DesktopBridge:
             return {"started": True}
         if method == "collaboration.get":
             return {"collaborationMode": self.collaboration_mode}
+        if method == "execution.cleanup":
+            self.require_idle()
+            from xuloom.security.sandbox_cleanup import retry
+            from xuloom.security.execution import ExecutionSandbox
+            retry(str(self.cwd), params.get("id"))
+            return ExecutionSandbox(str(self.cwd), self.execution_mode).status()
         if method in {"execution.get", "execution.set"}:
             from xuloom.security.execution import ExecutionSandbox
             if method == "execution.set":
@@ -642,7 +671,47 @@ class DesktopBridge:
         if method == "config.models":
             return await discover_models(load_config(), params)
         if method == "mcp.list":
-            return self.mcp_snapshot()
+            return await asyncio.to_thread(self.mcp_snapshot)
+        if method in {"mcp.oauth.cancel","mcp.oauth.callback"}:
+            if not self.oauth_task or self.oauth_task.done() or self.oauth_name!=params.get("name"):
+                raise ValueError("此服务没有等待中的 OAuth 登录")
+            if method=="mcp.oauth.callback":
+                if not self.oauth_callback.accept(params.get("url","")):
+                    raise ValueError("回调不匹配此登录，尚未使用授权码")
+                return {"accepted":True}
+            self.oauth_task.cancel()
+            await asyncio.gather(self.oauth_task,return_exceptions=True)
+            return {"status":"cancelled"}
+        if method in {"mcp.oauth.login","mcp.oauth.logout"}:
+            self.require_idle()
+            if self.execution_mode=="workspace": raise ValueError("系统隔离模式不在宿主执行 OAuth 登录或撤销")
+            if self.mcp_testing: raise ValueError("请先完成或取消当前 MCP 操作")
+            if not runtime_info()["available"]: raise ValueError(runtime_info()["message"])
+            from xuloom.protocols.mcp_config import validate_server
+            from xuloom.protocols.oauth_store import OAuthStore
+            from xuloom.protocols.oauth_callback import OAuthCallback
+            from xuloom.protocols.mcp_oauth import login, logout
+            name=params.get("name","")
+            raw=(await asyncio.to_thread(self.mcp_store.read,include_skills=True))["mcpServers"].get(name)
+            configured=validate_server(raw)
+            if configured.get("auth",{}).get("type")!="oauth": raise ValueError("先为此 HTTP 服务选择 OAuth 登录")
+            store=OAuthStore(self.mcp_store,name,configured)
+            self.mcp_testing=True
+            try:
+                if method=="mcp.oauth.logout":
+                    result=await logout(store)
+                else:
+                    self.oauth_callback=OAuthCallback();self.oauth_name=name
+                    async def notify(event):
+                        # Deliberately bypass turn recorders and model context.
+                        self.output({"type":"mcp_oauth_authorize","name":name,**event})
+                    self.oauth_task=asyncio.create_task(login(store,self.oauth_callback,notify))
+                    try: result=await self.oauth_task
+                    except asyncio.CancelledError: result={"status":"cancelled"}
+                return {**result,"snapshot":await asyncio.to_thread(self.mcp_snapshot)}
+            finally:
+                self.oauth_task=None;self.oauth_callback=None;self.oauth_name=None
+                self.mcp_testing=False
         if method == "mcp.market":
             return await self.mcp_market.search(params.get("query", ""), params.get("source", "builtin"), params.get("cursor", ""))
         if method in {"mcp.install", "mcp.save", "mcp.toggle", "mcp.remove", "mcp.reload", "mcp.test"}:
@@ -656,13 +725,13 @@ class DesktopBridge:
                 entry = self.mcp_market.entries.get(params.get("id"))
                 if not entry:
                     raise ValueError("Refresh the market before installing this entry")
-                self.mcp_store.save(name or entry["id"], materialize(entry, params.get("values", {})))
+                await asyncio.to_thread(self.mcp_store.save, name or entry["id"], materialize(entry, params.get("values", {})))
             elif method == "mcp.save":
-                self.mcp_store.save(name, params.get("config", {}), existing=params.get("existing") is True)
+                await asyncio.to_thread(self.mcp_store.save, name, params.get("config", {}), existing=params.get("existing", False))
             elif method == "mcp.toggle":
-                self.mcp_store.toggle(name, params.get("enabled") is True)
+                await asyncio.to_thread(self.mcp_store.toggle, name, params.get("enabled"))
             elif method == "mcp.remove":
-                self.mcp_store.remove(name)
+                await asyncio.to_thread(self.mcp_store.remove, name)
             elif method == "mcp.reload":
                 await self.reload_mcp()
             elif method == "mcp.test":
@@ -676,7 +745,7 @@ class DesktopBridge:
                 finally:
                     await bridge.cleanup()
                     self.mcp_testing = False
-            return self.mcp_snapshot()
+            return await asyncio.to_thread(self.mcp_snapshot)
         if method == "initialize":
             if self.attachment_upload is not None: raise ValueError("Finish the attachment upload before switching sessions")
             self.approval_policy.set_mode(params.get("permissionMode", "ask"))
@@ -910,11 +979,21 @@ class DesktopBridge:
                 change = (lambda cfg: save_connection(cfg, params)) if method == "config.save" else (lambda cfg: select_model(cfg, params.get("connectionId"), params.get("model")))
             cfg = await asyncio.to_thread(update_config, change)
             provider, network_mode = cfg["model_provider"], cfg["network_mode"]
+            from xuloom.security.credentials import is_protected
+            if is_protected(active_connection(cfg).get("api_key")):
+                # Deleting a connection can select another unavailable credential.
+                # Persist the requested edit; the next execution still fails closed.
+                for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+                    os.environ.pop(name, None)
+                return public_config(cfg)
             if method == "config.delete":
                 apply_catalog_env(cfg)
             for suffix in ("model", "base_url", "api_key"):
                 value = cfg.get(provider + "_" + suffix, "")
                 if value:
+                    if suffix == "api_key":
+                        from xuloom.security.credentials import api_key as checked_key
+                        value = checked_key(value)
                     os.environ[provider.upper() + "_" + suffix.upper()] = value
                 else:
                     os.environ.pop(provider.upper() + "_" + suffix.upper(), None)
@@ -986,6 +1065,9 @@ class DesktopBridge:
             self.recorder = None
 
     async def close(self):
+        if self.oauth_task and not self.oauth_task.done():
+            self.oauth_task.cancel()
+            await asyncio.gather(self.oauth_task,return_exceptions=True)
         try:
             await self.dispatch("stop", {})
         finally:

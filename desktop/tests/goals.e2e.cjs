@@ -43,6 +43,17 @@ async function main() {
     for(let i=0;i<100 && JSON.parse(fs.readFileSync(checkpoint)).metadata.goal?.status!=='completed';i++) await page.waitForTimeout(100);
     assert.equal(JSON.parse(fs.readFileSync(checkpoint)).metadata.goal.status,'completed');
     assert.equal(JSON.parse(fs.readFileSync(checkpoint)).metadata.goal.budget.output_tokens,null);
+    assert.equal(JSON.parse(fs.readFileSync(checkpoint)).metadata.goal.accepted_by,'model_report');
+    const completed=page.getByRole('button',{name:'查看目标完成依据',exact:true});
+    await completed.waitFor(); assert((await completed.innerText()).includes('模型报告完成'));
+    await completed.click();
+    await page.getByRole('region',{name:'目标完成依据',exact:true}).getByText('这是模型对任务完成情况的报告，未经过独立程序检查或用户验收。',{exact:true}).waitFor();
+    fs.mkdirSync(path.join(root,'test-results'),{recursive:true});
+    const proof=await app.evaluate(async({BrowserWindow})=>{const web=BrowserWindow.getAllWindows()[0].webContents;await web.capturePage(undefined,{stayHidden:true,stayAwake:true});return(await web.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG().toString('base64');});
+    fs.writeFileSync(path.join(root,'test-results/goals-completion-proof.png'),Buffer.from(proof,'base64'));
+    await page.getByRole('button',{name:'收起已完成目标',exact:true}).click();
+    assert.equal(await page.getByRole('region',{name:'持续目标',exact:true}).count(),0);
+    assert.equal(JSON.parse(fs.readFileSync(checkpoint)).metadata.goal.status,'completed');
     await page.getByRole('button',{name:'添加工具与模式',exact:true}).click();
     await page.getByRole('menuitem',{name:/定时唤醒/}).click();
     await page.getByRole("textbox",{name:"定时消息",exact:true}).fill("WAKE_MESSAGE_PROOF");
@@ -54,6 +65,7 @@ async function main() {
     const count=requests; await app.close(); app=undefined; await launch();
     assert.equal(requests,count); assert.equal(delayed,1);
     assert.equal(JSON.parse(fs.readFileSync(checkpoint)).metadata.goal.status,"completed");
+    await page.getByRole('button',{name:'查看目标完成依据',exact:true}).waitFor();
     const jobs=JSON.parse(fs.readFileSync(path.join(data,"schedules.json"))).items;
     assert.equal(Object.values(jobs)[0].status,"completed");
     assert.deepEqual(errors,[]);

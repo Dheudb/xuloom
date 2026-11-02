@@ -13,7 +13,9 @@
 
 Windows 下载包自带 Python 和 MCP SDK，无需安装 Python、选择解释器或安装 Node.js。第三方 MCP 程序可能另需 Node.js、uv 等环境，按服务说明准备。
 
-当前源码版本为 **v0.1.17**，可下载成品及校验和以 Releases 为准。成品面向 Windows x64；Linux/macOS 可使用源码 CLI，尚无对应的桌面发行包。
+当前源码版本为 **v0.1.23**，可下载成品及校验和以 Releases 为准。成品面向 Windows x64；Linux/macOS 可使用源码 CLI，尚无对应的桌面发行包。
+
+**原生条件续跑：** 普通工具调用可声明已确定的后续动作图，引擎在下一次模型请求前根据真实回执自动推进，支持条件分支、独立只读并行和核对式恢复。每步仍保留权限、隔离和持久化；未知结果、失败或新输入会交回模型。App 与 CLI 共用，无需先发现额外工具；模型未声明计划时保持原流程。详见[原生条件续跑](docs/native-continuations.md)，原[工具序列](docs/tool-sequences.md)仍可显式调用。
 
 执行过程按操作显示图标和简短说明：图片、编辑、终端、搜索等各有标识，点击过程行可展开参数与结果，完成后整轮过程自动折叠。读取图片会显示可点击放大的缩略图；会话保存图片快照，原文件被修改或删除后仍能回看。预览本身不会调用模型；模型理解图片还需所连接的接口支持图片输入。
 
@@ -133,7 +135,7 @@ skills: [literature-review]
 
 上例需要本机 Node.js/npm，并将允许目录改成真实路径。远程配置使用 `type: "http"`、`url`、`headers`。凭据使用环境变量或请求头，避免写入会显示在预览中的命令参数。连接测试会实际启动程序或访问服务，但不会调用聊天模型。
 
-仅启用可信服务。当前未实现 MCP OAuth 登录和旧版 SSE。Windows 系统隔离模式会禁用 MCP。详见 [MCP 配置与搜索](docs/mcp.md)。
+仅启用可信服务。HTTP 服务可使用 [OAuth 登录、刷新与退出](docs/mcp-oauth.md)，支持动态注册、客户端元数据文档及固定 Client ID；Xuloom 本身无需注册账号。旧版 SSE 暂未支持，Windows 系统隔离模式会禁用 MCP。详见 [MCP 配置与搜索](docs/mcp.md)。
 
 ## 会话、文件和权限
 
@@ -153,6 +155,8 @@ skills: [literature-review]
 | macOS 数据 | `~/Library/Application Support/Xuloom/` |
 
 配置与凭据保存在本机，模型和外部工具仍会接收任务中提供给它们的内容。公开仓库及发行包不包含个人配置、私人技能或聊天记录。
+
+Windows 保存模型、生成服务与 MCP 凭据时使用当前用户的原生加密；其他平台当前仍为本机文件存储。旧明文配置可用 `xuloom credentials migrate --json` 显式迁移；不可用的凭据可重新填写，框架不会改用另一组 Key。备份、跨机器与 CLI 修复说明见[凭据保护](docs/credentials.md)。
 
 ## CLI 与源码开发
 

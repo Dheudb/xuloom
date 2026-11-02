@@ -202,6 +202,7 @@ class QueryEngine:
             local_tokenizer_path=self.local_tokenizer_path,
             api_key=self._api_key,
             network_mode=self.network_mode,
+            request_owner=self._request_owner,
         )
         self.plan_manager = PlanManager(session_id=self.session_id)
         self.structured_output_manager = StructuredOutputManager()
@@ -309,8 +310,11 @@ class QueryEngine:
             "exit_plan_mode": ExitPlanModeTool(),
         }
         from xuloom.tools.media_tool import MediaTool
+        from xuloom.tools.tool_sequence import ToolSequenceTool
         all_tools["media_tool"] = MediaTool()
+        all_tools["tool_sequence"] = ToolSequenceTool()
         latent_tool_names = {
+            "tool_sequence",
             "media_tool",
             "goal_report_tool",
             "schedule_tool",
@@ -401,6 +405,7 @@ class QueryEngine:
             "agent_role": self.agent_role,
         }
         self.set_collaboration_mode(self.collaboration_mode, persist=False)
+        self.execution_sandbox.notify = lambda event: self.tool_context["capability_event"](event) if callable(self.tool_context.get("capability_event")) else None
         self._sync_model_runtime_context()
         from xuloom.features.schedules import add as add_schedule
         self.tool_context["schedule_add"] = lambda prompt, **options: add_schedule(self, prompt, **options)
@@ -439,10 +444,10 @@ class QueryEngine:
         next_key = api_key if api_key is not None else (self._api_key if next_provider == self.model_provider else os.environ.get(next_provider.upper() + "_API_KEY", ""))
         next_fallback = self._resolve_fallback_model(None, provider=next_provider, primary_model=next_model)
         next_profile = configured_profile(next_provider, next_model, next_base)
-        next_client = create_model_client(provider=next_provider, model=next_model, api_base_url=next_base, api_key=next_key, network_mode=next_network)
+        next_client = create_model_client(provider=next_provider, model=next_model, api_base_url=next_base, api_key=next_key, network_mode=next_network, request_owner=self._request_owner)
         try:
             next_compactor = MemoryCompactor(model=next_fallback or next_model, provider=next_provider,
-                api_base_url=next_base, local_tokenizer_path=self.local_tokenizer_path, api_key=next_key, network_mode=next_network)
+                api_base_url=next_base, local_tokenizer_path=self.local_tokenizer_path, api_key=next_key, network_mode=next_network, request_owner=self._request_owner)
         except BaseException:
             self._retired_model_clients.append(next_client)
             raise
@@ -532,7 +537,10 @@ class QueryEngine:
     def _build_model_client(self):
         from xuloom.core.network import create_model_client
         return create_model_client(provider=self.model_provider, model=self.primary_model,
-            api_base_url=self.api_base_url, api_key=self._api_key, network_mode=self.network_mode)
+            api_base_url=self.api_base_url, api_key=self._api_key, network_mode=self.network_mode, request_owner=self._request_owner)
+
+    def _request_owner(self):
+        return getattr(self, "tool_context", {}).get("delegation", {}).get("owner_session_id") or self.session_id
 
     def _input_contract(self, model):
         from xuloom.core.model_inputs import configured_inputs
@@ -1150,6 +1158,7 @@ class QueryEngine:
         return instructions(self.tool_context["collaboration"])
 
     def _build_tool_prompt_summary(self) -> str:
+        from xuloom.core.continuation import PROTOCOL
         policy = self.permission_manager.approval_policy.mode
         sections = ["# Tool approval policy\n" + (
             "Full access: tool execution is authorized for this conversation. Do not ask for tool approval. "
@@ -1157,6 +1166,7 @@ class QueryEngine:
             if policy == "full" else
             "Request approval: the tool permission system will request user confirmation when needed. "
             "Do not use the question tool to duplicate tool approval requests.")]
+        sections.append(PROTOCOL)
         if self.execution_sandbox.enabled:
             sections.append("System workspace isolation: file tools, command_tool and repl_tool run in restricted OS processes. "
                 "Network access and unconfined MCP/browser/LSP/legacy shell tools are blocked. Do not attempt host fallbacks. "
@@ -2113,6 +2123,9 @@ class QueryEngine:
     SIBLING_CANCEL_TOOLS = frozenset({"bash_tool"})
 
     def _is_concurrency_safe(self, tool_name: str, tool_inputs: dict) -> bool:
+        if "__xuloom_continuation" in tool_inputs:
+            # Register the complete declaration before the root can stream-execute.
+            return False
         handler = self.available_tools.get(tool_name)
         if not handler:
             return False
@@ -2190,6 +2203,8 @@ class QueryEngine:
         # 2. Start MCP Background Connections
         self.mcp_bridge = MCPBridge(str(configuration_file(self.session_cwd, "mcp_servers.json")))
         remote_tools = await self.mcp_bridge.load_and_connect()
+        for issue in self.mcp_bridge.configuration_issues:
+            sys_print("MCP configuration: " + issue["path"] + ": " + issue["error"])
         for name, status in self.mcp_bridge.statuses.items():
             if status.get("status") == "error":
                 sys_print("MCP " + name + ": " + status["error"])
@@ -2202,7 +2217,8 @@ class QueryEngine:
         effective_tools = self._get_effective_tools()
         schemas = []
         for tool in effective_tools.values():
-            definition = tool.get_tool_definition()
+            from xuloom.core.continuation import schema
+            definition = schema(tool.get_tool_definition())
             if self.model_provider == "openai":
                 schemas.append(self._openai_tool_definition(definition))
             else:
@@ -2687,6 +2703,7 @@ class QueryEngine:
                     local_tokenizer_path=self.local_tokenizer_path,
                     api_key=self._api_key,
                     network_mode=self.network_mode,
+                    request_owner=self._request_owner,
                 )
                 self._sync_model_runtime_context()
             self.todo_manager.load(metadata.get("todos", []))
@@ -2761,11 +2778,14 @@ class QueryEngine:
             self._update_compact_boundary()
             self._sync_message_context()
             self.session_started = metadata.get("hooks", {}).get("session_started", False)
+            from xuloom.core.continuation import restore
+            restore(self, metadata.get("native_continuation"))
             return True
         return False
 
     def _build_session_metadata(self) -> dict:
         return {
+            "native_continuation": copy.deepcopy(self.tool_context.get("native_continuation")),
             "external_agent": copy.deepcopy(self.tool_context.get("external_agent")),
             "execution_mode": self.execution_sandbox.mode,
             "collaboration_mode": self.collaboration_mode,
@@ -4059,6 +4079,12 @@ class QueryEngine:
             try:
                 if self.abort_event.is_set():
                     raise AbortRequestedError("Abort requested before turn start.")
+                from xuloom.core.continuation import advance
+                await advance(self, turn=turn_count, event_callback=event_callback, sys_print_callback=sys_print_callback)
+                # Inputs arriving during native continuation must reach the actor
+                # before any new reasoning request, using the existing inbox path.
+                if mailbox and mailbox():
+                    continue
                 await self._apply_layered_compaction_if_needed(sys_print_callback)
                 remaining_output_budget = self._remaining_output_budget(loop_state)
                 if remaining_output_budget <= 0:

@@ -101,6 +101,15 @@ class TurnRecorder:
             self.flush()
             record["steps"].append({"kind": "text", "text": event["message"],
                 "protocolError": {key: event.get(key) for key in ("retrying", "detail", "diagnostic")}})
+        elif kind == "loop_transition" and event.get("reason") in {"continuation_substitution", "continuation_deferred"}:
+            self.flush()
+            detail = event.get("detail", "")
+            reasons = {"guard_unknown": "条件所需结果不完整", "ambiguous_candidates": "后续动作需要进一步判断",
+                "new_input_or_scope_changed": "收到新输入或执行范围变化", "tool_or_scope_changed": "工具或执行范围变化",
+                "recovery_uncertain": "中断操作需要核对"}
+            text = ("按已声明计划执行 · " + str(event.get("node_id", "")) + " · 未新增模型请求"
+                if event["reason"] == "continuation_substitution" else "交回模型处理 · " + reasons.get(detail, detail))
+            record["steps"].append({"kind": "text", "text": text})
         elif kind in {"subagents_waiting", "workflow_incomplete"}:
             self.flush()
             record["steps"].append({"kind": "text", "text": event["message"]})

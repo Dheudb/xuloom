@@ -416,8 +416,24 @@ class PermissionManager:
                     if not isinstance(matchers, list): raise ValueError("Invalid input matchers")
                     for matcher in matchers:
                         if not isinstance(matcher, dict): raise ValueError("Invalid matcher")
+                        if matcher.keys() - {"source", "path", "key", "case_sensitive", "glob", "regex", "equals", "value", "contains"}:
+                            raise ValueError("Unknown matcher field")
+                        if "case_sensitive" in matcher and type(matcher["case_sensitive"]) is not bool:
+                            raise ValueError("Invalid case_sensitive")
+                        if matcher.get("source", "input_payload") not in ("input_payload", "classifier_input"):
+                            raise ValueError("Invalid matcher source")
+                        for selector in ("path", "key"):
+                            if matcher.get(selector) is not None and not isinstance(matcher[selector], str):
+                                raise ValueError("Invalid matcher path")
+                        if "path" in matcher and "key" in matcher and matcher["path"] != matcher["key"]:
+                            raise ValueError("Conflicting matcher paths")
+                        comparisons = {"glob", "regex", "equals", "value", "contains"}.intersection(matcher)
+                        if len(comparisons) != 1 or matcher[next(iter(comparisons))] is None:
+                            raise ValueError("Provide exactly one matcher comparison")
+                        for operator in ("glob", "regex"):
+                            if operator in matcher and not isinstance(matcher[operator], str):
+                                raise ValueError("Invalid matcher pattern")
                         if "regex" in matcher:
-                            if not isinstance(matcher["regex"], str): raise ValueError("Invalid regex")
                             re.compile(matcher["regex"])
             return payload
         except FileNotFoundError as error:
@@ -554,7 +570,7 @@ class PermissionManager:
         if raw_value is None and path not in {None, ""}:
             return False
 
-        case_sensitive = bool(matcher.get("case_sensitive", True))
+        case_sensitive = matcher.get("case_sensitive", True)
         candidate_text = self._stringify_match_value(raw_value if path not in {None, ""} else source_payload)
 
         glob_pattern = matcher.get("glob")

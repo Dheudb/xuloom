@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { AudioLines, ImagePlus, Music2, Plus, Video } from "lucide-react";
 
 type Kind = "image" | "image-edit" | "video" | "speech" | "sound" | "music";
-type Model = { connectionId: string; id: string; kind: Kind; model: string; base_url: string; hasKey: boolean };
+type Model = { connectionId: string; id: string; kind: Kind; model: string; base_url: string; hasKey: boolean; credentialUnavailable?: boolean };
 type Draft = { connectionId?: string; id?: string; kind: Kind; model: string; base_url: string; apiKey: string; hasKey?: boolean };
 type Job = { id: string; kind: Kind; phase: string; model_id: string; request_id?: string; error?: string; files?: { path: string }[] };
 const labels: Record<Kind, string> = { image: "图片", "image-edit": "图片编辑", video: "视频", speech: "语音", sound: "音效", music: "音乐" };
@@ -36,7 +36,7 @@ export default function MediaSettings({ invoke, busy = false, hasSession, contro
     setSaving(true); setError(""); setStatus("");
     try { await work(); } catch (error) { setError(String(error)); } finally { setSaving(false); }
   }
-  function edit(row: Model) { setDraft({ ...row, apiKey: "" }); setDeleting(""); setError(""); setStatus(""); }
+  function edit(row: Model) { const { connectionId, id, kind, model, base_url, hasKey } = row; setDraft({ connectionId, id, kind, model, base_url, hasKey, apiKey: "" }); setDeleting(""); setError(""); setStatus(""); }
   return <div className="media-settings" aria-busy={loading}>
     <h3>生成模型</h3>
     <p className="fine-print">选择用途，填写 API 地址、Key 和模型名，然后直接在对话里描述你想生成的内容。</p>
@@ -52,7 +52,7 @@ export default function MediaSettings({ invoke, busy = false, hasSession, contro
       {rows.filter(row => row.kind === kind || kind === "image" && row.kind === "image-edit").map(row => {
         const identity = row.connectionId + "/" + row.id;
         return <article className="generation-model-row" key={identity}>
-          <div><strong>{row.model}</strong><p title={row.base_url}>{row.base_url}</p><small>{row.hasKey ? "Key 已保存" : "未填写 Key"}{row.kind === "image-edit" ? " · 图片编辑" : ""}</small></div>
+          <div><strong>{row.model}</strong><p title={row.base_url}>{row.base_url}</p><small>{row.credentialUnavailable ? "凭据不可用，请编辑并重新填写" : row.hasKey ? "Key 已保存" : "未填写 Key"}{row.kind === "image-edit" ? " · 图片编辑" : ""}</small></div>
           <div className="generation-row-actions"><button disabled={busy || saving} onClick={() => edit(row)}>编辑</button>
             <button disabled={busy || saving} onClick={() => {
               if (deleting !== identity) { setDeleting(identity); return; }

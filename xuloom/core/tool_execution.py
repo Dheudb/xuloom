@@ -80,6 +80,9 @@ async def execute_tool(self, tool_block, sys_print_callback=print, *, turn: int 
     tool_name = self._tb_get(tool_block, "name", "")
     tool_id = self._tb_get(tool_block, "id", "")
     tool_inputs = copy.deepcopy(self._tb_get(tool_block, "input", {}) or {})
+    from xuloom.core.continuation import FIELD, KEY, register, observe, current
+    has_declaration = FIELD in tool_inputs
+    declaration = tool_inputs.pop(FIELD, None)
     input_error = bool(self._tb_get(tool_block, "_argument_error", ""))
     handler_invoked = False
     raw_result = None
@@ -136,6 +139,10 @@ async def execute_tool(self, tool_block, sys_print_callback=print, *, turn: int 
             ok=False, content=(self._tb_get(tool_block, "_argument_error", "") +
                 "\nThis call was not executed. Correct the arguments using the tool schema and resubmit only this call; do not repeat completed operations."),
             metadata={"tool_name": tool_name, "executed": False, "code": "invalid_json_arguments"}, is_error=True))
+    elif (has_declaration or self._tb_get(tool_block, "_literal_input", False)) and tool_inputs != {key: value for key, value in self._tb_get(tool_block, "input", {}).items() if key != FIELD}:
+        res_text = serialize_tool_result(build_tool_result(ok=False, is_error=True,
+            content="A hook changed a literal sequence action. Return to the model before executing it.",
+            metadata={"executed": False, "code": "literal_action_changed"}))
     elif tool_name not in self.available_tools:
         input_error = True
         res_text = serialize_tool_result(build_tool_result(ok=False,
@@ -181,6 +188,8 @@ async def execute_tool(self, tool_block, sys_print_callback=print, *, turn: int 
             validation_error = validate_input(**normalized_input) if callable(validate_input) else None
             if isinstance(validation_error, str) and validation_error.strip():
                 raise ToolProtocolError(validation_error)
+            if has_declaration:
+                register(self, tool_block, declaration)
             permission = await self.permission_manager.authorize(
                 handler,
                 tool_inputs,
@@ -193,6 +202,17 @@ async def execute_tool(self, tool_block, sys_print_callback=print, *, turn: int 
                     "delegated_authority_required": bool(self.tool_context.get("delegation", {}).get("authority_required")),
                 },
             )
+            graph = self.tool_context.get(KEY)
+            needs_guard = self._tb_get(tool_block, "_continuation_guard", None) or (has_declaration and graph and graph.get("id") == tool_id)
+            if needs_guard and (not graph or graph.get("status") != "active" or not current(self, graph, tool_name)):
+                from xuloom.security.permissions import PermissionDecision
+                permission = PermissionDecision("deny", "The continuation input, tool or execution scope changed; no action was executed.", source="continuation_scope_changed")
+            expected_scope = self._tb_get(tool_block, "_literal_scope", None)
+            if permission.behavior == "allow" and expected_scope is not None:
+                from xuloom.tools.tool_sequence import sequence_current
+                if not sequence_current(self, expected_scope, tool_name, self._tb_get(tool_block, "_literal_contract", None)):
+                    from xuloom.security.permissions import PermissionDecision
+                    permission = PermissionDecision("deny", "New input or execution scope changed while authorizing this sequence. The action was not executed.", source="sequence_scope_changed")
             if permission.behavior != "allow":
                 await self._record_loop_transition(
                     "permission_denied",
@@ -233,7 +253,11 @@ async def execute_tool(self, tool_block, sys_print_callback=print, *, turn: int 
                             self.in_progress_tools.pop(row.get("tool_use_id"), None)
                 handler_invoked = True
                 from xuloom.security.execution import FILE_TOOLS
-                if confinement.enabled and tool_name in FILE_TOOLS:
+                if tool_name == "tool_sequence":
+                    from xuloom.tools.tool_sequence import execute_sequence
+                    raw_result = await execute_sequence(self, tool_id, **tool_inputs, turn=turn,
+                        event_callback=event_callback, sys_print_callback=sys_print_callback)
+                elif confinement.enabled and tool_name in FILE_TOOLS:
                     raw_result = await confinement.tool(tool_name, tool_inputs, self.tool_context)
                 else:
                     raw_result = await handler(**tool_inputs)
@@ -315,6 +339,7 @@ async def execute_tool(self, tool_block, sys_print_callback=print, *, turn: int 
         agent_id=self.agent_id, tool_name=tool_name, tool_use_id=tool_id,
         result=raw_result, status=status)
     self.session_memory_manager.record_tool_call()
+    observe(self, tool_id, raw_result, receipt)
     self._sync_message_context()
     if not self.persist_session_state():
         # Keep the pre-execution checkpoint authoritative. Recovery must not assume absence of effects.

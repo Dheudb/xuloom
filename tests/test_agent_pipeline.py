@@ -52,6 +52,15 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
                 from xuloom.agents.pipeline import tree
                 live = tree(self.engine.tool_context, "research")["runs"][0]
                 self.assertEqual(live["items"][1]["stages"][1]["status"], "waiting")
+                snapshot = await asyncio.to_thread(read_tree, str(self.root), self.engine.session_id, "research")
+                snapshot = snapshot["runs"][0]
+                self.assertEqual(snapshot["status"], "running")
+                self.assertEqual(snapshot["liveness"], "unconfirmed")
+                step = snapshot["items"][1]["stages"][0]
+                self.assertEqual(step["status"], "running")
+                self.assertEqual(step["recorded_status"], "running")
+                self.assertEqual(step["liveness"], "unconfirmed")
+                self.assertEqual(live["items"][1]["stages"][0]["liveness"], "confirmed_alive")
             finally:
                 slow.set()
             result = await task

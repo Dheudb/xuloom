@@ -113,11 +113,16 @@ def tree(context, run_id=None):
             for stage in saved["spec"]["stages"]:
                 row = matching(context, saved["run_id"], item, stage)
                 state, error = "waiting" if not blocked else "blocked", None
+                liveness = "not_applicable"
                 if row:
                     state = "interrupted" if row.get("outcome_unknown") else row["status"]
                     task = context["subagent_tasks"].tasks.get(row["agent_id"])
-                    if state in {"running", "queued"} and not (task and not task.done()):
-                        state = "awaiting_resume" if state == "queued" else "interrupted"
+                    if state in {"running", "queued"}:
+                        # A reader has no ownership of another process's tasks.
+                        # Absence of a local handle is not evidence of interruption.
+                        liveness = "unconfirmed" if task is None else "confirmed_stopped" if task.done() else "confirmed_alive"
+                        if liveness == "confirmed_stopped":
+                            state = "awaiting_resume" if state == "queued" else "interrupted"
                     try:
                         if not ready:
                             raise ValueError("A predecessor has no verified result")
@@ -127,6 +132,7 @@ def tree(context, run_id=None):
                     except (ValueError, OSError) as exc:
                         state, error = "blocked", str(exc)
                 nodes.append({"stage_id": stage["id"], "status": state,
+                    "recorded_status": row["status"] if row else None, "liveness": liveness,
                     "agent_id": row["agent_id"] if row else None,
                     "started_at": row.get("started_at") if row else None,
                     "finished_at": row.get("finished_at") if row else None, "error": error})
@@ -137,8 +143,11 @@ def tree(context, run_id=None):
                 n["status"] in {"blocked", "interrupted", "crashed", "cancelled", "closed", "awaiting_resume"} for n in nodes) else "waiting"
             branches.append({"item_id": item["id"], "status": state, "stages": nodes,
                 "result": previous if state == "completed" else None})
-        state = "completed" if all(i["status"] == "completed" for i in branches) else "running" if saved["run_id"] in context.get("pipeline_active", set()) else "blocked"
-        output.append({"run_id": saved["run_id"], "status": state, "created_at": saved["created_at"], "items": branches})
+        active = saved["run_id"] in context.get("pipeline_active", set())
+        state = "completed" if all(i["status"] == "completed" for i in branches) else "running" if active or any(i["status"] == "running" for i in branches) else "blocked"
+        output.append({"run_id": saved["run_id"], "status": state,
+            "liveness": "confirmed_alive" if active else "unconfirmed" if state == "running" else "not_applicable",
+            "created_at": saved["created_at"], "items": branches})
     return {"runs": output}
 
 

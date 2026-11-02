@@ -4,6 +4,11 @@
 |---|---|
 | [桌面 App](desktop.md) | 使用便携包、打开项目、设置模型、恢复历史 |
 | [CLI](cli.md) | 安装、启动、命令和会话恢复 |
+| [条件式工具续跑](tool-sequences.md) | 字面动作、回执条件、新输入与权限边界、App/CLI 共享执行 |
+| [原生条件续跑](native-continuations.md) | 普通工具声明动作图、请求边界自动推进、分支、只读并行与恢复 |
+| [原生续跑本地验收](native-continuations-validation-2026-11-02.md) | 最终全量、独立进程恢复、原 EXE 与实际 App／CLI 验证 |
+| [v0.1.23 发布检查](release-v0.1.23-validation.md) | 版本边界、包内专项、App／CLI 与公开资源范围 |
+| [工具续跑本地验收](tool-sequences-validation-2026-11-02.md) | HarnessMM／DeepSeek 参考范围、最终全量与原安装验证 |
 | [目标与调度](goals-and-schedules.md) | 目标预算与验收、正式非交互 CLI、延迟和重复唤醒 |
 | [模型配置](models.md) | 支持的协议、本地模型与兼容边界 |
 | [后台渲染与验证](browser-capture.md) | 隐藏窗口截图、原生图像输入、权限与 CLI 依赖 |

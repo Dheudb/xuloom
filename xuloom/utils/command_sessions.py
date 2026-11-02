@@ -119,6 +119,8 @@ class CommandSessions:
                 row["finished_at"] = int(time.time() * 1000)
                 if launch:
                     launch.close()
+                    if launch.cleanup_issues:
+                        row["cleanup_issues"] = launch.cleanup_issues
                 try:
                     self._save(row)
                 except OSError as error:

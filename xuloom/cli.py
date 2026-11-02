@@ -23,6 +23,30 @@ EXIT_CODES = {"completed": 0, "cancelled": 130, "session_busy": 4, "session_conf
 def parser():
     p = argparse.ArgumentParser(prog="xuloom", description="Non-interactive tasks, persisted goals and timed messages")
     sub = p.add_subparsers(dest="command", required=True)
+    credentials = sub.add_parser("credentials", help="Inspect/migrate OS-protected credentials or replace one model key; no model request")
+    credentials.add_argument("action", choices=("status", "migrate", "set-model-key"))
+    credentials.add_argument("--cwd", help="Also inspect/migrate this project's MCP credentials")
+    credentials.add_argument("--connection", help="Existing model connection ID to repair")
+    credentials.add_argument("--key-env", help="Name of an environment variable holding the new key; never pass the key as an argument")
+    credentials.add_argument("--json", action="store_true")
+    mcp = sub.add_parser("mcp", help="Configure HTTP MCP and explicitly sign in/out; no model request")
+    mcp.add_argument("action", choices=("list","add","update","remove","login","logout"))
+    mcp.add_argument("name", nargs="?")
+    mcp.add_argument("--cwd", default=os.getcwd())
+    mcp.add_argument("--url")
+    mcp.add_argument("--oauth", action="store_true")
+    mcp.add_argument("--client-metadata-url")
+    mcp.add_argument("--client-id")
+    mcp.add_argument("--issuer")
+    mcp.add_argument("--redirect-uri")
+    mcp.add_argument("--client-secret-env", help="Environment variable holding a registered client secret; never pass the secret on the command line")
+    mcp.add_argument("--client-auth", choices=("auto","none","client_secret_basic","client_secret_post"), default="auto")
+    mcp.add_argument("--no-browser", action="store_true")
+    mcp.add_argument("--json", action="store_true")
+    cleanup = sub.add_parser("sandbox-cleanup", help="Inspect or explicitly retry owned Windows isolation cleanup; no model request")
+    cleanup.add_argument("--cwd", default=os.getcwd())
+    cleanup.add_argument("--id", help="Retry the specified saved cleanup record; omitted lists pending records")
+    cleanup.add_argument("--json", action="store_true")
     from xuloom.media.cli import add_parser as add_media_parser
     add_media_parser(sub)
     status = sub.add_parser("git-status", help="Read repository/branch without a model request")
@@ -143,6 +167,98 @@ async def open_engine(args, emit):
 
 
 async def dispatch(args, emit):
+    if args.command == "mcp":
+        from xuloom.branding import configuration_file
+        from xuloom.protocols.mcp_config import MCPConfigStore, validate_server
+        store=MCPConfigStore(configuration_file(Path(args.cwd).resolve(),"mcp_servers.json"))
+        if args.action=="list":
+            issues=[]
+            servers=await asyncio.to_thread(store.snapshot,issues=issues)
+            return {"ok":True,"reason":"completed","servers":servers,"configurationIssues":issues}
+        if not args.name: raise ValueError("Provide an MCP server name")
+        if args.action in {"add","update"}:
+            value={"type":"http","url":args.url,"enabled":False}
+            if args.action=="update":
+                previous=(await asyncio.to_thread(store.read,include_skills=True))["mcpServers"].get(args.name)
+                if not isinstance(previous,dict):raise ValueError("MCP server no longer exists")
+                value["enabled"]=previous.get("enabled",True)
+            fixed_client=any(value is not None for value in (args.client_id,args.issuer,args.redirect_uri,args.client_secret_env)) or args.client_auth!="auto"
+            if not args.oauth and (fixed_client or args.client_metadata_url is not None):
+                raise ValueError("OAuth client options require --oauth")
+            if args.oauth:
+                value["auth"]={"type":"oauth"}
+                if args.client_metadata_url: value["auth"]["client_metadata_url"]=args.client_metadata_url
+                if fixed_client:
+                    value["auth"].update(client_id=args.client_id,issuer=args.issuer,redirect_uri=args.redirect_uri,token_endpoint_auth_method=args.client_auth)
+                    if args.client_secret_env is not None:
+                        if not args.client_secret_env:raise ValueError("Provide the name of the client secret environment variable")
+                        secret=os.environ.get(args.client_secret_env)
+                        if not secret:raise ValueError("The client secret environment variable is missing or empty")
+                        value["auth"]["client_secret"]=secret
+            await asyncio.to_thread(store.save,args.name,value,existing=args.action=="update")
+            return {"ok":True,"reason":"completed","servers":await asyncio.to_thread(store.snapshot)}
+        if args.action=="remove":
+            await asyncio.to_thread(store.remove,args.name)
+            return {"ok":True,"reason":"completed"}
+        from xuloom.protocols.mcp_bridge import runtime_info
+        if not runtime_info()["available"]: raise ValueError(runtime_info()["message"])
+        from xuloom.protocols.oauth_store import OAuthStore
+        from xuloom.protocols.oauth_callback import OAuthCallback
+        from xuloom.protocols.mcp_oauth import login, logout
+        raw=(await asyncio.to_thread(store.read,include_skills=True))["mcpServers"].get(args.name)
+        value=validate_server(raw)
+        if value.get("auth",{}).get("type")!="oauth": raise ValueError("Configure OAuth for this MCP service first")
+        receipt=OAuthStore(store,args.name,value)
+        if args.action=="logout": result=await logout(receipt)
+        else:
+            async def notify(event):
+                await emit({"type":"mcp_oauth_authorize","name":args.name,**event})
+                if not args.json: print("Open this authorization URL: "+event["url"],file=sys.stderr)
+                if not args.no_browser:
+                    import webbrowser
+                    await asyncio.to_thread(webbrowser.open,event["url"])
+            result=await login(receipt,OAuthCallback(),notify)
+        return {"ok":True,"reason":"completed",**result}
+    if args.command == "credentials":
+        from xuloom.core.config import load_config, update_config
+        from xuloom.core.model_catalog import active_connection, connections, project_active, public_config
+        from xuloom.security.credentials import storage_status
+        if args.action == "set-model-key":
+            key = os.environ.get(args.key_env or "", "")
+            if not args.connection or not key:
+                raise ValueError("Provide --connection and --key-env naming a non-empty environment variable")
+            from xuloom.security.credentials import api_key as checked_key
+            key = checked_key(key)
+            def change(cfg):
+                items = connections(cfg)
+                item = next((row for row in items if row["id"] == args.connection), None)
+                if item is None:
+                    raise ValueError("Unknown model connection")
+                item["api_key"] = key
+                return project_active(dict(cfg), active_connection({**cfg, "model_connections": items}), items)
+            cfg = update_config(change)
+        elif args.action == "migrate":
+            cfg = update_config(lambda value: value)
+        else:
+            cfg = load_config()
+        output = {"ok": True, "reason": "completed", "credentials": storage_status(cfg), "config": public_config(cfg)}
+        if args.cwd:
+            from xuloom.branding import configuration_file
+            from xuloom.protocols.mcp_config import MCPConfigStore
+            workspace = Path(args.cwd).resolve(strict=True)
+            if not workspace.is_dir():
+                raise ValueError("Working directory must be a directory")
+            store = MCPConfigStore(configuration_file(workspace, "mcp_servers.json"))
+            data = store.read()
+            if args.action == "migrate" and store.path.is_file():
+                store.migrate()
+            output["mcp"] = storage_status(data)
+        return output
+    if args.command == "sandbox-cleanup":
+        from xuloom.security.sandbox_cleanup import pending, retry
+        report = retry(args.cwd, args.id) if args.id else None
+        ok = report is None or report["status"] == "cleaned"
+        return {"ok": ok, "reason": "completed" if ok else "blocked", "cleanup_issues": pending(args.cwd), "report": report}
     if args.command == "pipeline" and args.action == "tree":
         from xuloom.agents.pipeline import read_tree
         if not args.session: raise ValueError("--session is required")

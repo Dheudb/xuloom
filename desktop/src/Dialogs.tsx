@@ -141,6 +141,7 @@ export function SettingsDialog({
             <KeyRound size={16} /> 模型连接
           </h3>
           <p className="notice">保存模型连接后，新建会话即可使用。</p>
+          {config?.credentialStorage?.unavailable.length ? <p role="alert" className="error">部分受保护凭据无法读取，模型和地址已保留。请选择对应连接重新填写 Key，或删除该连接。</p> : null}
           <div className="api-connection-row"><label>API 连接
             <select aria-label="API 连接" disabled={discovering || saving} value={form.connectionId} onChange={(event) => {
               const connection = config?.connections?.find((item) => item.connectionId === event.target.value);
@@ -270,7 +271,7 @@ export function SettingsDialog({
             </select>
           </label>
           <p className="fine-print">
-            沿用 Xuloom 本机配置；密钥不会返回聊天界面。
+            {config?.credentialStorage?.mode === "windows-dpapi" ? "保存时由 Windows 当前用户加密保护凭据；密钥不会返回聊天界面。" : ["macos-keychain", "secret-service"].includes(config?.credentialStorage?.mode || "") ? "保存时使用系统密钥环保护凭据；密钥环需保持可用，密钥不会返回聊天界面。" : config?.credentialStorage?.mode === "unavailable" ? "已要求系统凭据保护，但原生后端不可用；本次不能保存凭据。请安装 secrets 可选依赖并解锁系统密钥环。" : "凭据保存在本机配置，当前未启用原生加密；可安装 secrets 可选依赖或使用环境变量。"}
           </p>
         {error && tab === "model" && <p role="alert" className="error">{error}</p>}
         <footer>

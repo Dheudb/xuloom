@@ -8,7 +8,6 @@ import subprocess
 import sys
 import tempfile
 import uuid
-import shutil
 
 
 class StartupInfo(C.Structure):
@@ -24,6 +23,18 @@ class StartupEx(C.Structure):
 
 class ProcessInfo(C.Structure):
     _fields_ = [("process", W.HANDLE), ("thread", W.HANDLE), ("pid", W.DWORD), ("tid", W.DWORD)]
+
+
+class AclSizeInfo(C.Structure):
+    _fields_ = [("count", W.DWORD), ("used", W.DWORD), ("free", W.DWORD)]
+
+
+class AceHeader(C.Structure):
+    _fields_ = [("kind", W.BYTE), ("flags", W.BYTE), ("size", W.WORD)]
+
+
+class AllowedAce(C.Structure):
+    _fields_ = [("header", AceHeader), ("mask", W.DWORD), ("sid_start", W.DWORD)]
 
 
 class Capabilities(C.Structure):
@@ -65,10 +76,14 @@ class WindowsAPI:
             (self.base, "DeriveCapabilitySidsFromName", [W.LPCWSTR, C.POINTER(C.c_void_p), C.POINTER(W.DWORD), C.POINTER(C.c_void_p), C.POINTER(W.DWORD)], W.BOOL),
             (self.userenv, "CreateAppContainerProfile", [W.LPCWSTR, W.LPCWSTR, W.LPCWSTR, C.c_void_p, W.DWORD, C.POINTER(C.c_void_p)], C.c_long),
             (self.userenv, "DeleteAppContainerProfile", [W.LPCWSTR], C.c_long),
+            (self.userenv, "DeriveAppContainerSidFromAppContainerName", [W.LPCWSTR, C.POINTER(C.c_void_p)], C.c_long),
             (self.advapi, "ConvertSidToStringSidW", [C.c_void_p, C.POINTER(W.LPWSTR)], W.BOOL),
             (self.advapi, "FreeSid", [C.c_void_p], C.c_void_p),
             (self.advapi, "GetFileSecurityW", [W.LPCWSTR, W.DWORD, C.c_void_p, W.DWORD, C.POINTER(W.DWORD)], W.BOOL),
             (self.advapi, "GetSecurityDescriptorDacl", [C.c_void_p, C.POINTER(W.BOOL), C.POINTER(C.c_void_p), C.POINTER(W.BOOL)], W.BOOL),
+            (self.advapi, "GetAclInformation", [C.c_void_p, C.c_void_p, W.DWORD, W.DWORD], W.BOOL),
+            (self.advapi, "GetAce", [C.c_void_p, W.DWORD, C.POINTER(C.c_void_p)], W.BOOL),
+            (self.advapi, "EqualSid", [C.c_void_p, C.c_void_p], W.BOOL),
             (self.advapi, "SetEntriesInAclW", [W.DWORD, C.POINTER(Access), C.c_void_p, C.POINTER(C.c_void_p)], W.DWORD),
             (self.advapi, "InitializeSecurityDescriptor", [C.c_void_p, W.DWORD], W.BOOL),
             (self.advapi, "SetSecurityDescriptorDacl", [C.c_void_p, W.BOOL, C.c_void_p, W.BOOL], W.BOOL),
@@ -126,6 +141,34 @@ class WindowsAPI:
         finally:
             self.kernel.LocalFree(updated)
 
+    def owns_writable_directory(self, path, sid):
+        """Verify a legacy scratch directory's explicit Modify grant, not its name."""
+        size = W.DWORD()
+        self.advapi.GetFileSecurityW(str(path), 4, None, 0, C.byref(size))
+        descriptor = C.create_string_buffer(size.value)
+        self.check(self.advapi.GetFileSecurityW(str(path), 4, descriptor, size, C.byref(size)))
+        present, defaulted, acl = W.BOOL(), W.BOOL(), C.c_void_p()
+        self.check(self.advapi.GetSecurityDescriptorDacl(descriptor, C.byref(present), C.byref(acl), C.byref(defaulted)))
+        if not present.value or not acl.value:
+            return False
+        info = AclSizeInfo()
+        self.check(self.advapi.GetAclInformation(acl, C.byref(info), C.sizeof(info), 2))
+        for index in range(info.count):
+            entry = C.c_void_p()
+            self.check(self.advapi.GetAce(acl, index, C.byref(entry)))
+            header = C.cast(entry, C.POINTER(AceHeader)).contents
+            # Allow ACE, not inherited/inherit-only; require write-data+delete.
+            if header.size < 16 or header.kind != 0 or header.flags & 0x18:
+                continue
+            ace = C.cast(entry, C.POINTER(AllowedAce)).contents
+            if ace.mask & 0x10002 != 0x10002:
+                continue
+            address = entry.value + AllowedAce.sid_start.offset
+            length = 8 + 4 * C.c_ubyte.from_address(address + 1).value
+            if AllowedAce.sid_start.offset + length <= header.size and self.advapi.EqualSid(sid, C.c_void_p(address)):
+                return True
+        return False
+
 
 def restricted_environment(scratch):
     allowed = {"SYSTEMROOT", "WINDIR", "SYSTEMDRIVE", "OS", "COMSPEC", "PATHEXT", "PATH", "PROGRAMDATA",
@@ -139,33 +182,44 @@ def restricted_environment(scratch):
 def launch(spec):
     api = WindowsAPI()
     kernel = api.kernel
-    name = "xuloom.sandbox." + uuid.uuid4().hex
+    identity = uuid.uuid4().hex
+    name = "xuloom.sandbox." + identity
     sid, attributes, job, owner, event = C.c_void_p(), None, None, None, None
     process = ProcessInfo()
-    changed, traversed, capability_allocations, sid_text, scratch = [], [], [], "", None
+    capability_allocations, sid_text, scratch = [], "", None
     workspace = Path(spec["workspace"]).resolve(strict=True)
     cwd = Path(spec["cwd"]).resolve(strict=True)
     if not cwd.is_relative_to(workspace):
         raise ValueError("Sandbox cwd is outside its authorized workspace")
+    from xuloom.security.sandbox_cleanup import directory, save, remove_grants, report_path
+    from xuloom.core.session_lock import SessionLock
+    cleanup_lock = SessionLock(directory(), identity)
+    cleanup_lock.acquire()
+    report = dict(id=identity, profile=name, workspace=str(workspace), status="active", sid=None,
+                  grants=[], traversed=[], scratch=None, failures=[])
     icacls = str(Path(os.environ["SystemRoot"]) / "System32/icacls.exe")
     def acl(path, permission):
         if event and kernel.WaitForSingleObject(event, 0) == 0:
             raise InterruptedError("Sandbox setup cancelled")
         path = Path(path).resolve(strict=True)
-        changed.append(path)
+        report["grants"].append(str(path)); save(report)
         completed = subprocess.run([icacls, str(path), "/L", "/grant", "*" + sid_text + ":" + permission],
             capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
         if completed.returncode:
             raise OSError("Sandbox ACL setup failed; execution was not started")
     try:
+        save(report)
         hr = api.userenv.CreateAppContainerProfile(name, name, "Xuloom restricted tool execution", None, 0, C.byref(sid))
         if hr < 0:
             raise OSError("AppContainer creation failed: " + hex(hr & 0xffffffff))
         text = W.LPWSTR()
         api.check(api.advapi.ConvertSidToStringSidW(sid, C.byref(text)))
         sid_text = text.value
+        report["sid"] = sid_text; save(report)
         kernel.LocalFree(text)
-        scratch = tempfile.mkdtemp(prefix="xuloom-restricted-")
+        scratch = tempfile.mkdtemp(prefix="xuloom-restricted-" + identity + "-")
+        details = os.lstat(scratch)
+        report.update(scratch=scratch, scratch_identity=[details.st_dev, details.st_ino]); save(report)
         if scratch:
             event = api.check(kernel.OpenEventW(0x100000, False, spec["cancel_event"]))
             acl(workspace, "(OI)(CI)M")
@@ -177,8 +231,8 @@ def launch(spec):
                 acl(parent, "RX")
             for parent in set(p for item in [workspace] + [Path(root) for root in spec["read_roots"]] for p in item.parents):
                 if parent.is_relative_to(Path.home()):
+                    report["traversed"].append(str(parent)); save(report)
                     api.traverse(parent, sid)
-                    traversed.append(parent)
             count = C.c_size_t()
             kernel.InitializeProcThreadAttributeList(None, 3, 0, C.byref(count))
             attributes = C.create_string_buffer(count.value)
@@ -239,23 +293,16 @@ def launch(spec):
                 kernel.CloseHandle(handle)
         if attributes is not None:
             kernel.DeleteProcThreadAttributeList(attributes)
-        if sid.value and sid_text:
-            for path in traversed:
-                try:
-                    api.traverse(path, sid, remove=True)
-                except OSError:
-                    pass
-            for path in reversed(list(dict.fromkeys(changed))):
-                if path.exists():
-                    subprocess.run([icacls, str(path), "/L", "/remove", "*" + sid_text], capture_output=True,
-                        creationflags=subprocess.CREATE_NO_WINDOW)
-        if sid.value:
-            api.advapi.FreeSid(sid)
-            api.userenv.DeleteAppContainerProfile(name)
-        for allocation in capability_allocations:
-            kernel.LocalFree(allocation)
-        if scratch:
-            shutil.rmtree(scratch, ignore_errors=True)
+        try:
+            remove_grants(report, api, icacls)
+            if report["status"] != "cleaned":
+                print("Sandbox execution ended; cleanup needs attention. Record: " + str(report_path(identity)), file=sys.stderr)
+        finally:
+            cleanup_lock.close()
+            if sid.value:
+                api.advapi.FreeSid(sid)
+            for allocation in capability_allocations:
+                kernel.LocalFree(allocation)
 
 
 if __name__ == "__main__":

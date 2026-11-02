@@ -147,7 +147,10 @@ async function main() {
     }, secondId), "Backend requires explicit deletion confirmation");
     await confirmDelete();
     assert.equal(readConfig().active_model_connection, "legacy-openai");
-    assert.equal(readConfig().openai_api_key, "first-fixture-key");
+    if (process.platform === "win32") {
+      assert.equal(readConfig().openai_api_key.$xuloom_secret, "dpapi-v1");
+      assert(!JSON.stringify(readConfig()).includes("first-fixture-key"), "Saved keys must be protected at rest");
+    } else assert.equal(readConfig().openai_api_key, "first-fixture-key");
     assert(!JSON.stringify(readConfig()).includes("second-fixture-key"));
     assert.equal(await page.getByLabel("API 连接").inputValue(), "legacy-openai");
     await page.getByRole("button", { name: "关闭设置", exact: true }).click();
@@ -175,6 +178,21 @@ async function main() {
     await page.getByLabel("API 地址", { exact: true }).fill(firstUrl);
     await page.getByLabel("API Key", { exact: true }).fill("first-fixture-key"); await save();
     await send("重新添加后正常请求", "one");
+    if (process.platform === "win32") {
+      await app.close();
+      const damaged = readConfig();
+      damaged.model_connections.find(row => row.id === damaged.active_model_connection).api_key.data = "unreadable-owned-fixture!";
+      damaged.openai_api_key.data = "unreadable-owned-fixture!";
+      atomicJSON(path.join(config, "config.json"), damaged);
+      const beforeRepair = requests.length;
+      await launch(); await settings();
+      await page.getByText("部分受保护凭据无法读取，模型和地址已保留。请选择对应连接重新填写 Key，或删除该连接。", { exact: true }).waitFor();
+      assert.equal(await page.getByLabel("API 地址", { exact: true }).inputValue(), firstUrl);
+      assert.equal(requests.length, beforeRepair, "Unreadable credentials do not issue requests during restart");
+      await page.getByLabel("API Key", { exact: true }).fill("first-fixture-key"); await save();
+      await send("修复凭据后继续", "one");
+      assert(!JSON.stringify(readConfig()).includes("first-fixture-key"));
+    }
     assert.deepEqual(errors, []);
     console.log("Model E2E passed: shared keys/models, switching, running guard, confirmed deletion, active fallback, empty catalog restart, no stale API requests and re-add");
   } finally {
