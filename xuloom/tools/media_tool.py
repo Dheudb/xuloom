@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from xuloom.context.tool_results import build_tool_result
 from xuloom.core.run_result import PersistenceError
-from xuloom.media import config, files, jobs, queue
+from xuloom.media import adapters, config, files, generation, jobs, queue
 from xuloom.tools.base import BaseAgenticTool
 
 
@@ -26,7 +26,7 @@ class MediaInput(BaseModel):
     connection: Optional[str] = Field(None, description="Configured media connection ID, returned by capabilities")
     model: Optional[str] = Field(None, description="Model entry ID within the connection, not an invented provider endpoint")
     prompt: Optional[str] = Field(None, min_length=1, max_length=20000)
-    inputs: dict = Field(default_factory=dict, description="Additional model input JSON, such as lyrics, voice_setting or duration; see the configured model defaults")
+    inputs: dict = Field(default_factory=dict, description="Standard optional generation controls: size (WIDTHxHEIGHT), aspect_ratio, duration_seconds, voice, speed, n, seed, instrumental, negative_prompt. The framework maps supported controls to the selected API; do not invent provider-specific fields.")
     image_paths: list[str] = Field(default_factory=list, max_length=4, description="Local reference images to upload for image-edit or image-conditioned generation")
     output_dir: Optional[str] = Field(None, description="Output directory for submit; defaults to generated/ in this workspace")
     job_id: Optional[str] = Field(None, description="Real Xuloom media task ID from submit/list; status never creates another generation")
@@ -128,7 +128,8 @@ class MediaTool(BaseAgenticTool):
             isolation.check_tool(self.name)  # Fail closed even when called outside the normal wrapper.
         if action == "capabilities":
             return build_tool_result(ok=True, content=json.dumps({"connections": config.public_connections(),
-                "protocols": ["fal-queue"], "max_wait_ms": 120000, "generation_requires_approval": True}, ensure_ascii=False))
+                "models": config.public_models(), "protocols": list(adapters.PROTOCOLS), "protocol_selection": "automatic",
+                "max_wait_ms": 120000, "generation_requires_approval": True}, ensure_ascii=False))
         if action == "list":
             return build_tool_result(ok=True, content=json.dumps({"jobs": jobs.listing(self.context)}, ensure_ascii=False))
         record, key = None, ""
@@ -162,7 +163,18 @@ class MediaTool(BaseAgenticTool):
                         payload[field] = images[0]
                     else:
                         payload[field] = images
-                digest = hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+                adapter, submit_url, uploads = None, None, []
+                if binding["protocol"] == "auto":
+                    adapter, schema = await adapters.detect(binding)
+                    image_data = [{"mime": item.split(";")[0][5:], "data": base64.b64decode(item.split(",", 1)[1])} for item in images]
+                    if adapter == "fal-queue":
+                        payload = await adapters.fal_payload(binding, prompt, inputs or {}, image_data, schema)
+                    else:
+                        submit_url, payload, uploads = await adapters.prepare(binding, key, adapter, prompt, inputs or {}, image_data)
+                    if re.search(r'"(?:api[_-]?key|authorization|access[_-]?token|password|secret)"\s*:', json.dumps(payload, ensure_ascii=False), re.I):
+                        raise ValueError("Generation schema must not insert credential fields into inputs")
+                digest_input = [payload, [hashlib.sha256(upload[1][1]).hexdigest() for upload in uploads]] if uploads else payload
+                digest = hashlib.sha256(json.dumps(digest_input, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
                 duplicate = jobs.uncertain_duplicate(self.context, binding, digest)
                 if duplicate and not retry_unknown:
                     return self._response(duplicate)
@@ -174,6 +186,9 @@ class MediaTool(BaseAgenticTool):
                     "phase": "submitting", "created_at": int(time.time() * 1000), "files": [],
                     "input_digest": digest}
                 self._save(record)  # Intent is durable before the one and only POST.
+                if adapter and adapter != "fal-queue":
+                    immediate = await generation.submit(self, record, key, adapter, submit_url, payload, uploads)
+                    return immediate if immediate is not None else await generation.inspect(self, record, key, "status", wait_ms)
                 value = await queue.request(binding, key, "POST", binding["base_url"] + "/" + binding["model"]["model"], payload)
                 candidate = value.get("request_id")
                 if isinstance(candidate, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", candidate):
@@ -185,6 +200,8 @@ class MediaTool(BaseAgenticTool):
                 if record["phase"] in {"downloaded", "failed", "cancelled"}:
                     return self._response(record, cancel=action == "cancel")
                 binding, key = config.resolve(record["connection_id"], record["model_id"], frozen=record["binding"])
+                if record.get("adapter") in {"openai-media", "eleven-audio"}:
+                    return await generation.inspect(self, record, key, action, wait_ms)
                 if not all(record.get(field) for field in ("request_id", "status_url", "response_url", "cancel_url")):
                     record.update(phase="unknown", error="Submission outcome is unknown; no new POST was made. Inspect this task with the provider before any new generation.")
                     self._save(record); return self._response(record)

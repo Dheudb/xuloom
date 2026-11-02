@@ -8,7 +8,7 @@ for (const directory of [config, data, work]) fs.mkdirSync(directory);
 atomicJSON(path.join(data, "workbench.json"), { projects: [], activeConversation: null, defaultDirectory: work });
 const env = { ...process.env, XULOOM_CONFIG_DIR: config, XULOOM_DATA_DIR: data, XULOOM_USER_DATA: data, HOME: path.join(fixture, "home"), USERPROFILE: path.join(fixture, "home"), XULOOM_SKILLS_PATHS: "", XULOOM_TEST_HEADLESS: "1", NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" };
 for (const key of ["ELECTRON_RUN_AS_NODE", "XULOOM_DEV_URL", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL", "XULOOM_MODEL_PROVIDER"]) delete env[key];
-let base, app, page, mediaConnectionId, sequence = 0, video, png, pending = false, statusRequests = 0;
+let base, app, page, mediaConnectionId, modelIds = {}, sequence = 0, video, png, pending = false, statusRequests = 0;
 const jobs = new Map(), posts = [], chatRequests = [], errors = [];
 const wav = Buffer.alloc(44 + 32000);
 wav.write("RIFF", 0); wav.writeUInt32LE(wav.length - 8, 4); wav.write("WAVEfmt ", 8); wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(8000, 24); wav.writeUInt32LE(16000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write("data", 36); wav.writeUInt32LE(32000, 40);
@@ -18,6 +18,7 @@ const server = http.createServer((req, res) => {
     assert.equal(req.headers.authorization, 'Key MEDIA_FIXTURE_KEY'); json(res, { status: 'OK' }); return;
   }
   if (req.method === "GET") {
+    if (req.url === "/q/openapi.json") { assert(!req.headers.authorization); json(res, {openapi: "3.0.0", paths: {"/models/requests/{request_id}/status": {get: {}}}}); return; }
     if (req.url.startsWith("/asset/")) {
       const kind = req.url.split("/").at(-1), body = kind === "image" ? png : kind === "video" ? video : wav;
       assert(!req.headers.authorization, "Generated media downloads must not receive the API key");
@@ -33,7 +34,7 @@ const server = http.createServer((req, res) => {
     const body = JSON.parse(raw);
     if (req.url.startsWith("/q/")) {
       assert.equal(req.headers.authorization, "Key MEDIA_FIXTURE_KEY"); posts.push(body);
-      const id = randomUUID(); jobs.set(id, body); const url = base + "/q/fal-ai/app/requests/" + id;
+      const id = randomUUID(); jobs.set(id, {...body, fixture_kind: req.url.split("/").at(-1)}); const url = base + "/q/fal-ai/app/requests/" + id;
       json(res, { request_id: id, status: "IN_QUEUE", status_url: url + "/status", response_url: url, cancel_url: url + "/cancel" }); return;
     }
     assert.equal(req.headers.authorization, "Bearer CHAT_FIXTURE_KEY"); chatRequests.push(body);
@@ -46,7 +47,7 @@ const server = http.createServer((req, res) => {
     if (after.length === 1) tool = { name: "media_tool", arguments: { action: "capabilities" } };
     if (after.length === 2) {
       assert(mediaConnectionId && JSON.stringify(after[1]).includes(mediaConnectionId), "Capabilities must expose the saved generated identity to the model");
-      tool = { name: "media_tool", arguments: { action: "submit", connection: mediaConnectionId, model: kind, prompt: "Fixture " + kind + " generation", wait_ms: 0 } };
+      tool = { name: "media_tool", arguments: { action: "submit", connection: mediaConnectionId, model: modelIds[kind], prompt: "Fixture " + kind + " generation", wait_ms: 0 } };
     }
     res.writeHead(200, { "Content-Type": "text/event-stream" });
     const send = (delta, finish_reason) => res.write("data: " + JSON.stringify({ choices: [{ index: 0, delta, finish_reason }] }) + "\n\n");
@@ -61,7 +62,7 @@ async function launch() {
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setBackgroundThrottling(false));
   await page.waitForFunction(() => !document.querySelector(".new-task")?.disabled);
 }
-async function settings() { await page.getByRole("button", { name: "设置与模型", exact: true }).click(); await page.getByRole("tab", { name: "媒体生成", exact: true }).click(); await page.waitForFunction(() => document.querySelector('.media-settings')?.getAttribute('aria-busy') === 'false'); }
+async function settings() { await page.getByRole("button", { name: "设置与模型", exact: true }).click(); await page.getByRole("tab", { name: "生成模型", exact: true }).click(); await page.waitForFunction(() => document.querySelector('.media-settings')?.getAttribute('aria-busy') === 'false'); }
 async function run(kind) {
   await page.getByRole("textbox", { name: "任务输入", exact: true }).fill("MEDIA_" + kind.toUpperCase());
   await page.getByRole("button", { name: "发送任务", exact: true }).click(); await page.getByText("MEDIA_DONE_" + kind.toUpperCase(), { exact: true }).last().waitFor();
@@ -90,41 +91,49 @@ async function preview(extension) {
     return { png, video: btoa(String.fromCharCode(...bytes)) };
   });
   png = Buffer.from(encoded.png, "base64"); video = Buffer.from(encoded.video, "base64"); assert(video.includes(Buffer.from([0x1f, 0x43, 0xb6, 0x75])), "The hidden test recorder must produce actual video frames, not only a WebM header");
-  await settings(); await page.getByRole("button", { name: "添加生成服务", exact: true }).click();
-  assert.equal(await page.getByRole("textbox", { name: "媒体连接 ID", exact: true }).count(), 0);
-  assert.equal(await page.getByRole("textbox", { name: "媒体 API 地址", exact: true }).inputValue(), "");
-  for (const label of ["图片", "图片编辑", "视频", "语音", "音效", "音乐"])
-    await page.locator(".media-add-models").getByRole("button", { name: label, exact: true }).click();
-  for (let index = 1; index <= 6; index++) {
-    assert.equal(await page.getByLabel("供应商模型端点 " + index, { exact: true }).inputValue(), "");
-    assert.equal(await page.getByLabel("媒体默认参数 " + index, { exact: true }).inputValue(), "{}");
+  await settings();
+  assert.equal(await page.locator('.generation-category').count(), 5);
+  for (const kind of ["图片", "视频", "语音", "音效", "音乐"]) {
+    await page.getByRole("button", {name: "添加" + kind + "模型", exact: true}).click();
+    const form = page.locator('.generation-model-form');
+    assert.equal(await form.locator('input').count(), 3);
+    for (const field of ["生成模型 API 地址", "生成模型 API Key", "生成模型名称"])
+      assert.equal(await page.getByLabel(field, {exact: true}).inputValue(), "");
+    assert.equal(await form.locator('textarea, select').count(), 0);
+    await form.getByRole('button', {name: '取消', exact: true}).click();
+    await form.waitFor({state: 'hidden'});
   }
-  assert(!/minimax|fal-ai\/flux/i.test(await page.locator(".media-settings").innerText()));
-  await page.locator(".media-settings h3").scrollIntoViewIfNeeded();
+  assert(!/minimax|fal-ai\/flux|连接 ID|默认参数|接口协议/.test(await page.locator('.media-settings').innerText()));
+  await page.getByRole('button', {name:'添加图片模型',exact:true}).click();
+  await page.locator('.generation-model-form').waitFor();
+  await page.locator('.media-settings h3').scrollIntoViewIfNeeded();
   const blankSettings = await app.evaluate(async ({ BrowserWindow }) =>
     (await BrowserWindow.getAllWindows()[0].webContents.capturePage(undefined, { stayHidden: true, stayAwake: true })).toDataURL());
   fs.mkdirSync(path.join(root, "test-results"), { recursive: true });
   fs.writeFileSync(path.join(root, "test-results/media-blank-config.png"), Buffer.from(blankSettings.split(",")[1], "base64"));
-  await page.getByRole("button", { name: "取消", exact: true }).click();
-  await page.getByRole("button", { name: "添加生成服务", exact: true }).click();
-  await page.getByRole("textbox", { name: "媒体连接名称", exact: true }).fill("Generation fixture");
-  await page.getByRole("textbox", { name: "媒体 API 地址", exact: true }).fill(base + "/q"); await page.getByLabel("媒体 API Key", { exact: true }).fill("MEDIA_FIXTURE_KEY");
-  for (const [index, kind, label] of [[1, "image", "图片"], [2, "speech", "语音"], [3, "video", "视频"]]) {
-    await page.locator(".media-add-models").getByRole("button", { name: label, exact: true }).click();
-    await page.getByRole("textbox", { name: "供应商模型端点 " + index, exact: true }).fill("fixture-owner/" + kind);
-    const row = page.locator(".media-model").nth(index - 1); await row.locator("summary").click();
-    await page.getByRole("textbox", { name: "媒体默认参数 " + index, exact: true }).fill(JSON.stringify({ fixture_kind: kind }));
+  await page.locator('.generation-model-form').getByRole('button',{name:'取消',exact:true}).click();
+  await page.locator('.generation-model-form').waitFor({state:'hidden'});
+  for (const [kind, label] of [["image", "图片"], ["speech", "语音"], ["video", "视频"]]) {
+    await page.getByRole("button", {name: "添加" + label + "模型", exact: true}).click();
+    await page.getByLabel('生成模型 API 地址', {exact: true}).fill(base + '/q');
+    await page.getByLabel('生成模型 API Key', {exact: true}).fill('MEDIA_FIXTURE_KEY');
+    await page.getByLabel('生成模型名称', {exact: true}).fill('fixture-owner/' + kind);
+    await page.getByRole('button', {name:'保存模型', exact:true}).click();
+    await page.getByText('生成模型已保存，可直接在对话中使用。', {exact:true}).waitFor();
   }
-  await page.getByRole("button", { name: "保存生成服务", exact: true }).click(); await page.getByText("生成服务已保存。可直接在对话中描述要生成的内容。", { exact: true }).waitFor();
-  assert.equal(posts.length, 0, "Saving configuration must not generate media");
-  await page.getByRole("button", { name: "编辑服务", exact: true }).click(); assert.equal(await page.getByLabel("媒体 API Key", { exact: true }).inputValue(), "");
-  await page.getByRole("button", { name: "保存生成服务", exact: true }).click(); await page.getByText("Key 已保存", { exact: true }).waitFor();
+  assert.equal(posts.length, 0, 'Saving never generates or probes the provider');
+  await page.getByRole('region', {name:'图片生成模型', exact:true}).getByRole('button',{name:'编辑', exact:true}).click();
+  assert.equal(await page.getByLabel('生成模型 API Key',{exact:true}).inputValue(), '');
+  await page.getByRole('button',{name:'保存模型',exact:true}).click();
+  await page.getByText('生成模型已保存，可直接在对话中使用。',{exact:true}).waitFor();
   const python = process.env.XULOOM_TEST_EXECUTABLE ? path.join(path.dirname(process.env.XULOOM_TEST_EXECUTABLE), "resources/python/python.exe") : resolveEnginePython({ packaged: false, projectRoot: repo });
-  const cli = spawnSync(python, ["-m", "xuloom", "media", "connections", "--json"], { cwd: repo, env, encoding: "utf8", windowsHide: true });
+  const cliEnv = {...env, PYTHONPATH: process.env.XULOOM_TEST_EXECUTABLE ? path.join(path.dirname(process.env.XULOOM_TEST_EXECUTABLE),'resources/python/Lib/site-packages') : repo};
+  const cli = spawnSync(python, ["-m", "xuloom", "media", "connections", "--json"], { cwd: fixture, env: cliEnv, encoding: "utf8", windowsHide: true });
   assert.equal(cli.status, 0, cli.stderr); const publicConfig = JSON.parse(cli.stdout).result.connections;
   assert.equal(publicConfig[0].models.length, 3); assert(publicConfig[0].hasKey); assert(!cli.stdout.includes("MEDIA_FIXTURE_KEY"));
   assert.match(publicConfig[0].id, /^media-[0-9a-f]{32}$/);
   mediaConnectionId = publicConfig[0].id;
+  modelIds = Object.fromEntries(publicConfig[0].models.map(model => [model.kind, model.id]));
   await page.getByRole("button", { name: "关闭设置", exact: true }).click(); await page.locator(".new-task").click(); await page.locator(".session-item.active").waitFor();
   await page.getByLabel("访问权限", { exact: true }).selectOption("full"); await page.waitForFunction(() => !document.querySelector(".permission-picker")?.disabled);
   await run("image"); let region = await preview("png"); await region.getByAltText("文件图片预览", { exact: true }).waitFor();
@@ -174,10 +183,11 @@ async function preview(extension) {
   await settings(); await page.getByText("此会话已保存的生成任务", { exact: true }).waitFor();
   assert.equal(await page.locator(".media-job-history details").count(), 5); assert.equal(posts.length, 5);
   assert(!(await page.locator("body").innerText()).includes("MEDIA_FIXTURE_KEY"));
-  await page.getByRole("button", { name: "移除", exact: true }).click(); await page.getByRole("button", { name: "确认移除服务", exact: true }).click();
-  await page.getByText("服务已移除；供应商已有任务没有被取消。", { exact: true }).waitFor(); assert.equal(posts.length, 5);
+  const imageSettings = page.getByRole('region',{name:'图片生成模型',exact:true});
+  await imageSettings.getByRole("button", { name: "移除", exact: true }).click(); await imageSettings.getByRole("button", { name: "确认移除", exact: true }).click();
+  await page.getByText("模型已移除；供应商已有任务没有被取消。", { exact: true }).waitFor(); assert.equal(posts.length, 5);
   assert.deepEqual(errors, []);
-  console.log("Media E2E passed: native settings + shared masked CLI config, deferred tool discovery, one key/multiple models, actual generated files, decoded PNG/WAV/WebM playback, source navigation, direct status without a chat-model call or draft loss, restart without re-submission and connection removal");
+  console.log("Media E2E passed: five type sections, three blank fields only + shared masked CLI config, deferred tool discovery, one key/multiple models, actual generated files, decoded PNG/WAV/WebM playback, source navigation, direct status without a chat-model call or draft loss, restart without re-submission and connection removal");
 } catch (error) { if (page) console.error((await page.locator("body").innerText().catch(() => "")).slice(-7000)); throw error; }
 finally { if (app) await app.close().catch(() => {}); server.closeAllConnections(); server.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

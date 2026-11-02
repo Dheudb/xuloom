@@ -130,21 +130,35 @@ async def download(binding, descriptor, directory, stem):
                 raise ValueError("Too many media download redirects")
         if size < 16 or descriptor.get("size") is not None and size != descriptor["size"]:
             raise ValueError("Generated media is empty or its declared size does not match")
-        actual_mime, extension = identify(temporary, kind)
-        aliases = {"audio/x-wav": "audio/wav", "audio/wave": "audio/wav", "audio/mp3": "audio/mpeg"}
-        if aliases.get(mime, mime) not in {"", "application/octet-stream", "binary/octet-stream", actual_mime}:
-            raise ValueError("Response MIME type disagrees with its media bytes")
-        target = directory / (stem + extension)
-        fingerprint = digest.hexdigest()
-        if target.exists():
-            if target.is_symlink() or not target.is_file() or target.stat().st_size != size:
-                raise ValueError("An existing output conflicts with this media task; no file was overwritten")
-            if file_sha256(target) != fingerprint:
-                raise ValueError("An existing output changed; no file was overwritten")
-        else:
-            # The complete, flushed sibling is published without replacing a racing file.
-            os.link(temporary, target)
-        return {"path": str(target), "mime": actual_mime, "size": size, "sha256": fingerprint}
+        return publish(temporary, directory, stem, kind, mime)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+
+
+def publish(source, directory, stem, kind, mime=""):
+    source, directory = Path(source), Path(directory).resolve()
+    actual_mime, extension = identify(source, kind)
+    size = source.stat().st_size
+    if size < 16 or size > (IMAGE_LIMIT if kind in {"image", "image-edit"} else MEDIA_LIMIT):
+        raise ValueError("Generated media has an invalid size")
+    aliases = {"audio/x-wav": "audio/wav", "audio/wave": "audio/wav", "audio/mp3": "audio/mpeg"}
+    if aliases.get(mime, mime) not in {"", "application/octet-stream", "binary/octet-stream", actual_mime}:
+        raise ValueError("Response MIME type disagrees with its media bytes")
+    directory.mkdir(parents=True, exist_ok=True)
+    target, fingerprint = directory / (stem + extension), file_sha256(source)
+    if target.exists() or target.is_symlink():
+        if target.is_symlink() or not target.is_file() or target.stat().st_size != size or file_sha256(target) != fingerprint:
+            raise ValueError("An existing output conflicts with this media task; no file was overwritten")
+    else:
+        # Copy into the destination volume, flush, then publish create-only.
+        import shutil
+        with tempfile.NamedTemporaryFile(prefix=".xuloom-media-", dir=directory, delete=False) as output:
+            temporary = Path(output.name)
+            try:
+                with source.open("rb") as incoming: shutil.copyfileobj(incoming, output)
+                output.flush(); os.fsync(output.fileno())
+                os.link(temporary, target)
+            finally:
+                output.close(); temporary.unlink(missing_ok=True)
+    return {"path": str(target), "mime": actual_mime, "size": size, "sha256": fingerprint}

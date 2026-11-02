@@ -538,11 +538,18 @@ class DesktopBridge:
             return resolve_link(params.get("url"), require_openable=True)
         if method == "config.get":
             return self.config()
-        if method in {"media.connections", "media.save", "media.remove"}:
+        if method in {"media.connections", "media.save", "media.remove", "media.models", "media.saveModel", "media.removeModel"}:
             from xuloom.media import config as media_config
             if method == "media.connections":
                 return {"connections": media_config.public_connections()}
+            if method == "media.models":
+                return {"models": media_config.public_models()}
             self.require_idle()
+            if method == "media.saveModel":
+                return {"models": await asyncio.to_thread(media_config.save_model, params.get("model"))}
+            if method == "media.removeModel":
+                if params.get("confirm") is not True: raise ValueError("请确认移除生成模型")
+                return {"models": await asyncio.to_thread(media_config.remove_model, params.get("connectionId"), params.get("modelId"))}
             if method == "media.remove" and params.get("confirm") is not True:
                 raise ValueError("请确认移除媒体连接；这不会取消供应商已有任务")
             rows = await asyncio.to_thread(media_config.save, params.get("connection")) if method == "media.save" else await asyncio.to_thread(media_config.remove, params.get("id"))

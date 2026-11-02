@@ -74,6 +74,7 @@ const engineMethods = new Set([
   "attachments.list", "attachments.info", "attachments.read", "attachments.preview",
   "media.read",
   "media.connections", "media.save", "media.remove", "media.jobs", "media.control",
+  "media.models", "media.saveModel", "media.removeModel",
   "files.undo",
   "files.list",
   "git.status",
@@ -495,8 +496,8 @@ async function invoke(method, params) {
     return true;
   }
   if (method === "config.get") return globalConfig().request("config.get");
-  if (["media.connections", "media.save", "media.remove"].includes(method) && !params.session) {
-    if (method !== "media.connections" && [...sessions.values()].some(running)) throw new Error("请先停止运行中的任务，再修改媒体连接");
+  if (["media.connections", "media.save", "media.remove", "media.models", "media.saveModel", "media.removeModel"].includes(method) && !params.session) {
+    if (!["media.connections", "media.models"].includes(method) && [...sessions.values()].some(running)) throw new Error("请先停止运行中的任务，再修改生成模型");
     return globalConfig().request(method, params);
   }
   if (["remote.profiles", "remote.models", "remote.save", "remote.remove", "remote.check"].includes(method))

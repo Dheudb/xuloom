@@ -24,9 +24,34 @@ def add_parser(sub):
         if action in {"status", "cancel"}:
             item.add_argument("job_id"); item.add_argument("--permission", choices=("ask", "full"), default="ask")
             item.add_argument("--wait-ms", type=int, default=0)
+    actions.add_parser("models", help="List configured generation models without keys or API calls").add_argument("--json", action="store_true")
+    model = actions.add_parser("add", help="Configure a generation model without writing JSON")
+    model.add_argument("--kind", choices=("image", "video", "speech", "sound", "music"), required=True)
+    model.add_argument("--api-url", required=True)
+    model.add_argument("--model", required=True)
+    model.add_argument("--api-key-env", help="Environment variable containing your key; otherwise ask privately on an interactive terminal")
+    model.add_argument("--connection", help="Existing internal connection for editing a listed model")
+    model.add_argument("--id", help="Existing internal model ID for editing; otherwise add a new model")
+    model.add_argument("--json", action="store_true")
 
 
 async def dispatch(args, emit):
+    if args.action == "models":
+        return {"models": config.public_models()}
+    if args.action == "add":
+        if bool(args.connection) != bool(args.id): raise ValueError("Editing requires both --connection and --id")
+        if args.api_key_env:
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", args.api_key_env) or not os.environ.get(args.api_key_env):
+                raise ValueError("The specified API key environment variable is invalid or empty")
+            key = os.environ[args.api_key_env]
+        elif sys.stdin.isatty():
+            from getpass import getpass
+            key = getpass("API Key (leave blank to keep the saved key): ")
+        elif args.connection: key = ""
+        else: raise ValueError("Use --api-key-env in non-interactive mode; the key must not be a command argument")
+        value = {"kind": args.kind, "base_url": args.api_url, "model": args.model, "apiKey": key}
+        if args.connection: value.update(connectionId=args.connection, id=args.id)
+        return {"models": config.save_model(value)}
     if args.action == "connections":
         return {"connections": config.public_connections()}
     if args.action == "save":

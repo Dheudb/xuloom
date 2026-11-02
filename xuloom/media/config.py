@@ -38,8 +38,9 @@ def validate(value):
         raise ValueError("Invalid media connection fields")
     if not isinstance(value.get("id"), str) or not IDENTITY.fullmatch(value["id"]):
         raise ValueError("Media connection ID must contain 1–64 letters, digits, _ or -")
-    if value.get("protocol", "fal-queue") != "fal-queue":
-        raise ValueError("Unsupported media protocol; select fal-queue")
+    protocol = value.get("protocol", "fal-queue")
+    if protocol not in {"fal-queue", "auto"}:
+        raise ValueError("Unsupported media protocol")
     base_url = address(value.get("base_url"))
     name = value.get("name") or urlsplit(base_url).netloc
     if not isinstance(name, str) or len(name) > 160 or any(ord(c) < 32 for c in name):
@@ -59,7 +60,9 @@ def validate(value):
             raise ValueError("Invalid media model fields")
         if not isinstance(item.get("id"), str) or not IDENTITY.fullmatch(item["id"]) or item.get("kind") not in KINDS:
             raise ValueError("Supply a media model ID and supported kind")
-        if not isinstance(item.get("model"), str) or not MODEL.fullmatch(item["model"]):
+        if not isinstance(item.get("model"), str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_./:-]{0,255}", item["model"]) or any(part in {".", "..", ""} for part in item["model"].split("/")):
+            raise ValueError("Supply the provider's exact model name")
+        if protocol == "fal-queue" and not MODEL.fullmatch(item["model"]):
             raise ValueError("Supply the exact fal model endpoint, such as owner/model/endpoint")
         prompt_field = item.get("prompt_field") or ("text" if item["kind"] in {"speech", "sound"} else "prompt")
         image_field = item.get("image_field") or "image_urls"
@@ -87,7 +90,7 @@ def validate(value):
         address(url)
         if urlsplit(url).path not in {"", "/"}:
             raise ValueError("Download origins must not contain a path")
-    return {"id": value["id"], "name": name, "protocol": "fal-queue", "api_key": key,
+    return {"id": value["id"], "name": name, "protocol": protocol, "api_key": key,
         "base_url": base_url, "network_mode": mode,
         "models": cleaned, "download_origins": sorted(set(downloads))}
 
@@ -105,6 +108,74 @@ def connections(cfg=None):
 def public_connections(cfg=None):
     return [{**{key: value for key, value in row.items() if key != "api_key"}, "hasKey": bool(row["api_key"])}
         for row in connections(cfg)]
+
+
+def public_models(cfg=None):
+    return [{"connectionId": row["id"], "id": model["id"], "kind": model["kind"],
+        "model": model["model"], "base_url": row["base_url"], "hasKey": bool(row["api_key"])}
+        for row in connections(cfg) for model in row["models"]]
+
+
+def save_model(value):
+    """Three-field model form; keep old connection/job identities on edits."""
+    if not isinstance(value, dict) or value.keys() - {"connectionId", "id", "kind", "model", "base_url", "apiKey"}:
+        raise ValueError("Invalid generation model fields")
+    if value.get("kind") not in KINDS:
+        raise ValueError("Select a generation type")
+    base = address(value.get("base_url"))
+    host = urlsplit(base).hostname.lower()
+    if host in {"api.openai.com", "api.elevenlabs.io"} and not urlsplit(base).path:
+        base += "/v1"
+    if host == "queue.fal.run" and isinstance(value.get("model"), str) and base.endswith("/" + value["model"].strip()):
+        base = base[:-len(value["model"].strip()) - 1]
+    def change(cfg):
+        rows = connections(cfg)
+        identity, model_id = value.get("connectionId"), value.get("id")
+        old = next((r for r in rows if r["id"] == identity), None)
+        if identity and (not old or not any(m["id"] == model_id for m in old["models"])):
+            raise ValueError("Generation model no longer exists; refresh settings")
+        key = value.get("apiKey") or (old["api_key"] if old else "")
+        if not isinstance(key, str) or not key.strip():
+            raise ValueError("Fill in the model API key; unauthenticated local services may use a placeholder")
+        model = {"id": model_id or "model-" + uuid.uuid4().hex, "kind": value["kind"], "model": value.get("model", "").strip()}
+        if old:
+            previous = next(m for m in old["models"] if m["id"] == model_id)
+            changed = base != old["base_url"] or previous["model"] != model["model"] or previous["kind"] != model["kind"]
+            if (changed or key != old["api_key"]) and len(old["models"]) > 1:
+                # A flat model edit must not change its siblings' API or key.
+                row = validate({**old, "id": "media-" + uuid.uuid4().hex, "base_url": base, "api_key": key,
+                    "protocol": "auto" if changed else old["protocol"], "models": [model if changed else previous]})
+                cfg["media_connections"] = [{**r, "models": [m for m in r["models"] if m["id"] != model_id]} if r["id"] == identity else r for r in rows] + [row]
+                return cfg
+            if not changed:
+                model = previous  # Preserve existing jobs' frozen legacy binding.
+            row = {**old, "base_url": base, "api_key": key,
+                "protocol": "auto" if changed else old["protocol"],
+                "models": [model if m["id"] == model_id else m for m in old["models"]]}
+            cfg["media_connections"] = [validate(row) if r["id"] == identity else r for r in rows]
+        else:
+            # Model configuration stays flat; identical credentials can share private storage.
+            shared = next((r for r in rows if r["base_url"] == base and r["api_key"] == key and r["protocol"] == "auto"), None)
+            if shared:
+                row = validate({**shared, "models": shared["models"] + [model]})
+                cfg["media_connections"] = [row if r["id"] == shared["id"] else r for r in rows]
+            else:
+                row = validate({"id": "media-" + uuid.uuid4().hex, "protocol": "auto", "base_url": base, "api_key": key, "models": [model]})
+                cfg["media_connections"] = rows + [row]
+        return cfg
+    return public_models(update_config(change))
+
+
+def remove_model(connection_id, model_id):
+    def change(cfg):
+        rows = connections(cfg)
+        row = next((r for r in rows if r["id"] == connection_id), None)
+        if not row or not any(m["id"] == model_id for m in row["models"]):
+            raise ValueError("Unknown generation model")
+        updated = {**row, "models": [m for m in row["models"] if m["id"] != model_id]}
+        cfg["media_connections"] = [updated if r["id"] == connection_id else r for r in rows if r["id"] != connection_id or updated["models"]]
+        return cfg
+    return public_models(update_config(change))
 
 
 def save(value):
