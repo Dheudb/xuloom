@@ -711,6 +711,16 @@ class DesktopBridge:
                 return await asyncio.to_thread(preview.info, self.cwd, params.get("path"), self.file_changes)
             return await asyncio.to_thread(preview.read, self.cwd, params.get("path"), self.file_changes,
                 params.get("version"), params.get("offset", 0), params.get("length", 262144))
+        if method in {"session.transcript", "session.transcriptImage"}:
+            from xuloom.features.agent_history import inspect
+            sid = self.engine.session_id if self.engine else self.resume_id
+            if not sid:
+                raise ValueError("请先打开已保存的会话")
+            if method == "session.transcriptImage" and params.get("imageIndex") is None:
+                raise ValueError("请选择历史记录中的图片")
+            return await inspect(self.cwd, sid, agent_id=params.get("agentId"), cursor=params.get("cursor"),
+                limit=params.get("limit", 40), image_index=params.get("imageIndex") if method.endswith("Image") else None,
+                version=params.get("version"))
         if method == "session.summary":
             from xuloom.features.session_summary import read_summary
             sid = self.engine.session_id if self.engine else self.resume_id

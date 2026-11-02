@@ -1941,3 +1941,17 @@ body.panel-resizing iframe { pointer-events: none; }
 .goal-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .goal-card button { padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: inherit; cursor: pointer; }
 .goal-card button:disabled { opacity: .45; cursor: default; }
+.worker-history.dialog { width: min(960px, calc(100vw - 32px)); max-width: none; max-height: min(820px, calc(100vh - 40px)); padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+.worker-history header { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 22px 26px; border-bottom: 1px solid var(--border); }
+.worker-history h2 { margin: 4px 0 0; font-size: 18px; overflow-wrap: anywhere; }
+.worker-history-actions { display: flex; flex-shrink: 0; gap: 8px; }
+.worker-history-body { overflow: auto; min-height: 0; padding: 12px 26px 26px; overscroll-behavior: contain; }
+.history-entry { padding: 18px 0; border-bottom: 1px solid var(--border); min-width: 0; }
+.history-entry-label { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+.history-entry-label .icon-button { margin-left: auto; }
+.history-entry pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.7; max-width: 100%; }
+.history-entry summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.history-entry summary code { margin-left: 10px; font-size: 11px; overflow-wrap: anywhere; }
+.history-image { display: block; max-width: 100%; max-height: 65vh; object-fit: contain; }
+.worker-history-footer { display: flex; justify-content: center; padding: 22px 0 0; color: var(--muted); font-size: 12px; }
+.worker-history-error { color: #b44832; overflow-wrap: anywhere; }

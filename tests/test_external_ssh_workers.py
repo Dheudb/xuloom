@@ -81,6 +81,36 @@ class ExternalSSHContracts:
         result = await self.native.spawn(**values)
         return result['agents'][0]
 
+    async def test_readonly_history_runs_on_execution_host_without_restarting_worker(self):
+        from xuloom.features.agent_history import inspect
+        row = await self.spawn(run_in_background=False)
+        self.assertEqual(row['status'], 'completed', row)
+        engine = self.native.engine
+        versions = dict(engine.session_manager._versions)
+        path = IOPath(engine.session_manager.get_subagent_transcript_path(row['agent_id']))
+        before = path.read_bytes(), path.stat().st_mtime_ns
+        requests = len(self.host.local.records)
+        remote_before = self.remote_state(row)
+        page = await inspect(self.root, engine.session_id, agent_id=row['agent_id'])
+        self.assertEqual(page['backend'], self.backend)
+        evidence = [entry for entry in page['entries'] if entry['kind'] == 'tool_result']
+        self.assertTrue(any('REMOTE_EXECUTION_HOST_EVIDENCE' in entry['text'] for entry in evidence), page)
+        self.assertNotIn('LOCAL_MUST_NOT_BE_READ', json.dumps(page))
+        self.assertEqual(len(self.host.local.records), requests)
+        self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), before)
+        self.assertEqual(engine.session_manager._versions, versions)
+        self.assertEqual(self.remote_state(row), remote_before)
+        from xuloom.cli import parser
+        from xuloom.remote.cli import dispatch
+        remote_sid = self.native.tool._worker(row['agent_id'])['remote_reference']['session_id']
+        args = parser().parse_args(['remote', 'transcript', 'test', '--session', remote_sid, '--json'])
+        events = []
+        async def emit(event): events.append(event)
+        cli = await dispatch(args, emit)
+        self.assertTrue(cli['ok'], cli)
+        self.assertEqual(cli['transcript']['entries'], page['entries'])
+        self.assertEqual(len(self.host.local.records), requests)
+
     def remote_state(self, row):
         reference = self.native.tool._worker(row['agent_id'])['remote_reference']
         path = self.root / 'remote-data/history' / history_root(self.host.remote).name / 'sessions' / (reference['session_id'] + '.json')

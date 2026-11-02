@@ -291,6 +291,7 @@ def run_command_palette(tui: InteractiveTerminalTUI) -> str:
             {"value": "/git", "label": "View repository and branch"},
             {"value": "/summary", "label": "View saved output files and sources"},
             {"value": "/summary all", "label": "View outputs and sources for the whole conversation"},
+            {"value": "/history", "label": "Read saved dialogue; /history agent-id shows a registered child"},
             {"value": "/link", "label": "Show this chat's local deep link"},
             {"value": "/tools", "label": "View tool activity"},
             {"value": "/todos", "label": "View structured todos"},
@@ -615,6 +616,7 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
                     "  /status           View runtime status\n"
                     "  /git              View repository and branch\n\n"
                     "  /summary [all]    View saved outputs, sources and tool counts\n"
+                    "  /history [agent-id|-] [cursor]    Read a saved dialogue page without running it\n"
                     "  /link             Show this chat's local deep link\n\n"
                     "[bold white]Model & Provider[/bold white]\n"
                     "  /model            Interactive model/provider switch\n"
@@ -731,6 +733,12 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
             elif normalized_input in {"/summary", "/summary all"}:
                 from xuloom.features.session_summary import read_summary
                 console.print_json(data=read_summary(engine.session_cwd, engine.session_id, all_turns=normalized_input.endswith(" all")))
+                continue
+            elif normalized_input == "/history" or normalized_input.startswith("/history "):
+                from xuloom.features.agent_history import inspect, command_params
+                values = command_params(user_input.strip().partition(" ")[2])
+                console.print_json(data=await inspect(engine.session_cwd, engine.session_id,
+                    agent_id=values['agentId'], cursor=values['cursor']))
                 continue
             elif normalized_input == "/status":
                 console.print(Panel(engine.get_runtime_summary(), title="Runtime Status", border_style="cyan", expand=False))
@@ -922,7 +930,7 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
 
 
 def main():
-    if len(sys.argv) > 1 and sys.argv[1] in {"exec", "goal", "schedule", "git-status", "chat-link", "summary", "media", "remote"}:
+    if len(sys.argv) > 1 and sys.argv[1] in {"exec", "goal", "schedule", "git-status", "chat-link", "summary", "transcript", "media", "remote"}:
         from xuloom.cli import main as noninteractive
         raise SystemExit(noninteractive(sys.argv[1:]))
     import argparse

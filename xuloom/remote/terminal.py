@@ -176,7 +176,7 @@ async def interactive_chat(identity, *, session_id=None, binding=None, machine=N
                 command, _, argument = text.partition(" ")
                 if command in {"/quit", "/q", "/exit"}: break
                 if command == "/help":
-                    console.print("/link /status /git /summary [all] /files [path] /read <path> /preview <HTML path> /skills /agents /model list|status|use N\n/attach <local file> /attachments /attachments use UUID /attachments clear /download UUID <local file>\n/permission ask|full /collaboration solo|auto|ultra /thinking enabled|disabled /effort LEVEL\n/sandbox host|workspace /plan on|off /continue /quit", markup=False); continue
+                    console.print("/link /status /git /summary [all] /history [agent-id|-] [cursor] /files [path] /read <path> /preview <HTML path> /skills /agents /model list|status|use N\n/attach <local file> /attachments /attachments use UUID /attachments clear /download UUID <local file>\n/permission ask|full /collaboration solo|auto|ultra /thinking enabled|disabled /effort LEVEL\n/sandbox host|workspace /plan on|off /continue /quit", markup=False); continue
                 if command == "/attach":
                     filename = argument.strip().strip('"')
                     if not filename: raise ValueError("Use /attach <local file>")
@@ -209,6 +209,10 @@ async def interactive_chat(identity, *, session_id=None, binding=None, machine=N
                 if command == "/plan":
                     if argument not in {"on", "off"}: raise ValueError("Use /plan on|off")
                     plan = argument == "on"; continue
+                if command == "/history":
+                    from xuloom.features.agent_history import command_params
+                    value = await bridge.dispatch("session.transcript", command_params(argument))
+                    console.print(json.dumps(value, ensure_ascii=False, indent=2), markup=False); continue
                 methods = {"/summary": ("session.summary", {"all": argument == "all"}), "/status": ("session.status", {"sessionId": session_id}), "/git": ("git.status", {}),
                     "/files": ("files.list", {"path": argument}), "/read": ("files.read", {"path": argument}),
                     "/preview": ("files.htmlInfo", {"path": argument}),

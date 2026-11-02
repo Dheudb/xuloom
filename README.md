@@ -98,7 +98,7 @@ skills: [literature-review]
 
 先添加示例依赖的 `literature-review` Skill。`tools` 可使用 Read、Write、Edit、Exec、Grep、Glob、Skill 等别名或实际工具名；省略 `tools` 继承工具，手动填写 `tools: []` 表示禁用全部工具。省略 `connection` 时，`model` 使用主代理连接；添加 `connection: <已配置连接的 ID>` 可跨供应商运行原生子代理。桌面与 CLI 共用定义和凭据，详见 [角色连接](docs/capabilities.md#角色连接与异构原生子代理)。[原生 SSH worker](docs/distributed-workers-plan.md) 使用执行主机的连接和配置；可选的 [Claude Code / Pi / Codex / DSH 后端](docs/external-agents.md) 使用用户已安装 CLI 和受控 MCP 工具，不捆绑外部程序或使用个人登录。DSH 当前验证 0.2.1-rc.5，初始任务为文本，工具可返回图片；Codex 需要真正支持 Responses 的连接，不能将 Chat Completions 网关视为已经兼容。
 
-在右侧“代理”中点角色的 **分配任务**，或在 prompt 中明确指定角色。创建定义不会自动启动代理。输入框中的 **Solo** 关闭委派，**Auto** 按需委派，**Ultra** 更积极地寻找并行机会。两档默认不设子代理数量限制；只有显式设置宿主并发限制时，超额已接受任务才排队。详见 [协作与配置](docs/capabilities.md)。
+在右侧“代理”中点角色的 **分配任务**，或在 prompt 中明确指定角色。创建定义不会自动启动代理。 在会话任务卡片中点击 **查看完整对话历史** 可分页查看输入、工具、推理摘要和图片；CLI 使用 `xuloom transcript --session <ID> --agent <ID> --json`，详见[只读历史](docs/agent-history.md)。输入框中的 **Solo** 关闭委派，**Auto** 按需委派，**Ultra** 更积极地寻找并行机会。两档默认不设子代理数量限制；只有显式设置宿主并发限制时，超额已接受任务才排队。详见 [协作与配置](docs/capabilities.md)。
 
 ## SSH 远程（开发版本）
 

@@ -9,7 +9,7 @@ from xuloom.remote.ssh import SSHClient, RemoteDisconnected, RemoteRequestError
 def add_parser(sub):
     parent = sub.add_parser("remote", help="Manage keyless SSH profiles and execute on another Xuloom installation")
     actions = parent.add_subparsers(dest="action", required=True)
-    for action in ("list", "add", "remove", "check", "sessions", "inspect", "summary", "exec", "chat", "files", "read", "preview", "attach", "attachments", "download", "git-status", "references", "forget"):
+    for action in ("list", "add", "remove", "check", "sessions", "inspect", "summary", "transcript", "exec", "chat", "files", "read", "preview", "attach", "attachments", "download", "git-status", "references", "forget"):
         item = actions.add_parser(action)
         item.add_argument("--json", action="store_true", help="UTF-8 JSON events and final receipt")
         if action not in {"list", "references"}: item.add_argument("id", help="Local reference token" if action == "forget" else "Saved SSH connection ID")
@@ -21,7 +21,11 @@ def add_parser(sub):
             item.add_argument("--python", default="python3", help="Remote Python with Xuloom installed")
             item.add_argument("--platform", choices=("posix", "windows"), default="posix")
             item.add_argument("--port", type=int, help="Override the SSH alias's configured port"); item.add_argument("--ssh-config", default="")
-        if action in {"exec", "inspect", "summary", "chat", "preview", "attach", "attachments", "download"}: item.add_argument("--session")
+        if action in {"exec", "inspect", "summary", "transcript", "chat", "preview", "attach", "attachments", "download"}: item.add_argument("--session")
+        if action == "transcript":
+            item.add_argument("--agent")
+            item.add_argument("--cursor")
+            item.add_argument("--limit", type=int, default=40)
         if action == "attach": item.add_argument("files", nargs="+", help="Local files to copy into the remote session")
         if action == "attachments": item.add_argument("--cursor", default="", help="Continue a saved attachment listing")
         if action == "download":
@@ -87,6 +91,11 @@ async def dispatch(args, emit):
             chunk = {} if args.offset is None else {"chunk": await client.request("files.htmlChunk",
                 {**params, "asset": file["asset"], "version": file["version"], "offset": args.offset, "length": args.length})}
             result = {"ok": True, "reason": "completed", "file": file, **chunk}
+        elif args.action == "transcript":
+            if not session_id: raise ValueError("--session is required")
+            await client.request("initialize", {"sessionId": session_id})
+            result = {"ok": True, "reason": "completed", "transcript": await client.request("session.transcript",
+                {"agentId": args.agent, "cursor": args.cursor, "limit": args.limit})}
         elif args.action == "summary":
             await client.request("initialize", {"sessionId": session_id})
             result = {"ok": True, "reason": "completed", "summary": await client.request("session.summary", {"turnId": args.turn, "all": args.all})}

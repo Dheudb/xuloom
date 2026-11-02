@@ -35,6 +35,13 @@ def parser():
     selection = summary.add_mutually_exclusive_group()
     selection.add_argument("--turn", help="Human message UUID identifying one turn")
     selection.add_argument("--all", action="store_true", help="All saved turns in this conversation")
+    transcript = sub.add_parser("transcript", help="Read a saved conversation or registered child history without executing it")
+    transcript.add_argument("--cwd", default=os.getcwd())
+    transcript.add_argument("--session", required=True)
+    transcript.add_argument("--agent", help="Registered subagent ID in this parent conversation")
+    transcript.add_argument("--cursor", help="Continue the exact read-only history snapshot")
+    transcript.add_argument("--limit", type=int, default=40)
+    transcript.add_argument("--json", action="store_true")
     link = sub.add_parser("chat-link", help="Create or resolve a local/known SSH chat address without calling a model")
     link.add_argument("--cwd", default=os.getcwd())
     mode = link.add_mutually_exclusive_group(required=True)
@@ -132,6 +139,10 @@ async def open_engine(args, emit):
 
 
 async def dispatch(args, emit):
+    if args.command == "transcript":
+        from xuloom.features.agent_history import inspect
+        return {"ok": True, "reason": "completed", "transcript": await inspect(args.cwd, args.session,
+            agent_id=args.agent, cursor=args.cursor, limit=args.limit)}
     if args.command == "media":
         from xuloom.media.cli import dispatch as media_dispatch
         return {"ok": True, "reason": "completed", **await media_dispatch(args, emit)}

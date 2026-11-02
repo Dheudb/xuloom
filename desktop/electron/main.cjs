@@ -78,6 +78,7 @@ const engineMethods = new Set([
   "files.list",
   "git.status",
   "session.summary",
+  "session.transcript", "session.transcriptImage",
   "files.gitDiff",
   "capabilities.list",
   "capabilities.toggle",

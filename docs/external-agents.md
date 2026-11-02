@@ -112,3 +112,7 @@ DSH 已发布版的 JSON 过程事件有长度限制，不能直接作为完整�
 Pi 协议依据为其官方 [RPC](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md)、[CLI](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/cli.md)、[MCP](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/mcp.md) 与[模型设置](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/models.md)。`XULOOM_TEST_PI_PROGRAM` 指定已安装 `dist/bundle/cli.js` 后运行 `tests/test_pi_agents.py`；测试实际 Pi/Node 与本地协议服务，不消费供应商额度。
 
 Codex 依据 [官方 App Server](https://learn.chatgpt.com/docs/app-server)、[配置参考](https://learn.chatgpt.com/docs/config-file/config-reference)及当前安装程序生成的协议 schema，Responses 依据[官方接口结构](https://developers.openai.com/api/reference/resources/responses/methods/retrieve)。`XULOOM_TEST_CODEX_PROGRAM` 指定实际可执行文件后运行 `tests/test_codex_responses.py`；桌面与正式 CLI 联动检查为 `npm run test:codex-workbench`。这些检查不使用个人 Codex 登录，也不证明其他安装版本或真实模型长任务已经验证。
+
+## 只读查看完整执行历史
+
+本机及 SSH 会话任务卡片中的“查看完整对话历史”从各后端的原生 JSONL 展示输入、回答、工具和公开推理；图片按需读取，长文本分页。CLI 和程序接口见[历史查看](agent-history.md)。查看不等于恢复执行，不改变现有写者的保存版本，也不替代原有回执验证。
