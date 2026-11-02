@@ -14,10 +14,15 @@ class SessionConflictError(OSError):
     pass
 
 
+def session_identity(value):
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", value):
+        raise ValueError("Invalid session identity")
+    return value
+
+
 class SessionLock:
     def __init__(self, directory, identity):
-        if not isinstance(identity, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", identity):
-            raise ValueError("Invalid session identity")
+        identity = session_identity(identity)
         self.path = IOPath(directory) / (identity + ".lock")
         self.identity = identity
         self.handle = None

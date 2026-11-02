@@ -12,7 +12,7 @@ const project = path.join(fixture, "workspace"), other = path.join(fixture, "tar
 for (const directory of [project, other, data, config, home]) fs.mkdirSync(directory);
 const env = { ...process.env, USERPROFILE: home, HOME: home, XULOOM_DATA_DIR: data, XULOOM_USER_DATA: data, XULOOM_CONFIG_DIR: config, XULOOM_TEST_HEADLESS: "1", XULOOM_SKILLS_PATHS: "", PYTHONPATH: path.dirname(root) };
 for (const key of ["ELECTRON_RUN_AS_NODE", "XULOOM_DEV_URL", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL", "XULOOM_MODEL_PROVIDER"]) delete env[key];
-let app, page, owner, lines, requests = 0;
+let app, page, owner, lines, repairCheckpoint, requests = 0;
 const server = http.createServer((req, res) => {
   let raw = ""; req.on("data", (chunk) => raw += chunk);
   req.on("end", () => {
@@ -42,7 +42,8 @@ async function main() {
     await page.locator(".session-item.active").waitFor();
     const id = sessionKey(project, "shared");
     assert.equal(await page.locator(".user-message").count() > 0 || (await page.locator("body").innerText()).includes("first"), true, "Owned history remains readable");
-    await page.evaluate(({ id }) => window.xuloom.invoke("prompt", { session: id, text: "Must not request the model", skills: [], mode: "normal" }), { id });
+    const input = page.getByRole("textbox", { name: "任务输入" });
+    await input.fill("Must not request the model"); await input.press("Enter");
     await page.getByText(/Session is in use by another writer/).waitFor();
     assert.equal(requests, 0);
     for (const [method, params] of [["session.fork", { id }], ["session.move", { id, path: other }], ["session.delete", { id, confirm: true }]]) {
@@ -53,19 +54,46 @@ async function main() {
     const exited = once(owner, "exit"); owner.stdin.end("release\n"); await exited;
     // Reopen after failed deletion disposed the read-only engine transport.
     await page.locator('.session-item[data-session-id="' + id + '"] .session-select').click();
-    const input = page.getByRole("textbox", { name: "任务输入" });
     await input.fill("Continue after the writer released"); await input.press("Enter");
     await page.getByText("RECOVERED_WRITER", { exact: true }).waitFor();
     await page.waitForFunction(() => !document.querySelector(".send-button.stop"));
     assert.equal(requests, 1);
     assert.equal(errors.length, 0, errors.join("\n"));
     assert(JSON.parse(fs.readFileSync(history)).revision > 1);
-    console.log("Session ownership E2E passed: read-only history, no model request before ownership, blocked fork/move/delete, unchanged checkpoint, writer release and successful continuation");
+    const valid = fs.readFileSync(history), saved = JSON.parse(valid);
+    repairCheckpoint = () => fs.writeFileSync(history, valid);
+    atomicJSON(history, { ...saved, revision: null });
+    const corrupt = fs.readFileSync(history);
+    await input.fill("Must not execute with an invalid checkpoint"); await input.press("Enter");
+    await page.getByText(/Invalid session revision/).first().waitFor();
+    await page.waitForFunction(() => !document.querySelector(".send-button.stop"));
+    assert.equal(requests, 1, "A loaded engine must also check corruption before the next model request");
+    assert.deepEqual(fs.readFileSync(history), corrupt, "Failed execution must preserve the corrupt checkpoint");
+    // Normal shutdown must not overwrite corruption either. Restore only this
+    // owned fixture's exact known-good bytes so its writer can close normally.
+    repairCheckpoint();
+    await page.evaluate(({ id }) => window.xuloom.invoke("session.close", { session: id }), { id });
+    const closed = fs.readFileSync(history);
+    repairCheckpoint = () => fs.writeFileSync(history, closed);
+    atomicJSON(history, { ...JSON.parse(closed), revision: null });
+    const coldCorrupt = fs.readFileSync(history);
+    // Opening history is lazy/read-only; the execution entry must reject it.
+    await page.evaluate(({ id }) => window.xuloom.invoke("session.select", { id }), { id });
+    const resumeError = await page.evaluate(async ({ id }) => {
+      try { await window.xuloom.invoke("prompt", { session: id, text: "Cold execution must not run", skills: [], mode: "normal" }); return ""; }
+      catch (error) { return String(error); }
+    }, { id });
+    assert.match(resumeError, /Invalid session revision/, "Cold desktop execution must report corruption explicitly");
+    assert.equal(requests, 1);
+    assert.deepEqual(fs.readFileSync(history), coldCorrupt);
+    assert.equal(errors.length, 0, errors.join("\n"));
+    console.log("Session ownership E2E passed: read-only history, no model request before ownership, blocked fork/move/delete, writer release, successful continuation and warm/cold corrupt checkpoint rejection without overwrite or model retry");
   } catch (error) {
     console.error("Requests:", requests);
     if (page) console.error("Fixture UI:", await page.locator("body").innerText().catch(() => "unavailable"));
     throw error;
   } finally {
+    if (repairCheckpoint) repairCheckpoint();
     if (app) await app.close().catch(() => {});
     if (owner && owner.exitCode === null) { const exited = once(owner, "exit"); owner.stdin.end("release\n"); await exited; }
     if (lines) lines.close();

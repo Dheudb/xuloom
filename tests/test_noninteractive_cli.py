@@ -54,7 +54,7 @@ class CliTests(unittest.TestCase):
             "HOME": str(self.root/"home"), "USERPROFILE": str(self.root/"home"), "XULOOM_SKILLS_PATHS": "",
             "OPENAI_API_KEY": "fixture", "OPENAI_MODEL": "fixture", "XULOOM_MODEL_PROVIDER": "openai",
             "OPENAI_BASE_URL": f"http://127.0.0.1:{self.server.server_port}/v1", "PYTHONIOENCODING": "utf-8",
-            "PYTHONPATH": str(Path(__file__).resolve().parents[1]), "XULOOM_NETWORK_MODE": "direct"}
+            "PYTHONPATH": os.environ.get("XULOOM_TEST_SITE", str(Path(__file__).resolve().parents[1])), "XULOOM_NETWORK_MODE": "direct"}
 
     def tearDown(self):
         self.finish_request.set()
@@ -96,6 +96,28 @@ class CliTests(unittest.TestCase):
             if not request["path"].startswith("/worker/"):
                 self.assertEqual(request["headers"]["authorization"], "Bearer fixture")
         self.assertTrue(final["persisted"])
+
+    def test_corrupt_session_returns_conflict_without_model_retry_or_overwrite(self):
+        from unittest.mock import patch
+        from xuloom.core.session import SessionManager
+        initial, _, saved = self.cli("exec", "Seed conversation")
+        self.assertEqual(initial.returncode, 0, initial.stderr)
+        sid = saved["session_id"]
+        with patch.dict(os.environ, self.env), SessionManager(cwd=self.root) as manager:
+            checkpoint = Path(manager.session_dir) / (sid + ".json")
+        raw = json.loads(checkpoint.read_bytes())
+        self.mode = "write"
+        count = len(self.wire)
+        for revision in (None, True, -1, "7"):
+            with self.subTest(revision=revision):
+                checkpoint.write_text(json.dumps({**raw, "revision": revision}), encoding="utf-8")
+                before = checkpoint.read_bytes()
+                process, _, result = self.cli("exec", "Continue and write", "--session", sid, "--permission", "full")
+                self.assertEqual(process.returncode, 4, process.stderr)
+                self.assertEqual(result["reason"], "session_conflict")
+                self.assertEqual(len(self.wire), count)
+                self.assertEqual(checkpoint.read_bytes(), before)
+                self.assertFalse((self.root / "effect.txt").exists())
 
     def test_empty_desktop_draft_can_start_in_cli_without_closing_its_current_client(self):
         from unittest.mock import patch

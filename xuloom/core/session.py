@@ -4,7 +4,7 @@ import time
 import hashlib
 from pathlib import Path
 from xuloom.core.storage import session_directory, data_directory, IOPath
-from xuloom.core.session_lock import SessionLock, SessionBusyError, SessionConflictError
+from xuloom.core.session_lock import SessionLock, SessionBusyError, SessionConflictError, session_identity
 
 class SessionManager:
     """
@@ -30,6 +30,7 @@ class SessionManager:
         self.release_writer()
 
     def acquire_writer(self, session_id):
+        session_id = session_identity(session_id)
         created = session_id not in self._writers
         if session_id not in self._writers:
             lock = SessionLock(self.lock_directory, session_id)
@@ -55,15 +56,39 @@ class SessionManager:
         return session_id in self._writers
 
     @staticmethod
-    def _version(path):
+    def _payload_revision(payload, *, legacy=False):
+        if legacy and isinstance(payload, list):
+            return 0
+        if (not isinstance(payload, dict) or not isinstance(payload.get("messages", []), list)
+                or not isinstance(payload.get("metadata", {}), dict)):
+            raise SessionConflictError("Invalid session checkpoint structure; existing history was preserved.")
+        revision = payload.get("revision", 0)
+        if type(revision) is not int or revision < 0:
+            raise SessionConflictError("Invalid session revision: expected a non-negative integer; existing history was preserved.")
+        return revision
+
+    @classmethod
+    def _decode(cls, data, *, child=False):
+        try:
+            payload = json.loads(data)
+        except (ValueError, UnicodeError) as error:
+            raise SessionConflictError("Session checkpoint could not be decoded; existing history was preserved.") from error
+        revision = cls._payload_revision(payload, legacy=not child)
+        return payload, (revision, hashlib.sha256(data).hexdigest())
+
+    @classmethod
+    def _version(cls, path):
         try:
             raw = IOPath(path).read_bytes()
         except FileNotFoundError:
             return (0, None)
-        payload = json.loads(raw)
-        return (payload.get("revision", 0) if isinstance(payload, dict) else 0, hashlib.sha256(raw).hexdigest())
+        return cls._decode(raw)[1]
+
+    def _session_path(self, session_id):
+        return os.path.join(self.session_dir, session_identity(session_id) + ".json")
 
     def _save(self, path, payload, owner):
+        self._payload_revision(payload)
         owned = self.owns_writer(owner)
         self.acquire_writer(owner)
         try:
@@ -80,7 +105,7 @@ class SessionManager:
             raise
 
     def check_current(self, session_id):
-        path = os.path.join(self.session_dir, f"{session_id}.json")
+        path = self._session_path(session_id)
         self._check_current_path(path)
 
     def check_subagent_current(self, agent_id):
@@ -93,8 +118,8 @@ class SessionManager:
     def load_subagent_transcript(self, agent_id):
         path = self.get_subagent_transcript_path(agent_id)
         data = IOPath(path).read_bytes()
-        payload = json.loads(data)
-        self._versions[path] = (payload.get("revision", 0), hashlib.sha256(data).hexdigest())
+        payload, version = self._decode(data, child=True)
+        self._versions[path] = version
         return payload
 
     def _make_json_safe(self, value):
@@ -129,8 +154,9 @@ class SessionManager:
         atomic_json(path, payload)
         
     def save_session_state(self, session_id: str, messages: list, metadata: dict = None):
-        path = os.path.join(self.session_dir, f"{session_id}.json")
+        path = ""
         try:
+            path = self._session_path(session_id)
             payload = {
                 "messages": self._make_json_safe(messages),
                 "metadata": self._make_json_safe(metadata or {}),
@@ -150,33 +176,24 @@ class SessionManager:
         self.save_session_state(session_id, messages, metadata={})
             
     def load_session_state(self, session_id: str) -> dict:
-        path = os.path.join(self.session_dir, f"{session_id}.json")
-        if not IOPath(path).exists():
-            return {"messages": [], "metadata": {}}
+        path = self._session_path(session_id)
         try:
             data = IOPath(path).read_bytes()
-            payload = json.loads(data)
-            self._versions[path] = (payload.get("revision", 0) if isinstance(payload, dict) else 0, hashlib.sha256(data).hexdigest())
-            if isinstance(payload, list):
-                return {"messages": payload, "metadata": {}, "_valid": True}
-            if isinstance(payload, dict):
-                return {
-                    "messages": payload.get("messages", []),
-                    "metadata": payload.get("metadata", {}),
-                    "_valid": isinstance(payload.get("messages", []), list) and isinstance(payload.get("metadata", {}), dict),
-                }
+        except FileNotFoundError:
             return {"messages": [], "metadata": {}}
-        except Exception:
-            return {"messages": [], "metadata": {}}
+        payload, version = self._decode(data)
+        self._versions[path] = version
+        if isinstance(payload, list):
+            return {"messages": payload, "metadata": {}, "_valid": True}
+        return {"messages": payload.get("messages", []), "metadata": payload.get("metadata", {}), "_valid": True}
 
     def load_session(self, session_id: str) -> list:
         return self.load_session_state(session_id).get("messages", [])
 
     def save_subagent_transcript(self, agent_id: str, payload: dict):
-        subagent_dir = os.path.join(self.session_dir, "subagents")
-        IOPath(subagent_dir).mkdir(parents=True, exist_ok=True)
-        path = os.path.join(subagent_dir, f"{agent_id}.json")
+        path = ""
         try:
+            path = self.get_subagent_transcript_path(agent_id)
             owner = payload.get("session_id") or payload.get("metadata", {}).get("delegation", {}).get("owner_session_id") or agent_id
             self._save(path, self._make_json_safe(payload), owner)
             self.last_save_ok = True
@@ -190,6 +207,7 @@ class SessionManager:
             return False
 
     def get_subagent_transcript_path(self, agent_id: str) -> str:
+        agent_id = session_identity(agent_id)
         subagent_dir = os.path.join(self.session_dir, "subagents")
         IOPath(subagent_dir).mkdir(parents=True, exist_ok=True)
         return os.path.join(subagent_dir, f"{agent_id}.json")
@@ -232,10 +250,11 @@ class SessionManager:
             return f"Error retrieving sessions: {e}"
 
     def delete_session(self, session_id: str) -> bool:
+        session_id = session_identity(session_id)
         owned = self.owns_writer(session_id)
         self.acquire_writer(session_id)
         try:
-            path = os.path.join(self.session_dir, f"{session_id}.json")
+            path = self._session_path(session_id)
             found = IOPath(path).exists()
             if self.central:
                 from xuloom.core.session_mutation import mutate

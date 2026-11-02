@@ -72,6 +72,24 @@ class NativeSSHTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(path.read_bytes(), preserved)
         self.assertEqual((len(self.fixture.server.commands), len(self.fixture.local.records)), (channels, requests))
 
+    async def test_invalid_local_revision_is_rejected_before_remote_work(self):
+        row = (await self.spawn(run_in_background=False))['agents'][0]
+        self.assertEqual(row['status'], 'completed', row)
+        path = IOPath(self.engine.session_manager.get_subagent_transcript_path(row['agent_id']))
+        await self.restore_controller()
+        saved = json.loads(path.read_bytes()); saved['revision'] = None
+        preserved = json.dumps(saved).encode(); path.write_bytes(preserved)
+        self.fixture.hold_model(write=True)
+        channels, requests = len(self.fixture.server.commands), len(self.fixture.local.records)
+        result = json.loads(await self.tool.execute(action='followup', agent_id=row['agent_id'],
+            prompt='Write the owned fixture file', response_format='json'))
+        self.assertEqual(result['status'], 'crashed', result)
+        self.assertFalse((self.fixture.remote / 'must-not-exist.txt').exists(),
+            'Invalid checkpoint was accepted until after a real remote write')
+        self.assertEqual((len(self.fixture.server.commands), len(self.fixture.local.records)), (channels, requests),
+            'A corrupt local checkpoint must be rejected before any new SSH/model work')
+        self.assertEqual(path.read_bytes(), preserved)
+
     async def test_missing_local_receipt_is_not_recreated_to_continue_a_previous_worker(self):
         row = (await self.spawn(run_in_background=False))['agents'][0]
         path = IOPath(self.engine.session_manager.get_subagent_transcript_path(row['agent_id']))

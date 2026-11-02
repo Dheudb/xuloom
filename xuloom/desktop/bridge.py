@@ -258,32 +258,27 @@ class DesktopBridge:
         from xuloom.tools.lsp_tool import LspTool
         from xuloom.protocols.lsp_manager import LSPManager
         engine = self._create_engine()
-        if self.resume_id and not engine.load_session(self.resume_id):
-            await engine.aclose()
-            raise ValueError("Session could not be resumed")
-        if write:
-            try:
-                engine.require_writer()
-            except BaseException:
-                await engine.aclose()
-                raise
-        # History restores conversation state; current saved settings determine
-        # how its next request connects, including changes made in another tab.
-        await self.sync_model(engine, force=True)
-        for record in engine.subagent_registry:
-            if record.get("status") == "running":
-                record["status"] = "interrupted"
-        for member in engine.team_manager.get_non_lead_members():
-            member.is_active = False
-        engine.set_permission_handler(self.permission)
-        engine.browser_manager.capture_callback = None if os.environ.get("XULOOM_REMOTE") == "1" else self.capture
-        engine.tool_context.update(skill_registry=self.skills, agent_registry=self.agents, capability_event=self.emit, ask_user_callback=lambda questions: self.ask("questions", {"questions": questions}), plan_approval_callback=lambda content: self.ask("plan_approval", {"content": content}))
-        lsp = LspTool()
-        engine.lsp_manager = LSPManager()
-        engine.tool_context["lsp_manager"] = engine.lsp_manager
-        lsp.context = engine.tool_context
-        engine.latent_tools[lsp.name] = lsp
         try:
+            if self.resume_id and not engine.load_session(self.resume_id):
+                raise ValueError("Session could not be resumed")
+            if write:
+                engine.require_writer()
+            # History restores conversation state; current saved settings determine
+            # how its next request connects, including changes made in another tab.
+            await self.sync_model(engine, force=True)
+            for record in engine.subagent_registry:
+                if record.get("status") == "running":
+                    record["status"] = "interrupted"
+            for member in engine.team_manager.get_non_lead_members():
+                member.is_active = False
+            engine.set_permission_handler(self.permission)
+            engine.browser_manager.capture_callback = None if os.environ.get("XULOOM_REMOTE") == "1" else self.capture
+            engine.tool_context.update(skill_registry=self.skills, agent_registry=self.agents, capability_event=self.emit, ask_user_callback=lambda questions: self.ask("questions", {"questions": questions}), plan_approval_callback=lambda content: self.ask("plan_approval", {"content": content}))
+            lsp = LspTool()
+            engine.lsp_manager = LSPManager()
+            engine.tool_context["lsp_manager"] = engine.lsp_manager
+            lsp.context = engine.tool_context
+            engine.latent_tools[lsp.name] = lsp
             self._configure_engine(engine)
         except BaseException:
             await engine.aclose()

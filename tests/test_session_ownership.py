@@ -6,10 +6,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from xuloom.core.session import SessionManager
-from xuloom.core.session_lock import SessionBusyError, SessionLock
+from xuloom.core.session_lock import SessionBusyError, SessionConflictError, SessionLock
 from xuloom.desktop.bridge import DesktopBridge
 
 
@@ -33,7 +33,7 @@ class SessionOwnershipTests(unittest.TestCase):
 
     def holder(self):
         script = Path(__file__).with_name("fixtures") / "session_writer.py"
-        env = {**self.environment, "PYTHONPATH": str(Path(__file__).resolve().parents[1])}
+        env = {**self.environment, "PYTHONPATH": os.environ.get("XULOOM_TEST_SITE", str(Path(__file__).resolve().parents[1]))}
         process = subprocess.Popen([sys.executable, str(script), str(self.root), "hold", "shared"], env=env,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         def cleanup():
@@ -130,4 +130,53 @@ class SessionOwnershipTests(unittest.TestCase):
             self.assertTrue((await bridge.dispatch("storage.mutate", spec))["completed"])
             self.assertFalse(checkpoint.exists())
             await bridge.close()
+        asyncio.run(verify())
+
+    def test_desktop_rejects_corrupt_resume_before_initialization_and_closes_readonly_engine(self):
+        async def verify():
+            manager = self.manager()
+            self.assertTrue(manager.save_session_state("corrupt", []))
+            manager.release_writer()
+            checkpoint = Path(manager.session_dir) / "corrupt.json"
+            raw = json.loads(checkpoint.read_bytes()); raw["revision"] = None
+            checkpoint.write_text(json.dumps(raw), encoding="utf-8")
+            before = checkpoint.read_bytes()
+            bridge = DesktopBridge(lambda _: None, cwd=self.root)
+            bridge.resume_id = "corrupt"
+            try:
+                with patch.object(bridge, "_create_engine", wraps=bridge._create_engine) as create:
+                    with self.assertRaises(SessionConflictError): await bridge.ensure_engine(write=True)
+                    create.assert_not_called()
+                engine = bridge._create_engine()
+                with patch.object(bridge, "_create_engine", return_value=engine), \
+                        patch.object(engine, "aclose", wraps=engine.aclose) as close, \
+                        patch.object(bridge, "sync_model", new_callable=AsyncMock) as sync, \
+                        patch.object(bridge, "_connect_mcp", new_callable=AsyncMock) as connect:
+                    with self.assertRaises(SessionConflictError): await bridge.ensure_engine()
+                    close.assert_awaited_once()
+                    sync.assert_not_awaited()
+                    connect.assert_not_awaited()
+                self.assertIsNone(bridge.engine)
+                self.assertIsNone(bridge.protocol_task)
+                self.assertEqual(checkpoint.read_bytes(), before)
+            finally:
+                await bridge.close()
+        asyncio.run(verify())
+
+    def test_desktop_failed_model_configuration_releases_new_engine_writer(self):
+        async def verify():
+            bridge = DesktopBridge(lambda _: None, cwd=self.root)
+            engine = bridge._create_engine()
+            try:
+                with patch.object(bridge, "_create_engine", return_value=engine), \
+                        patch.object(engine, "aclose", wraps=engine.aclose) as close, \
+                        patch.object(bridge, "sync_model", new_callable=AsyncMock, side_effect=ValueError("bad configuration")):
+                    with self.assertRaisesRegex(ValueError, "bad configuration"):
+                        await bridge.ensure_engine(write=True)
+                    close.assert_awaited_once()
+                self.assertIsNone(bridge.engine)
+                self.assertFalse(engine.session_manager.owns_writer(engine.session_id))
+                self.manager().acquire_writer(engine.session_id)
+            finally:
+                await bridge.close()
         asyncio.run(verify())
