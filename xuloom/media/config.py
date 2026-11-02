@@ -3,6 +3,7 @@ import copy
 import hashlib
 import json
 import re
+import uuid
 from urllib.parse import urlsplit, urlunsplit
 
 from xuloom.core.config import load_config, update_config
@@ -39,7 +40,8 @@ def validate(value):
         raise ValueError("Media connection ID must contain 1–64 letters, digits, _ or -")
     if value.get("protocol", "fal-queue") != "fal-queue":
         raise ValueError("Unsupported media protocol; select fal-queue")
-    name = value.get("name") or value["id"]
+    base_url = address(value.get("base_url"))
+    name = value.get("name") or urlsplit(base_url).netloc
     if not isinstance(name, str) or len(name) > 160 or any(ord(c) < 32 for c in name):
         raise ValueError("Invalid media connection name")
     key = value.get("api_key", "")
@@ -86,7 +88,7 @@ def validate(value):
         if urlsplit(url).path not in {"", "/"}:
             raise ValueError("Download origins must not contain a path")
     return {"id": value["id"], "name": name, "protocol": "fal-queue", "api_key": key,
-        "base_url": address(value.get("base_url", "https://queue.fal.run")), "network_mode": mode,
+        "base_url": base_url, "network_mode": mode,
         "models": cleaned, "download_origins": sorted(set(downloads))}
 
 
@@ -108,6 +110,8 @@ def public_connections(cfg=None):
 def save(value):
     if not isinstance(value, dict) or value.keys() - {"id", "name", "protocol", "base_url", "network_mode", "apiKey", "models", "download_origins"}:
         raise ValueError("Invalid media connection fields")
+    if "id" not in value or value["id"] == "":
+        value = {**value, "id": "media-" + uuid.uuid4().hex}
     def change(cfg):
         rows = connections(cfg)
         old = next((row for row in rows if row["id"] == value.get("id")), {})

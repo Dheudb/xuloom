@@ -8,7 +8,7 @@ for (const directory of [config, data, work]) fs.mkdirSync(directory);
 atomicJSON(path.join(data, "workbench.json"), { projects: [], activeConversation: null, defaultDirectory: work });
 const env = { ...process.env, XULOOM_CONFIG_DIR: config, XULOOM_DATA_DIR: data, XULOOM_USER_DATA: data, HOME: path.join(fixture, "home"), USERPROFILE: path.join(fixture, "home"), XULOOM_SKILLS_PATHS: "", XULOOM_TEST_HEADLESS: "1", NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" };
 for (const key of ["ELECTRON_RUN_AS_NODE", "XULOOM_DEV_URL", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL", "XULOOM_MODEL_PROVIDER"]) delete env[key];
-let base, app, page, sequence = 0, video, png, pending = false, statusRequests = 0;
+let base, app, page, mediaConnectionId, sequence = 0, video, png, pending = false, statusRequests = 0;
 const jobs = new Map(), posts = [], chatRequests = [], errors = [];
 const wav = Buffer.alloc(44 + 32000);
 wav.write("RIFF", 0); wav.writeUInt32LE(wav.length - 8, 4); wav.write("WAVEfmt ", 8); wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(8000, 24); wav.writeUInt32LE(16000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write("data", 36); wav.writeUInt32LE(32000, 40);
@@ -44,7 +44,10 @@ const server = http.createServer((req, res) => {
     let tool;
     if (after.length === 0) tool = { name: "tool_search_tool", arguments: { query: "generate image video speech music", activate: ["media_tool"] } };
     if (after.length === 1) tool = { name: "media_tool", arguments: { action: "capabilities" } };
-    if (after.length === 2) tool = { name: "media_tool", arguments: { action: "submit", connection: "my-media", model: kind, prompt: "Fixture " + kind + " generation", wait_ms: 0 } };
+    if (after.length === 2) {
+      assert(mediaConnectionId && JSON.stringify(after[1]).includes(mediaConnectionId), "Capabilities must expose the saved generated identity to the model");
+      tool = { name: "media_tool", arguments: { action: "submit", connection: mediaConnectionId, model: kind, prompt: "Fixture " + kind + " generation", wait_ms: 0 } };
+    }
     res.writeHead(200, { "Content-Type": "text/event-stream" });
     const send = (delta, finish_reason) => res.write("data: " + JSON.stringify({ choices: [{ index: 0, delta, finish_reason }] }) + "\n\n");
     if (tool) { send({ tool_calls: [{ index: 0, id: "media-ui-" + ++sequence, type: "function", function: { name: tool.name, arguments: JSON.stringify(tool.arguments) } }] }, null); send({}, "tool_calls"); }
@@ -88,23 +91,40 @@ async function preview(extension) {
   });
   png = Buffer.from(encoded.png, "base64"); video = Buffer.from(encoded.video, "base64"); assert(video.includes(Buffer.from([0x1f, 0x43, 0xb6, 0x75])), "The hidden test recorder must produce actual video frames, not only a WebM header");
   await settings(); await page.getByRole("button", { name: "添加生成服务", exact: true }).click();
-  await page.getByRole("textbox", { name: "媒体连接 ID", exact: true }).fill("my-media");
+  assert.equal(await page.getByRole("textbox", { name: "媒体连接 ID", exact: true }).count(), 0);
+  assert.equal(await page.getByRole("textbox", { name: "媒体 API 地址", exact: true }).inputValue(), "");
+  for (const label of ["图片", "图片编辑", "视频", "语音", "音效", "音乐"])
+    await page.locator(".media-add-models").getByRole("button", { name: label, exact: true }).click();
+  for (let index = 1; index <= 6; index++) {
+    assert.equal(await page.getByLabel("供应商模型端点 " + index, { exact: true }).inputValue(), "");
+    assert.equal(await page.getByLabel("媒体默认参数 " + index, { exact: true }).inputValue(), "{}");
+  }
+  assert(!/minimax|fal-ai\/flux/i.test(await page.locator(".media-settings").innerText()));
+  await page.locator(".media-settings h3").scrollIntoViewIfNeeded();
+  const blankSettings = await app.evaluate(async ({ BrowserWindow }) =>
+    (await BrowserWindow.getAllWindows()[0].webContents.capturePage(undefined, { stayHidden: true, stayAwake: true })).toDataURL());
+  fs.mkdirSync(path.join(root, "test-results"), { recursive: true });
+  fs.writeFileSync(path.join(root, "test-results/media-blank-config.png"), Buffer.from(blankSettings.split(",")[1], "base64"));
+  await page.getByRole("button", { name: "取消", exact: true }).click();
+  await page.getByRole("button", { name: "添加生成服务", exact: true }).click();
   await page.getByRole("textbox", { name: "媒体连接名称", exact: true }).fill("Generation fixture");
   await page.getByRole("textbox", { name: "媒体 API 地址", exact: true }).fill(base + "/q"); await page.getByLabel("媒体 API Key", { exact: true }).fill("MEDIA_FIXTURE_KEY");
   for (const [index, kind, label] of [[1, "image", "图片"], [2, "speech", "语音"], [3, "video", "视频"]]) {
     await page.locator(".media-add-models").getByRole("button", { name: label, exact: true }).click();
-    if (kind === "video") await page.getByRole("textbox", { name: "供应商模型端点 " + index, exact: true }).fill("fal-ai/app/video");
+    await page.getByRole("textbox", { name: "供应商模型端点 " + index, exact: true }).fill("fixture-owner/" + kind);
     const row = page.locator(".media-model").nth(index - 1); await row.locator("summary").click();
     await page.getByRole("textbox", { name: "媒体默认参数 " + index, exact: true }).fill(JSON.stringify({ fixture_kind: kind }));
   }
-  await page.getByRole("button", { name: "保存媒体连接", exact: true }).click(); await page.getByText("媒体连接已保存。可直接在对话中描述要生成的内容。", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "保存生成服务", exact: true }).click(); await page.getByText("生成服务已保存。可直接在对话中描述要生成的内容。", { exact: true }).waitFor();
   assert.equal(posts.length, 0, "Saving configuration must not generate media");
-  await page.getByRole("button", { name: "编辑连接", exact: true }).click(); assert.equal(await page.getByLabel("媒体 API Key", { exact: true }).inputValue(), "");
-  await page.getByRole("button", { name: "保存媒体连接", exact: true }).click(); await page.getByText("Key 已保存", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "编辑服务", exact: true }).click(); assert.equal(await page.getByLabel("媒体 API Key", { exact: true }).inputValue(), "");
+  await page.getByRole("button", { name: "保存生成服务", exact: true }).click(); await page.getByText("Key 已保存", { exact: true }).waitFor();
   const python = process.env.XULOOM_TEST_EXECUTABLE ? path.join(path.dirname(process.env.XULOOM_TEST_EXECUTABLE), "resources/python/python.exe") : resolveEnginePython({ packaged: false, projectRoot: repo });
   const cli = spawnSync(python, ["-m", "xuloom", "media", "connections", "--json"], { cwd: repo, env, encoding: "utf8", windowsHide: true });
   assert.equal(cli.status, 0, cli.stderr); const publicConfig = JSON.parse(cli.stdout).result.connections;
   assert.equal(publicConfig[0].models.length, 3); assert(publicConfig[0].hasKey); assert(!cli.stdout.includes("MEDIA_FIXTURE_KEY"));
+  assert.match(publicConfig[0].id, /^media-[0-9a-f]{32}$/);
+  mediaConnectionId = publicConfig[0].id;
   await page.getByRole("button", { name: "关闭设置", exact: true }).click(); await page.locator(".new-task").click(); await page.locator(".session-item.active").waitFor();
   await page.getByLabel("访问权限", { exact: true }).selectOption("full"); await page.waitForFunction(() => !document.querySelector(".permission-picker")?.disabled);
   await run("image"); let region = await preview("png"); await region.getByAltText("文件图片预览", { exact: true }).waitFor();
@@ -154,8 +174,8 @@ async function preview(extension) {
   await settings(); await page.getByText("此会话已保存的生成任务", { exact: true }).waitFor();
   assert.equal(await page.locator(".media-job-history details").count(), 5); assert.equal(posts.length, 5);
   assert(!(await page.locator("body").innerText()).includes("MEDIA_FIXTURE_KEY"));
-  await page.getByRole("button", { name: "移除", exact: true }).click(); await page.getByRole("button", { name: "确认移除连接", exact: true }).click();
-  await page.getByText("连接已移除；供应商已有任务没有被取消。", { exact: true }).waitFor(); assert.equal(posts.length, 5);
+  await page.getByRole("button", { name: "移除", exact: true }).click(); await page.getByRole("button", { name: "确认移除服务", exact: true }).click();
+  await page.getByText("服务已移除；供应商已有任务没有被取消。", { exact: true }).waitFor(); assert.equal(posts.length, 5);
   assert.deepEqual(errors, []);
   console.log("Media E2E passed: native settings + shared masked CLI config, deferred tool discovery, one key/multiple models, actual generated files, decoded PNG/WAV/WebM playback, source navigation, direct status without a chat-model call or draft loss, restart without re-submission and connection removal");
 } catch (error) { if (page) console.error((await page.locator("body").innerText().catch(() => "")).slice(-7000)); throw error; }

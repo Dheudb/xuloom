@@ -4,12 +4,14 @@ Xuloom 通过用户配置的服务生成图片、编辑图片、生成视频、�
 
 ## 桌面配置与使用
 
-1. 打开 **设置 → 媒体生成 → 添加生成服务**，填写连接 ID、显示名称、API 地址及自己的 Key。官方队列地址为 `https://queue.fal.run`。
-2. 添加用途对应的模型。本地模型 ID 用来选择条目；供应商模型端点填写实际 `owner/model/endpoint`。一个连接的多个模型共用一个 Key。
+1. 打开 **设置 → 媒体生成 → 添加生成服务**，填写生成服务的 API 地址和自己的 Key。名称可选，留空显示服务地址中的主机名；连接 ID 自动生成和保存，不需要手填。
+2. 添加用途对应的模型，填写服务商提供的实际 `owner/model/endpoint`。不预填任何供应商、API 地址、模型端点或专用参数。同一服务的多个模型共用一个 Key；本地调用名自动提供，可在高级设置调整。
 3. 默认参数 JSON 填模型特有字段，如声音、时长、尺寸或歌词。提示词字段通常是 `prompt`，语音通常是 `text`；参考图字段默认是 `image_urls`，部分视频接口为 `image_url` 或 `first_frame_url`。以所选模型的当前官方 schema 为准。
 4. 保存后直接发送“生成一张……图片”“把这段文字生成为……语音”等任务。主代理通过工具发现调用 `media_tool`，先检查已配置能力，再使用实际条目提交。
 
-保存、查看配置不会调用服务。编辑 Key 留空保留原值；已保存的 Key 不回传界面或聊天模型。未配置媒体服务不影响普通聊天。视频、音效需要自行填写当前可用端点；界面不默认选择已弃用的视频接口。其他用途的预填示例也不保证供应商持续开放或有免费额度。
+保存、查看配置不会调用服务。编辑 Key 留空保留原值；已保存的 Key 不回传界面或聊天模型。未配置媒体服务不影响普通聊天。编辑已有服务沿用原标识与配置，避免历史任务失去关联；移除默认值不会擅自清除用户已保存的模型。API 地址为空时保存失败，不回退到任何供应商。
+
+API 地址和 Key 确定请求位置及认证；具体模型、输入字段、排队／结果结构仍取决于接口协议。目前仅支持 fal Queue 兼容服务，其他原生生成协议需要各自的适配器，不能只替换地址便宣称兼容。
 
 支持的结果结构为 `images` 数组或 `image` 对象，以及 `video`／`audio` 对象，各产物具有 `url` 字段。不任意遍历 JSON 并下载其中所有地址；其他结构需要增加适配，不能由“同为 fal 模型”推断一定兼容。
 
@@ -23,16 +25,13 @@ CLI 与 App 共享 `~/.xuloom/config.json` 的 `media_connections`，不需要�
 
 ```json
 {
-  "id": "fal",
   "name": "我的媒体服务",
   "protocol": "fal-queue",
-  "base_url": "https://queue.fal.run",
+  "base_url": "https://your-generation-service.example",
   "network_mode": "direct",
   "models": [
-    {"id": "picture", "kind": "image", "model": "fal-ai/flux/schnell", "defaults": {}},
-    {"id": "edit", "kind": "image-edit", "model": "fal-ai/flux-2/edit", "defaults": {}},
-    {"id": "voice", "kind": "speech", "model": "fal-ai/minimax/speech-02-hd", "defaults": {"output_format": "url"}},
-    {"id": "music", "kind": "music", "model": "fal-ai/minimax-music/v2.6", "defaults": {"is_instrumental": true}}
+    {"id": "picture", "kind": "image", "model": "your-owner/your-image-model", "defaults": {}},
+    {"id": "voice", "kind": "speech", "model": "your-owner/your-speech-model", "defaults": {}}
   ],
   "download_origins": []
 }
@@ -46,7 +45,7 @@ xuloom media connections --json
 xuloom exec "使用已配置的 picture 模型生成一张简洁的山景图片" --cwd /path/to/work --permission full --json
 ```
 
-`connections` 只返回是否已有 Key。模型参数以当前供应商文档为准；以上是连接格式示例，不是 Xuloom 提供的额度或真实供应商验收记录。可不使用 `--permission full`，此时按当前审批方式执行。
+请把 `.example` 地址与 `your-owner/...` 替换为自己的真实服务和端点。未提供 `id` 时，CLI 与 App 的保存接口都会自动生成，并在返回值中给出；脚本后续编辑应复用这个标识，也可为已有自动化继续显式指定 `id`。桌面表单的标识在草稿期间保持固定，重复保存不会改成新身份。`connections` 只返回是否已有 Key。模型参数以当前供应商文档为准；示例不提供额度或供应商验收证明。可不使用 `--permission full`，此时按当前审批方式执行。
 
 ## 查询与取消，不经过聊天模型
 
@@ -56,7 +55,7 @@ xuloom exec "使用已配置的 picture 模型生成一张简洁的山景图片"
 xuloom media jobs --cwd /path/to/work --session SESSION_ID --json
 xuloom media status MEDIA_JOB_ID --cwd /path/to/work --session SESSION_ID --permission full --wait-ms 0 --json
 xuloom media cancel MEDIA_JOB_ID --cwd /path/to/work --session SESSION_ID --permission full --json
-xuloom media remove fal --yes --json
+xuloom media remove CONNECTION_ID --yes --json
 ```
 
 `status` 和 `cancel` 恢复原会话的权限和独占写者，通过现有工具执行入口操作，**不请求聊天模型**。默认 `--permission ask`，非交互入口需要审批时返回 `approval_required` 和退出码 3；`--permission full` 仍遵守显式拒绝。CLI 返回的 `reason: completed` 表示这次控制操作结束，生成是否完成看 `generation_completed` 和 `job.phase`。

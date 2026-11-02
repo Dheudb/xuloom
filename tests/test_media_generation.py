@@ -148,6 +148,32 @@ class MediaTests(unittest.IsolatedAsyncioTestCase):
         self.engine.plan_manager.set_mode("normal"); self.engine.permission_manager.always_deny_tools.add("media_tool")
         self.assertTrue((await self.call())["is_error"]); self.assertEqual(self.requests, [])
 
+    async def test_new_connection_id_is_generated_and_edits_keep_its_key_and_identity(self):
+        value = {key: item for key, item in self.connection.items() if key != "id"}
+        value.pop("name")
+        saved = config.save(value)
+        created = next(row for row in saved if row["id"] != "media")
+        self.assertRegex(created["id"], r"^media-[0-9a-f]{32}$")
+        self.assertEqual(created["name"], self.base.removeprefix("http://"))
+        self.assertNotIn("MEDIA_ONLY_SECRET", json.dumps(saved))
+        editable = {key: item for key, item in created.items() if key != "hasKey"}
+        rows = config.save({**editable, "apiKey": "", "name": "Renamed service"})
+        self.assertEqual(len(rows), 2)
+        binding, key = config.resolve(created["id"], "image")
+        self.assertEqual(binding["id"], created["id"])
+        self.assertEqual(key, "MEDIA_ONLY_SECRET")
+        self.assertEqual(self.requests, [])
+
+    async def test_missing_service_address_never_falls_back_or_changes_saved_connections(self):
+        before = config.load_config()
+        for address in (None, ""):
+            with self.subTest(address=address), self.assertRaises(ValueError):
+                config.save({**self.connection, "base_url": address})
+        value = dict(self.connection); value.pop("base_url")
+        with self.assertRaises(ValueError): config.save(value)
+        self.assertEqual(config.load_config(), before)
+        self.assertEqual(self.requests, [])
+
     async def test_unknown_accepted_submission_is_not_automatically_reposted_after_restart(self):
         self.scenario = "lost"
         self.assertTrue((await self.call())["is_error"])
@@ -315,19 +341,22 @@ class MediaTests(unittest.IsolatedAsyncioTestCase):
         finally: external.unlink(missing_ok=True)
 
     async def test_formal_cli_uses_same_config_without_key_echo_or_model_requests(self):
-        value = dict(self.connection); value.pop("apiKey")
-        path = self.root / "new-connection.json"; path.write_text(json.dumps({**value, "id": "from-cli"}), encoding="utf-8")
-        env = {**os.environ, "XULOOM_CONFIG_DIR": str(self.root / "config-cli"), "MEDIA_TEST_KEY": "FROM_ENV_ONLY", "OPENAI_API_KEY": "", "ANTHROPIC_API_KEY": ""}
+        value = dict(self.connection); value.pop("apiKey"); value.pop("id")
+        path = self.root / "new-connection.json"; path.write_text(json.dumps(value), encoding="utf-8")
+        env = {**os.environ, "XULOOM_CONFIG_DIR": str(self.root / "config-cli"), "MEDIA_TEST_KEY": "FROM_ENV_ONLY", "OPENAI_API_KEY": "", "ANTHROPIC_API_KEY": "",
+            "PYTHONPATH": os.environ.get("XULOOM_TEST_SITE", str(Path(__file__).resolve().parents[1]))}
         async def command(*args):
             process = await asyncio.create_subprocess_exec(sys.executable, "-m", "xuloom", "media", *args, "--json", env=env,
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                cwd=self.root, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
             out, err = await asyncio.wait_for(process.communicate(), 30)
             self.assertEqual(process.returncode, 0, err.decode()); self.assertNotIn(b"FROM_ENV_ONLY", out)
             return json.loads(out)["result"]
         result = await command("save", "--file", str(path), "--api-key-env", "MEDIA_TEST_KEY")
         self.assertTrue(result["connections"][0]["hasKey"])
+        identity = result["connections"][0]["id"]
+        self.assertRegex(identity, r"^media-[0-9a-f]{32}$")
         self.assertEqual(len((await command("connections"))["connections"]), 1)
-        self.assertEqual((await command("remove", "from-cli", "--yes"))["connections"], [])
+        self.assertEqual((await command("remove", identity, "--yes"))["connections"], [])
         self.assertEqual(self.requests, [])
 
     async def test_existing_output_conflict_never_overwrites_user_file(self):
@@ -360,11 +389,12 @@ class MediaTests(unittest.IsolatedAsyncioTestCase):
         configuration = self.root / "control-config"; configuration.mkdir()
         (configuration / "config.json").write_text(json.dumps(config.load_config()), encoding="utf-8")
         env = {**os.environ, "XULOOM_CONFIG_DIR": str(configuration), "OPENAI_API_KEY": "", "ANTHROPIC_API_KEY": "",
-            "OPENAI_MODEL": "", "ANTHROPIC_MODEL": "", "OPENAI_BASE_URL": self.base + "/chat/v1", "ANTHROPIC_BASE_URL": self.base + "/chat"}
+            "OPENAI_MODEL": "", "ANTHROPIC_MODEL": "", "OPENAI_BASE_URL": self.base + "/chat/v1", "ANTHROPIC_BASE_URL": self.base + "/chat",
+            "PYTHONPATH": os.environ.get("XULOOM_TEST_SITE", str(Path(__file__).resolve().parents[1]))}
         async def command(action, identity, *extra):
             process = await asyncio.create_subprocess_exec(sys.executable, "-m", "xuloom", "media", action, identity,
                 "--cwd", str(self.root), "--session", self.engine.session_id, "--json", *extra,
-                env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                cwd=self.root, env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
             out, err = await asyncio.wait_for(process.communicate(), 30)
             self.assertNotIn(b"MEDIA_ONLY_SECRET", out)
             events = [json.loads(line) for line in out.splitlines()]

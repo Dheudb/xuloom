@@ -35,7 +35,7 @@ class SessionOwnershipTests(unittest.TestCase):
         script = Path(__file__).with_name("fixtures") / "session_writer.py"
         env = {**self.environment, "PYTHONPATH": os.environ.get("XULOOM_TEST_SITE", str(Path(__file__).resolve().parents[1]))}
         process = subprocess.Popen([sys.executable, str(script), str(self.root), "hold", "shared"], env=env,
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            cwd=self.root, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         def cleanup():
             if process.poll() is None:
                 process.communicate("release\n", timeout=30)
@@ -57,7 +57,7 @@ class SessionOwnershipTests(unittest.TestCase):
         spill.parent.mkdir(parents=True)
         spill.write_text("Another writer's new result", encoding="utf-8")
         probe = subprocess.run([sys.executable, str(script), str(self.root), "probe", "shared"], env=env,
-            capture_output=True, text=True, timeout=45)
+            cwd=self.root, capture_output=True, text=True, timeout=45)
         self.assertEqual(probe.returncode, 0, probe.stderr)
         result = json.loads(probe.stdout.strip().splitlines()[-1])
         self.assertEqual(result, {"reason": "session_busy", "model_calls": 0, "tool_error": True, "agent_error": "session_busy", "effect_exists": False})

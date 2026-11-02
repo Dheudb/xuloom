@@ -62,7 +62,7 @@ class CliTests(unittest.TestCase):
 
     def cli(self, *args, stdin=""):
         result = subprocess.run([sys.executable, "-m", "xuloom", *args, "--json", "--cwd", str(self.root)],
-            input=stdin, text=True, encoding="utf-8", capture_output=True, env=self.env, timeout=35)
+            cwd=self.root, input=stdin, text=True, encoding="utf-8", capture_output=True, env=self.env, timeout=35)
         events = [json.loads(line) for line in result.stdout.splitlines()]
         self.assertEqual(sum(e["type"] == "final" for e in events), 1, result.stdout+result.stderr)
         return result, events, events[-1]["result"]
@@ -188,7 +188,7 @@ class CliTests(unittest.TestCase):
     def test_another_process_pauses_the_goal_without_taking_its_writer_lease(self):
         self.mode = "hold"
         process = subprocess.Popen([sys.executable, "-m", "xuloom", "goal", "start", "Wait for result", "--criterion", "Inspect result", "--json", "--cwd", str(self.root)],
-            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", env=self.env)
+            cwd=self.root, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", env=self.env)
         lines = queue.Queue()
         reader = threading.Thread(target=lambda: [lines.put(line) for line in process.stdout], daemon=True); reader.start()
         try:
