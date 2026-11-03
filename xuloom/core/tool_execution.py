@@ -172,6 +172,9 @@ async def execute_tool(self, tool_block, sys_print_callback=print, *, turn: int 
             if tool_name not in effective_tools:
                 raise KeyError(f"Tool '{tool_name}' is not available in current mode.")
             handler = effective_tools[tool_name]
+            from xuloom.core.tool_catalog import CORE_TOOLS
+            if tool_name in getattr(self, 'builtin_tool_names', ()) and tool_name not in CORE_TOOLS:
+                self.activated_tools.add(tool_name)
             confinement = self.execution_sandbox
             confinement.check_tool(tool_name)
             normalized_input = tool_inputs

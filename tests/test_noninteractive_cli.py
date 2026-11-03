@@ -26,6 +26,9 @@ class CliTests(unittest.TestCase):
                 if not raw: return
                 body = json.loads(raw)
                 owner.wire.append({"path": self.path, "headers": dict(self.headers), "body": body})
+                if owner.mode == 'native-search' and self.path == '/v1/tools/search':
+                    self.send_response(200); self.send_header('Content-Type', 'application/json'); self.end_headers()
+                    self.wfile.write(json.dumps({'results': [{'url': 'https://evidence.invalid/paper', 'title': 'Paper', 'summary': 'LOCAL_SEARCH_EVIDENCE'}]}).encode()); return
                 if not body.get("stream"):
                     self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
                     self.wfile.write(json.dumps({"choices": [{"message": {"role": "assistant", "content": "memory"}}]}).encode()); return
@@ -34,6 +37,11 @@ class CliTests(unittest.TestCase):
                 if owner.mode == "hold": owner.finish_request.wait(25)
                 has_tool_result = body["messages"][-1]["role"] == "tool"
                 delta, finish = {"content": "CLI_RESULT_你好"}, "stop"
+                if owner.mode == 'native-search' and len(owner.requests) <= 2:
+                    name = 'tool_search_tool' if len(owner.requests) == 1 else 'web_search_tool'
+                    arguments = {'query': 'web search', 'activate': ['web_search_tool']} if len(owner.requests) == 1 else {'query': 'question', 'max_results': 15}
+                    delta, finish = {'tool_calls': [{'index': 0, 'id': 'native-search-' + str(len(owner.requests)), 'type': 'function',
+                        'function': {'name': name, 'arguments': json.dumps(arguments)}}]}, 'tool_calls'
                 if owner.mode == "heterogeneous" and not self.path.startswith("/worker/") and not has_tool_result:
                     delta, finish = {"tool_calls": [{"index": 0, "id": "delegate", "type": "function", "function": {"name": "spawn_agent",
                         "arguments": json.dumps({"prompt": "independent evidence", "subagent_type": "other-account"})}}]}, "tool_calls"
@@ -77,6 +85,44 @@ class CliTests(unittest.TestCase):
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertEqual(result["session_id"], sid)
         self.assertIn("Analyze this sentence", json.dumps(self.requests[-1], ensure_ascii=False))
+
+    def test_native_search_discovery_from_formal_cli_uses_saved_connection(self):
+        self.mode = 'native-search'
+        config = self.root / 'config'; config.mkdir()
+        (config / 'config.json').write_text(json.dumps({'active_model_connection': 'parent', 'model_connections': [
+            {'id': 'parent', 'provider': 'openai', 'model': 'fixture', 'models': ['fixture'], 'base_url': self.env['OPENAI_BASE_URL'],
+                'api_key': 'fixture', 'native_search': {'backend': 'deepseek', 'model': '', 'baseUrl': ''}}]}), encoding='utf-8')
+        process, events, result = self.cli('exec', 'Search the web', '--permission', 'full')
+        self.assertEqual(process.returncode, 0, process.stderr + json.dumps(events))
+        self.assertTrue(result['persisted'])
+        self.assertEqual(len(self.requests), 3)
+        first = self.requests[0]
+        compact = lambda value: json.dumps(value, ensure_ascii=False, separators=(',', ':'))
+        system = '\n'.join(row['content'] for row in first['messages'] if row['role'] == 'system')
+        size = len(system) + len(compact(first['tools'])) + len(compact([row for row in first['messages'] if row['role'] != 'system']))
+        self.assertLess(size, 6500, 'Empty-profile first requests must stay near the Pi baseline')
+        self.assertNotIn('web_search_tool', [row['function']['name'] for row in self.requests[0]['tools']])
+        search = next(row['function'] for row in self.requests[1]['tools'] if row['function']['name'] == 'web_search_tool')
+        self.assertEqual(search['parameters']['properties']['query']['maxLength'], 128)
+        last = json.dumps(self.requests[-1]['messages'])
+        self.assertIn('https://evidence.invalid/paper', last)
+        self.assertIn('LOCAL_SEARCH_EVIDENCE', last)
+        raw_search = [row for row in self.wire if row['path'] == '/v1/tools/search']
+        self.assertEqual(len(raw_search), 1)
+        self.assertEqual(raw_search[0]['headers']['Authorization'], 'Bearer fixture')
+
+    def test_search_config_formal_entry_does_not_start_engine_or_request_model(self):
+        config = self.root / 'config'; config.mkdir()
+        (config / 'config.json').write_text(json.dumps({'active_model_connection': 'parent', 'model_connections': [
+            {'id': 'parent', 'provider': 'openai', 'model': 'fixture', 'models': ['fixture'], 'base_url': self.env['OPENAI_BASE_URL'], 'api_key': 'fixture-secret'}]}), encoding='utf-8')
+        process = subprocess.run([sys.executable, '-m', 'xuloom', 'search-config', '--backend', 'deepseek', '--json'],
+            cwd=self.root, capture_output=True, text=True, encoding='utf-8', env=self.env, timeout=35)
+        self.assertEqual(process.returncode, 0, process.stderr + process.stdout)
+        events = [json.loads(line) for line in process.stdout.splitlines()]
+        self.assertEqual(events[-1]['type'], 'final')
+        self.assertEqual(events[-1]['result']['search']['backend'], 'deepseek')
+        self.assertNotIn('fixture-secret', process.stdout)
+        self.assertEqual(self.wire, [])
 
     def test_native_named_connection_role_from_formal_cli(self):
         self.mode = "heterogeneous"

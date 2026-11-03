@@ -24,6 +24,7 @@ try:
 except ImportError:
     git = None
 from xuloom.core.run_result import RunResult, PersistenceError, finish_run
+from xuloom.core import tool_catalog
 from xuloom.core.session_lock import SessionBusyError, SessionConflictError
 from xuloom.core.reasoning import EFFORTS, configured_profile, request_options, normalize_profile
 from xuloom.features.auto_commit import AutoCommitManager
@@ -313,6 +314,7 @@ class QueryEngine:
         from xuloom.tools.tool_sequence import ToolSequenceTool
         all_tools["media_tool"] = MediaTool()
         all_tools["tool_sequence"] = ToolSequenceTool()
+        self.builtin_tool_names = frozenset(all_tools)
         latent_tool_names = {
             "tool_sequence",
             "media_tool",
@@ -350,6 +352,7 @@ class QueryEngine:
             "sandbox_manager": self.sandbox_manager,
             "engine_available_tools": self.available_tools,
             "latent_tools_registry": self.latent_tools,
+            "model_tool_names": lambda: set(tool_catalog.visible(self)),
             "activate_tools": self.activate_tools,
             "permission_manager": self.permission_manager,
             "permission_handler": permission_handler,
@@ -494,6 +497,12 @@ class QueryEngine:
         # tool descriptions, worker records or checkpoint metadata.
         self.tool_context["model_client_options"] = lambda: {"api_key": self._api_key, "network_mode": self.network_mode}
         self.tool_context["model_input_contract"] = self._input_contract
+        from xuloom.tools.native_search import configured, normalize
+        search = (self._model_contract or {}).get('search') if self._model_contract is not None else configured(
+            self.model_provider, self.primary_model, self.api_base_url, self._api_key)
+        self.tool_context['native_search_options'] = lambda: {
+            'profile': normalize(search), 'model': self.primary_model, 'base_url': self.api_base_url or str(getattr(self.client, 'base_url', '')),
+            'api_key': self._api_key, 'network_mode': self.network_mode, 'owner': self._request_owner}
 
     def _resolve_model_provider(self, provider: str = None, model: str = None) -> str:
         resolved = str(
@@ -910,7 +919,7 @@ class QueryEngine:
         activated = []
         for name in tool_names or []:
             accept = self.tool_context.get("activate_tool_filter")
-            if accept and not accept(name, self.latent_tools.get(name)):
+            if accept and not accept(name, self.latent_tools.get(name) or self.available_tools.get(name)):
                 self.activated_tools.discard(name)
                 continue
             if self.execution_sandbox.enabled:
@@ -918,6 +927,8 @@ class QueryEngine:
                 if name not in FILE_TOOLS | CONTROL_TOOLS | PROCESS_TOOLS:
                     continue
             tool = self.latent_tools.pop(name, None)
+            if tool is None and name in self.available_tools:
+                tool = self.available_tools[name]
             if not tool:
                 continue
             tool.context = self.tool_context
@@ -1160,12 +1171,8 @@ class QueryEngine:
     def _build_tool_prompt_summary(self) -> str:
         from xuloom.core.continuation import PROTOCOL
         policy = self.permission_manager.approval_policy.mode
-        sections = ["# Tool approval policy\n" + (
-            "Full access: tool execution is authorized for this conversation. Do not ask for tool approval. "
-            "Agent role and Plan mode tool limits still apply. Ask questions only for missing task information."
-            if policy == "full" else
-            "Request approval: the tool permission system will request user confirmation when needed. "
-            "Do not use the question tool to duplicate tool approval requests.")]
+        sections = [("Full access: do not ask for duplicate tool approval; role/Plan restrictions still apply."
+            if policy == "full" else "The runtime requests tool approval when required; do not duplicate it with a question.")]
         sections.append(PROTOCOL)
         if self.execution_sandbox.enabled:
             sections.append("System workspace isolation: file tools, command_tool and repl_tool run in restricted OS processes. "
@@ -1178,14 +1185,7 @@ class QueryEngine:
                             "Its current working directory is " + self.session_cwd + ". "
                             "Historical paths and project instructions may belong to earlier locations. "
                             "Use the current directory and its project instructions for new tasks; do not reuse old project paths by default.")
-        for name, tool in self.available_tools.items():
-            prompt_builder = getattr(tool, "prompt", None)
-            if not callable(prompt_builder):
-                continue
-            content = str(prompt_builder() or "").strip()
-            if not content:
-                continue
-            sections.append(f"[{name}] {content}")
+        sections.append("Use tool_search_tool to discover and activate other capabilities; activation does not execute them.")
         return "\n".join(sections)
 
     def set_mode(self, mode: str) -> str:
@@ -2214,11 +2214,14 @@ class QueryEngine:
         
     def _get_anthropic_tools_schema(self):
         """Converts registered Pydantic tool classes into provider-native schemas."""
-        effective_tools = self._get_effective_tools()
+        from xuloom.core.tool_catalog import visible, compact_definition
+        effective_tools = visible(self)
         schemas = []
         for tool in effective_tools.values():
             from xuloom.core.continuation import schema
-            definition = schema(tool.get_tool_definition())
+            definition = schema(compact_definition(tool.get_tool_definition()))
+            if tool.name == 'web_search_tool' and self.tool_context['native_search_options']()['profile']['backend'] == 'deepseek':
+                definition['input_schema']['properties']['query']['maxLength'] = 128
             if self.model_provider == "openai":
                 schemas.append(self._openai_tool_definition(definition))
             else:

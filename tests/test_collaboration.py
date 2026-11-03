@@ -352,16 +352,15 @@ class ConversationPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.ok)
         request = self.requests[0]
         system = "\n".join(message["content"] for message in request["messages"] if message["role"] == "system")
-        self.assertIn("Proactive delegation is enabled", system)
-        self.assertIn("instead of doing every branch yourself", system)
+        self.assertIn("Proactively delegate independent", system)
+        self.assertIn("work alongside agents", system)
         self.assertEqual(system.count("# Collaboration: ultra"), 1)
         self.assertTrue(system.endswith(self.engine._collaboration_instructions()))
         self.assertGreater(system.index("# Collaboration: ultra"), system.index("# Tool-Specific Rules"))
-        self.assertIn("run_in_background=true", system)
         self.assertNotIn("run_in_background=false when the current answer requires", system)
-        worker = next(tool["function"] for tool in request["tools"] if tool["function"]["name"] == "agent_tool")
+        worker = next(tool["function"] for tool in request["tools"] if tool["function"]["name"] == "spawn_agent")
         self.assertNotIn("complex, multi-step", worker["description"])
-        self.assertIn("without blocking", worker["parameters"]["properties"]["run_in_background"]["description"])
+        self.assertIn('background', worker['description'])
         # Intent is not a quota or a hidden planner: a model answer never triggers automatic children/retries.
         self.assertEqual(len(self.requests), 1)
         self.assertEqual(self.engine.subagent_registry, [])
@@ -373,9 +372,12 @@ class ConversationPolicyTests(unittest.IsolatedAsyncioTestCase):
         result = await self.engine._run_loop("Briefly compare the given options.", sys_print_callback=lambda _: None)
         self.assertTrue(result.ok)
         system = "\n".join(message["content"] for message in self.requests[0]["messages"] if message["role"] == "system")
-        self.assertIn("benefit exceeds coordination cost", system)
+        self.assertIn("benefits exceed coordination cost", system)
         self.assertNotIn("Proactive delegation is enabled", system)
-        self.assertIn("agent_tool", [tool["function"]["name"] for tool in self.requests[0]["tools"]])
+        names = [tool['function']['name'] for tool in self.requests[0]['tools']]
+        self.assertIn('tool_search_tool', names)
+        self.assertNotIn('agent_tool', names)
+        self.assertIn('agent_tool', self.engine.available_tools)
         self.assertEqual(before, (self.engine.reasoning_effort, self.engine.permission_manager.approval_policy.mode))
 
     async def test_simple_question_no_workers_and_each_new_turn_has_its_own_limits(self):

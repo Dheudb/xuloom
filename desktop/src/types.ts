@@ -46,6 +46,7 @@ export type ReasoningProfile = {
   budgetTokens: number;
 };
 export type ModelConfig = {
+  nativeSearch?: { backend: string; model: string; baseUrl: string };
   connectionId?: string;
   connectionName?: string;
   provider: string;

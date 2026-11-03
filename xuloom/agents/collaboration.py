@@ -60,12 +60,9 @@ def instructions(profile):
     mode = profile["mode"]
     principle = {
         "solo": "Complete work yourself. Do not spawn or resume subagents. If the user explicitly requests parallel workers, explain Solo is selected and ask them to switch the collaboration menu; do not switch it yourself.",
-        "auto": "Delegate only when there is clearly independent work and its benefit exceeds coordination cost. Keep small, tightly coupled tasks together. Answer ordinary questions directly.",
-        "ultra": "Proactive delegation is enabled. Use spawn_agent early for independent research branches, alternative approaches or checks when this can save time or improve quality, instead of doing every branch yourself. Ultra is the user's request for proactive collaboration; no extra request is needed. Keep the critical path and final synthesis yourself; work alongside the agents. Answer simple questions and tightly sequential tasks directly.",
+        "auto": "Delegate clearly independent work when benefits exceed coordination cost; answer simple tasks directly.",
+        "ultra": "Proactively delegate independent research, alternatives or checks early; no extra request is needed. Keep the critical path and synthesis yourself and work alongside agents. Answer simple tasks directly.",
     }[mode]
     return (f"# Collaboration: {mode}\n{principle}\n"
-            "Never launch workers to fill a quota. Do not duplicate the same assignment unless the user explicitly asks for repeated independent trials. "
-            "Give workers self-contained assignments instead of serially relaying every step. Wait for relevant results before final synthesis. "
-            "The runtime automatically queues accepted workers beyond the concurrency limit and starts them FIFO as slots free. Do not manually split a batch solely for concurrency. Queued workers reserve no output tokens until they execute. "
-            "Collaboration does not change tool permissions, reasoning effort or recursion limits. "
-            "Auto and Ultra differ in initiative, not worker quantity. Host limits, if configured, are enforced by the runtime; query capacity when needed.")
+            "Discover agent tools when needed. Give self-contained assignments, avoid duplicate work and wait for results. "
+            "Runtime queues workers FIFO; no manual concurrency batching. Auto/Ultra change initiative, not quantities or permissions.")

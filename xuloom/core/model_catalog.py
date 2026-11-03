@@ -58,7 +58,8 @@ def public_connection(item):
             "model": item.get("model", ""), "models": item.get("models", []), "baseUrl": item.get("base_url", ""),
             "hasKey": bool(item.get("api_key")) and not is_protected(item.get("api_key")),
             "credentialUnavailable": is_protected(item.get("api_key")), "networkMode": item.get("network_mode", "direct"),
-            "modelInputs": item.get("model_inputs", {}), "modelReasoning": item.get("model_reasoning", {})}
+            "modelInputs": item.get("model_inputs", {}), "modelReasoning": item.get("model_reasoning", {}),
+            "nativeSearch": item.get("native_search", {"backend": "builtin", "model": "", "baseUrl": ""})}
 
 
 def public_config(cfg):
@@ -139,9 +140,12 @@ def save_connection(cfg, params):
     if not isinstance(profiles, dict) or any(name not in names for name in profiles):
         raise ValueError("推理能力必须按此连接已配置的模型 ID 保存")
     profiles = {name: normalize_profile(value, provider) for name, value in profiles.items()}
+    from xuloom.tools.native_search import normalize as normalize_search
+    search = normalize_search(params.get('nativeSearch', previous.get('native_search')))
     item = {"id": identity, "name": str(params.get("connectionName") or previous.get("name") or "我的 API").strip()[:100],
             "provider": provider, "model": model, "models": names, "base_url": base,
-            "api_key": key, "network_mode": mode, "model_inputs": inputs, "model_reasoning": profiles}
+            "api_key": key, "network_mode": mode, "model_inputs": inputs, "model_reasoning": profiles,
+            "native_search": search}
     items = [item if old["id"] == identity else old for old in items]
     if not previous:
         items.append(item)

@@ -268,7 +268,7 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Do not place label/description directly in questions", feedback)
             self.assertIn("Valid example", feedback)
             self.assertIn("executed: False", feedback)
-            declared = next(t["function"]["parameters"] for t in self.requests[0]["tools"]
+            declared = next(t["function"]["parameters"] for t in self.requests[1]["tools"]
                 if t["function"]["name"] == "ask_user_question_tool")
             self.assertIn("options", declared["properties"]["questions"]["items"]["properties"])
             answer.set_result({"Which weekend?": "Travel"})

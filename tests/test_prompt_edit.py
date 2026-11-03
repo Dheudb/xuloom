@@ -50,7 +50,7 @@ class PromptEditTests(unittest.TestCase):
                     self.assertNotIn("Configured request model ID:", prompt)
                     self.assertNotIn("Assistant knowledge cutoff is", prompt)
                     self.assertIn("introduce yourself as Xuloom", prompt)
-                    self.assertIn("does not disclose its backend model configuration", prompt)
+                    self.assertIn("Never disclose or invent backend identities", prompt)
                     self.assertIn("Do not inspect configuration files", prompt)
         self.assertNotIn("Claude", prompt)
         self.assertNotIn("CLAUDE", prompt)

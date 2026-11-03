@@ -23,6 +23,12 @@ EXIT_CODES = {"completed": 0, "cancelled": 130, "session_busy": 4, "session_conf
 def parser():
     p = argparse.ArgumentParser(prog="xuloom", description="Non-interactive tasks, persisted goals and timed messages")
     sub = p.add_subparsers(dest="command", required=True)
+    search = sub.add_parser('search-config', help='Configure the active connection search backend; no model request')
+    search.add_argument('--connection', help='Existing connection ID; defaults to the active connection')
+    search.add_argument('--backend', choices=('builtin', 'openai', 'openai-chat', 'anthropic', 'deepseek', 'qwen'))
+    search.add_argument('--model', help='Optional search model; empty inherits the current model')
+    search.add_argument('--base-url', help='Optional search API root; empty reuses the connection address and key')
+    search.add_argument('--json', action='store_true')
     credentials = sub.add_parser("credentials", help="Inspect/migrate OS-protected credentials or replace one model key; no model request")
     credentials.add_argument("action", choices=("status", "migrate", "set-model-key"))
     credentials.add_argument("--cwd", help="Also inspect/migrate this project's MCP credentials")
@@ -167,6 +173,30 @@ async def open_engine(args, emit):
 
 
 async def dispatch(args, emit):
+    if args.command == 'search-config':
+        from xuloom.core.config import load_config, update_config
+        from xuloom.core.model_catalog import connections, active_connection
+        from xuloom.tools.native_search import normalize
+        def select(cfg):
+            identity = args.connection or active_connection(cfg)['id']
+            item = next((row for row in connections(cfg) if row['id'] == identity), None)
+            if item is None: raise ValueError('请先添加模型连接')
+            return item
+        if any(value is not None for value in (args.backend, args.model, args.base_url)):
+            def change(cfg):
+                item = select(cfg)
+                profile = normalize(item.get('native_search'))
+                for name, value in [('backend', args.backend), ('model', args.model), ('baseUrl', args.base_url)]:
+                    if value is not None: profile[name] = value
+                item['native_search'] = normalize(profile)
+                cfg['model_connections'] = [item if row['id'] == item['id'] else row for row in connections(cfg)]
+                return cfg
+            cfg = update_config(change)
+        else:
+            cfg = load_config(decrypt_secrets=False)
+        item = select(cfg)
+        await emit({'type': 'search_config', 'connection_id': item['id'], 'search': normalize(item.get('native_search'))})
+        return {'ok': True, 'reason': 'completed', 'connection_id': item['id'], 'search': normalize(item.get('native_search'))}
     if args.command == "mcp":
         from xuloom.branding import configuration_file
         from xuloom.protocols.mcp_config import MCPConfigStore, validate_server

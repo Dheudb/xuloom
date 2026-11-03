@@ -16,13 +16,10 @@ from xuloom.tools.tool_sequence import LiteralStep, digest, observation
 
 FIELD = "__xuloom_continuation"
 KEY = "native_continuation"
-PROTOCOL = ("# Native continuation protocol\nNormal tool arguments optionally accept __xuloom_continuation:{nodes:[{id,tool,arguments,depends_on,when}]}. "
-    "Use it when useful future actions and all literal arguments are already determined; do not wait for another actor call to restate them. "
-    "depends_on defaults to ['root'] (the current call); use earlier node IDs for dependencies. "
-    "when defaults to []; each condition is {step:'root' or ancestor ID,path:['JSON','keys'],equals:literal JSON value}. "
-    "All conditions must match complete native receipts. False branches are skipped; missing evidence returns control. "
-    "Use available tools, unique IDs and non-recursive literal arguments. Omit the field or use nodes:[] when new interpretation is needed. "
-    "Do not duplicate declared nodes as separate calls. Native permissions, cancellation and acceptance rules remain unchanged.")
+PROTOCOL = ("Optional __xuloom_continuation={nodes:[{id,tool,arguments,depends_on,when}]}. "
+    "Predeclare only known literal actions, never duplicate them. depends_on defaults to ['root'] (this call); use earlier IDs. "
+    "when=[{step:ancestor ID,path:[JSON keys],equals:JSON value}] defaults to []. "
+    "The runtime checks real receipts and permissions; missing evidence or new input returns control. Omit when interpretation is needed.")
 
 
 class Decision(LiteralStep):
@@ -42,20 +39,22 @@ def schema(definition):
         return result
     # Detailed semantics are stated once in the shared tool protocol, rather
     # than repeating a large recursive schema for every active native/MCP tool.
-    body.setdefault("properties", {})[FIELD] = {"type": "object", "properties": {
-        "nodes": {"type": "array", "items": {"type": "object"}, "maxItems": 128}},
-        "required": ["nodes"], "additionalProperties": False,
-        "description": "Optional literal action graph; see the shared native continuation protocol."}
+    body.setdefault("properties", {})[FIELD] = {"type": "object"}
     return result
 
 
 def binding(engine):
     sandbox = engine.sandbox_manager.active_sandbox or {}
-    return digest([engine.session_id, engine.agent_id, engine.session_cwd, engine.model_provider,
+    search = engine.tool_context.get('native_search_options')
+    profile = search()['profile'] if callable(search) else {}
+    values = [engine.session_id, engine.agent_id, engine.session_cwd, engine.model_provider,
         engine.primary_model, engine.api_base_url, engine._api_key, engine.get_mode(),
         engine.execution_sandbox.mode, sandbox.get("path"), engine.agent_role, engine.permission_manager.approval_policy.mode,
         [m.get("_uuid") for m in engine.messages if m.get("role") == "user" and not m.get("_is_tool_result")
-         and m.get("_origin") != "resume_control"]])
+         and m.get("_origin") != "resume_control"]]
+    if profile.get('backend', 'builtin') != 'builtin':
+        values.append(profile)
+    return digest(values)
 
 
 def save(engine):

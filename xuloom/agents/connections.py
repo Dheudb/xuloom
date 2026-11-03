@@ -32,6 +32,10 @@ def resolve_connection(identity, model=None, *, frozen=None):
         "api_base_url": normalize_api_base_url(provider, item.get("base_url", "")),
         "network_mode": model_network_mode(item.get("network_mode", "direct")),
         "contract": {"inputs": copy.deepcopy(inputs), "reasoning": profile}}
+    from xuloom.tools.native_search import normalize as normalize_search
+    search = normalize_search(item.get('native_search'))
+    if search['backend'] != 'builtin' or frozen is not None and 'search' in frozen.get('contract', {}):
+        binding['contract']['search'] = search
     if frozen is not None and binding != frozen:
         raise ValueError("Worker model connection changed; restore its original settings or start a new worker")
     return binding, {"api_key": key, "network_mode": binding["network_mode"]}

@@ -27,7 +27,7 @@ class ToolSearchTool(BaseAgenticTool):
         return (
             "If you need a specialized capability that is not currently exposed as an active tool, "
             "use `tool_search_tool` to discover and activate matching tools first, including connected MCP tools."
-            " Web search and URL reading are already active: use web_search_tool and web_fetch_tool directly. "
+            " Discover web search and URL reading here when not already loaded. "
             "This tool searches tool definitions, not the internet."
         )
 
@@ -37,6 +37,8 @@ class ToolSearchTool(BaseAgenticTool):
         active_tools = self.context.get("engine_available_tools", {}) or {}
         latent_tools = self.context.get("latent_tools_registry", {}) or {}
         activate_tools = self.context.get("activate_tools")
+        current_names = self.context.get("model_tool_names")
+        model_names = current_names() if callable(current_names) else set(active_tools)
         isolation = self.context.get("execution_sandbox")
         if isolation and isolation.enabled:
             from xuloom.security.execution import FILE_TOOLS, CONTROL_TOOLS, PROCESS_TOOLS
@@ -51,7 +53,7 @@ class ToolSearchTool(BaseAgenticTool):
                 "name": name,
                 "description": getattr(tool, "description", ""),
                 "prompt": tool.prompt() if callable(getattr(tool, "prompt", None)) else "",
-                "active": True,
+                "active": name in model_names,
             }
         for name, tool in latent_tools.items():
             catalog[name] = {
@@ -88,6 +90,9 @@ class ToolSearchTool(BaseAgenticTool):
         activated = []
         if activate and callable(activate_tools):
             activated = activate_tools(activate)
+        for item in matches:
+            if item['name'] in activated:
+                item['active'] = True
 
         lines = [f"Matched tools for query '{query}':"]
         if matches:

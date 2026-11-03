@@ -50,6 +50,7 @@ def configure_role(engine, definition, *, allowed_tools, parent_tools=None, late
     engine.latent_tools = filter_tools({name: tool for name, tool in latent.items()
         if name not in engine.available_tools and eligible(tool)}, allowed_tools, blocked)
     engine.activated_tools = {name for name in activated if name in engine.available_tools or name not in previous_catalog}
+    engine.tool_context['role_declared_tools'] = frozenset(allowed_tools or ())
     scope_blocked = ALL_AGENT_DISALLOWED_TOOLS | blocked
     engine.tool_context["activate_tool_filter"] = lambda name, tool: name not in scope_blocked and (
         allowed_tools is None or "*" in allowed_tools or name in allowed_tools) and (tool is None or eligible(tool))

@@ -71,6 +71,17 @@ async function main() {
     await page.getByLabel("连接名称", { exact: true }).fill("第一个 API");
     await page.getByLabel("模型输入能力", { exact: true }).selectOption("text");
     await page.getByLabel("可选模型列表", { exact: true }).fill("one\ntwo\ntwo"); await save();
+    await settings();
+    const beforeSearch = requests.length;
+    await page.getByLabel('联网搜索', { exact: true }).selectOption('deepseek');
+    await page.getByText('搜索接口地址', { exact: true }).click();
+    await page.getByLabel('搜索 API 根地址', { exact: true }).fill(firstUrl);
+    await save();
+    assert.equal(requests.length, beforeSearch, 'Saving native search never calls a provider');
+    assert.deepEqual(readConfig().model_connections[0].native_search, { backend: 'deepseek', model: '', baseUrl: firstUrl });
+    await settings();
+    assert.equal(await page.getByLabel('联网搜索', { exact: true }).inputValue(), 'deepseek');
+    await page.getByLabel('联网搜索', { exact: true }).selectOption('builtin'); await save();
     assert.deepEqual(readConfig().openai_models, ["one", "two"]);
     assert.deepEqual(readConfig().model_connections[0].model_inputs.one, ["text"]);
     await settings();

@@ -51,7 +51,7 @@ class WebSearchTool(BaseAgenticTool):
         month_year = datetime.datetime.now().strftime("%B %Y")
         return f"""Search the web for real-time information about any topic. Returns search result information formatted as search result blocks, including links as markdown hyperlinks.
 
-Use this tool directly when the user asks to search the public web, research papers/models, or verify current information. It is already active and needs no tool discovery or model-provider API feature. Keep public research scoped to online sources; inspect project files only for project-specific requests.
+Use this tool for public web research or current information. Discover it with tool_search_tool if not loaded. It uses the connection's configured search backend. Inspect local files only for project-specific requests.
 If the search service fails, report the service error and try a revised query or a configured search MCP. A provider failure does not mean the tool is unavailable.
 max_results accepts 1–50 (default 5). Request more results for broad research when needed, not automatically for every query. The search provider may return fewer; this is a maximum, not a guaranteed count.
 
@@ -63,8 +63,16 @@ IMPORTANT - Use the correct year in search queries:
 - The current month is {month_year}. Include an appropriate year when recency matters without excluding relevant earlier research."""
 
     async def execute(self, query: str, max_results: int = 5) -> dict:
+        backend = 'ddgs'
         try:
             limit = max(1, min(int(max_results), MAX_SEARCH_RESULTS))
+            options = self.context.get('native_search_options')
+            if callable(options):
+                backend = options()['profile']['backend']
+                if backend != 'builtin':
+                    from xuloom.tools.native_search import execute
+                    return await execute(self.context, query, limit)
+                backend = 'ddgs'
             # DDGS is synchronous; its network calls must not block streaming or Stop.
             results = await asyncio.wait_for(asyncio.to_thread(lambda: list(DDGS(timeout=8).text(query, max_results=limit))), timeout=35)
             results = [r for r in results if isinstance(r, dict) and str(r.get('href', '')).startswith(('https://', 'http://'))][:limit]
@@ -76,7 +84,7 @@ IMPORTANT - Use the correct year in search queries:
             return build_tool_result(ok=True, content=out, metadata={"backend": "ddgs", "query": query, "result_count": len(results),
                 "sources_in_content": True, "sources": [{"url": r["href"], "title": str(r.get("title", "")), "kind": "search"} for r in results]})
         except Exception as e:
-            return build_tool_result(ok=False, is_error=True, content=f"Built-in web search service failed ({type(e).__name__}). Check network access, retry, or use a configured search MCP. This is a search-provider failure, not a missing tool.", metadata=network_error(e, {"backend": "ddgs", "query": query}))
+            return build_tool_result(ok=False, is_error=True, content=f"Search service {backend} failed ({type(e).__name__}). This is not a missing tool. Check API/model support and network access; no fallback provider was called.", metadata=network_error(e, {"backend": backend, "query": query}))
 
     def input_error_hint(self) -> str:
         return 'Use {"query":"your search terms","max_results":15}. max_results must be between 1 and 50; omit it for the default of 5. The provider may return fewer results.'
@@ -108,6 +116,10 @@ Usage notes:
             target = httpx.URL(url)
             if target.scheme not in {"http", "https"} or not target.host or target.username or target.password:
                 return build_tool_result(ok=False, is_error=True, content="Use an HTTP(S) URL without embedded credentials.", metadata={"code": "invalid_url", "retryable": False})
+            options = self.context.get('native_search_options')
+            if callable(options) and options()['profile']['backend'] == 'deepseek':
+                from xuloom.tools.native_search import execute
+                return await execute(self.context, prompt, 1, url=url)
             async with httpx.AsyncClient(follow_redirects=True, timeout=15.0) as client:
                 async with client.stream("GET", url) as resp:
                     resp.raise_for_status()

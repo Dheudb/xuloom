@@ -13,7 +13,7 @@
 
 Windows 下载包自带 Python 和 MCP SDK，无需安装 Python、选择解释器或安装 Node.js。第三方 MCP 程序可能另需 Node.js、uv 等环境，按服务说明准备。
 
-当前源码版本为 **v0.1.23**，可下载成品及校验和以 Releases 为准。成品面向 Windows x64；Linux/macOS 可使用源码 CLI，尚无对应的桌面发行包。
+当前源码版本为 **v0.1.24**，可下载成品及校验和以 Releases 为准。成品面向 Windows x64；Linux/macOS 可使用源码 CLI，尚无对应的桌面发行包。
 
 **原生条件续跑：** 普通工具调用可声明已确定的后续动作图，引擎在下一次模型请求前根据真实回执自动推进，支持条件分支、独立只读并行和核对式恢复。每步仍保留权限、隔离和持久化；未知结果、失败或新输入会交回模型。App 与 CLI 共用，无需先发现额外工具；模型未声明计划时保持原流程。详见[原生条件续跑](docs/native-continuations.md)，原[工具序列](docs/tool-sequences.md)仍可显式调用。
 
@@ -41,7 +41,17 @@ SSH 会话的 HTML 可直接在文件面板预览，支持工作区内的相对 
 
 可选的 [Claude Code / Pi / Codex / DSH 后端](docs/external-agents.md) 可使用用户已安装 CLI，继续走 Xuloom 的原生队列、工具授权和中央历史。Claude 使用 Anthropic Messages；Pi／DSH 支持 Anthropic Messages 和 OpenAI Chat，Codex 使用 OpenAI Responses。Pi 主动停止在回执与历史确认后可通过同一 worker 明确续聊，未知结果不会自动重放，见 [停止与恢复边界](docs/external-agents.md#续聊停止与边界)。DSH 使用独立最小 headless 配置，见 [DSH 验证](docs/dsh-backend-validation-2026-11-02.md)。外部 CLI 经 SSH 的完整联动仍在 [持续目标](docs/product-roadmap.md) 中，不能把原生 SSH worker 当成所有后端已验收。
 
+默认首轮只向模型声明文件读写、命令和工具发现五个入口，其余工具按需加载；Ultra 额外直接提供后台派发入口。精简提示不会关闭权限、参数校验或恢复检查。用户指令、选中 Skill、已激活工具和历史会增加实际输入，详见 [首轮输入与原生搜索](docs/lean-context-search.md)。
+
 按需发现的工具会随会话保存，续聊时恢复当前角色仍允许使用的工具；晚注册的 MCP 工具也重新检查角色范围。外部 CLI 缓存工具定义不等于获得执行权限，模型请求和实际执行仍受原生可见性及授权约束。详见 [工具发现与恢复验证](docs/tool-discovery-validation-2026-11-02.md)。
+
+## 联网搜索
+
+**设置 → 模型连接 → 联网搜索** 可以选择内置搜索，或 OpenAI（Responses／专用 Chat 搜索模型）、Anthropic、DeepSeek、通义千问（Responses）的原生搜索。默认复用该连接的地址和 Key；需要时另外填写搜索模型和搜索接口根地址。无需手写 JSON，也不会根据模型名字猜测供应商。
+
+主代理仍通过 `web_search_tool` 发起搜索：框架将查询交给所选原生接口，整理来源和实际 usage，再交回当前会话。它不是给每次主模型回复强制开启搜索；模型型搜索可能增加一次模型调用及供应商费用。DeepSeek 还可通过 `web_fetch_tool` 调用原生网页读取。第三方兼容接口必须确实支持对应搜索协议；失败不会自动转发 Key 或改用别的供应商。
+
+CLI 使用相同配置，例如 `xuloom search-config --backend deepseek`；查看配置用 `xuloom search-config --json`，恢复内置搜索用 `xuloom search-config --backend builtin`。完整说明与协议边界见 [首轮输入与原生搜索](docs/lean-context-search.md)。
 
 ## 图片、视频、语音与音乐
 

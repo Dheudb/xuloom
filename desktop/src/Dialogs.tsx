@@ -57,6 +57,7 @@ export function SettingsDialog({
     networkMode: config?.networkMode || "direct",
     modelInputs: config?.modelInputs || {} as NonNullable<ModelConfig["modelInputs"]>,
     modelReasoning: config?.modelReasoning || {} as NonNullable<ModelConfig["modelReasoning"]>,
+    nativeSearch: config?.nativeSearch || { backend: 'builtin', model: '', baseUrl: '' },
   });
   const [modelsText, setModelsText] = useState((config?.models || (config?.model ? [config.model] : [])).join("\n"));
   const [discovering, setDiscovering] = useState(false);
@@ -145,13 +146,13 @@ export function SettingsDialog({
           <div className="api-connection-row"><label>API 连接
             <select aria-label="API 连接" disabled={discovering || saving} value={form.connectionId} onChange={(event) => {
               const connection = config?.connections?.find((item) => item.connectionId === event.target.value);
-              if (connection) { setForm({ ...connection, apiKey: "", networkMode: connection.networkMode || "direct", modelInputs: connection.modelInputs || {}, modelReasoning: connection.modelReasoning || {} }); setModelsText(connection.models.join("\n")); setDiscoveryStatus(""); setError(""); setDeleteId(""); }
+              if (connection) { setForm({ ...connection, apiKey: "", networkMode: connection.networkMode || "direct", modelInputs: connection.modelInputs || {}, modelReasoning: connection.modelReasoning || {}, nativeSearch: connection.nativeSearch || { backend: 'builtin', model: '', baseUrl: '' } }); setModelsText(connection.models.join("\n")); setDiscoveryStatus(""); setError(""); setDeleteId(""); }
             }}>
               {(config?.connections || []).map((connection) => <option key={connection.connectionId} value={connection.connectionId}>{connection.connectionName}</option>)}
               {!config?.connections?.some((connection) => connection.connectionId === form.connectionId) && <option value={form.connectionId}>{form.connectionName}</option>}
             </select></label>
             <button disabled={discovering || saving} onClick={() => {
-              setForm({ connectionId: crypto.randomUUID(), connectionName: "新 API", provider: "openai", model: "", baseUrl: "", hasKey: false, apiKey: "", networkMode: "direct", modelInputs: {}, modelReasoning: {} });
+              setForm({ connectionId: crypto.randomUUID(), connectionName: "新 API", provider: "openai", model: "", baseUrl: "", hasKey: false, apiKey: "", networkMode: "direct", modelInputs: {}, modelReasoning: {}, nativeSearch: { backend: 'builtin', model: '', baseUrl: '' } });
               setModelsText(""); setDiscoveryStatus(""); setError(""); setDeleteId("");
             }}>新增 API</button>
             <button className="danger" disabled={!savedConnection || saving || discovering || deleting} onClick={() => { setDeleteId(form.connectionId); setError(""); }}>删除 API</button>
@@ -164,7 +165,7 @@ export function SettingsDialog({
                 try {
                   const next = await deleteConnection(deleteId);
                   setForm({ connectionId: next.connectionId || crypto.randomUUID(), connectionName: next.connectionName || "我的 API", provider: next.provider,
-                    model: next.model, baseUrl: next.baseUrl, hasKey: next.hasKey, apiKey: "", networkMode: next.networkMode || "direct", modelInputs: next.modelInputs || {}, modelReasoning: next.modelReasoning || {} });
+                    model: next.model, baseUrl: next.baseUrl, hasKey: next.hasKey, apiKey: "", networkMode: next.networkMode || "direct", modelInputs: next.modelInputs || {}, modelReasoning: next.modelReasoning || {}, nativeSearch: next.nativeSearch || { backend: 'builtin', model: '', baseUrl: '' } });
                   setModelsText((next.models || []).join("\n")); setDeleteId("");
                   setDiscoveryStatus(next.connections?.length ? "已删除 API 连接。" : "已删除所有 API 连接，请添加新的连接。");
                 } catch (e) { setError(String(e)); } finally { setDeleting(false); }
@@ -187,6 +188,7 @@ export function SettingsDialog({
                   apiKey: "",
                   modelInputs: {},
                   modelReasoning: {},
+                  nativeSearch: { backend: 'builtin', model: '', baseUrl: '' },
                 }); setModelsText(""); setDiscoveryStatus(""); }
               }
             >
@@ -262,6 +264,25 @@ export function SettingsDialog({
               onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
             />
           </label>
+          <label>联网搜索
+            <select aria-label="联网搜索" value={form.nativeSearch.backend} onChange={event => setForm({ ...form, nativeSearch: { ...form.nativeSearch, backend: event.target.value } })}>
+              <option value="builtin">内置搜索</option>
+              <option value="openai">OpenAI 原生搜索（Responses）</option>
+              <option value="openai-chat">OpenAI 搜索模型（Chat Completions）</option>
+              <option value="anthropic">Anthropic 原生搜索</option>
+              <option value="deepseek">DeepSeek 搜索与网页读取</option>
+              <option value="qwen">通义千问原生搜索（Responses）</option>
+            </select>
+          </label>
+          {form.nativeSearch.backend !== 'builtin' && <>
+            <p className="fine-print">通过现有搜索工具调用所选服务，共用此连接的 Key。接口与模型需支持相应搜索协议；保存不会发起请求，失败不会自动换供应商。模型搜索可能产生额外调用费用。</p>
+            {form.nativeSearch.backend !== 'deepseek' && <label>搜索模型（可选）
+              <input aria-label="搜索模型" placeholder="留空使用当前模型" value={form.nativeSearch.model} onChange={event => setForm({ ...form, nativeSearch: { ...form.nativeSearch, model: event.target.value } })} />
+            </label>}
+            <details><summary>搜索接口地址</summary><label>搜索 API 根地址（可选）
+              <input aria-label="搜索 API 根地址" placeholder="留空复用上面的 API 地址" value={form.nativeSearch.baseUrl} onChange={event => setForm({ ...form, nativeSearch: { ...form.nativeSearch, baseUrl: event.target.value } })} />
+            </label></details>
+          </>}
           <label>
             连接方式
             <select aria-label="连接方式" value={form.networkMode}
