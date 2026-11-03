@@ -783,6 +783,9 @@ class DesktopBridge:
             return {"controlledExecution": controlled, "controlledModel": controlled_model, "project": str(self.cwd), "persistedId": sid, "executionMode": self.execution_mode, "collaborationMode": self.collaboration_mode, "permissionMode": self.approval_policy.mode, "config": self.config(), "capabilities": self.capabilities(), "sessions": self.sessions(), "history": self.history(messages, traces), "activity": activity, "workers": workers, "fileChanges": self.file_changes}
         if method == "files.read":
             return preview_file(self.cwd, params.get("path"), self.file_changes)
+        if method == "files.reference":
+            from xuloom.features.workspace_files import inspect_reference
+            return inspect_reference(self.cwd, params.get("path"), self.file_changes, params.get("basePath"))
         if method in {"files.htmlInfo", "files.htmlChunk"}:
             from xuloom.features import html_preview
             if method == "files.htmlInfo":

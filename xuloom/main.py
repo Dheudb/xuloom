@@ -8,7 +8,7 @@ from collections import deque
 from contextlib import contextmanager, redirect_stdout
 
 from rich.console import Console, Group
-from rich.markdown import Markdown
+from xuloom.terminal_markdown import TerminalMarkdown, MarkdownStream, terminal_links
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -22,13 +22,7 @@ console = Console()
 
 
 class InteractiveTerminalTUI:
-    """Flicker-free streaming TUI.
-
-    Instead of rich.Live (erase-N-lines + rewrite = flicker), we:
-    - Print a one-line status bar that updates in-place via carriage return
-    - Stream text_delta content directly to stdout (append-only, zero clearing)
-    This matches how Claude Code (Ink/React) renders: only the changed part repaints.
-    """
+    """Append stable Markdown blocks without repainting terminal scrollback."""
 
     HIDE_CURSOR = "\x1b[?25l"
     SHOW_CURSOR = "\x1b[?25h"
@@ -58,6 +52,9 @@ class InteractiveTerminalTUI:
         self.event_log = deque(maxlen=10)
         self._status_visible = False
         self._streaming_text = False
+        self.compacting = False
+        self.compaction_ids = set()
+        self.markdown = MarkdownStream(self.console, getattr(self.engine, "session_cwd", os.getcwd()), terminal_links(self.console))
 
     def _write_status_line(self):
         """Overwrite the current line with a compact status bar."""
@@ -65,6 +62,7 @@ class InteractiveTerminalTUI:
         mode = self.engine.get_mode()
         parts = [icon, f"Mode: {mode}", f"Turn: {self.turn_number or '-'}",
                  f"Tools: {self.tool_count}"]
+        if self.compacting: parts.append("正在压缩上下文…")
         if self.last_tool:
             parts.append(f"Active: {self.last_tool}")
         line = " │ ".join(parts)
@@ -90,6 +88,7 @@ class InteractiveTerminalTUI:
 
     def stop_streaming(self):
         self._clear_status_line()
+        self.markdown.finish()
         self._stream.write(self.SHOW_CURSOR)
         self._stream.flush()
 
@@ -109,9 +108,22 @@ class InteractiveTerminalTUI:
                 if not self._streaming_text:
                     self._clear_status_line()
                     self._streaming_text = True
-                self._stream.write(text)
-                self._stream.flush()
+                self.markdown.append(text)
+        elif event_type == "context_compaction":
+            self._clear_status_line()
+            status = event.get("status")
+            self.compacting = status == "running"
+            self.markdown.finish()
+            if self.compacting:
+                self.console.print("正在压缩上下文…", markup=False)
+            else:
+                labels = {"completed": "上下文已自动压缩", "failed": "上下文压缩失败，原始记录已保留", "cancelled": "上下文压缩已取消", "interrupted": "上下文压缩已中断"}
+                if event.get("id") not in self.compaction_ids:
+                    self.console.print(labels.get(status, "上下文压缩状态变化"), markup=False)
+                    self.compaction_ids.add(event.get("id"))
+            self._write_status_line()
         elif event_type == "tool_scheduled":
+            self.markdown.finish()
             self.tool_count += 1
             self.last_tool = event.get("tool_name", "") or ""
             if self._streaming_text:
@@ -131,6 +143,7 @@ class InteractiveTerminalTUI:
         elif event_type == "auto_commit_proposal":
             self.pending_auto_commit = True
         elif event_type == "message_stop":
+            self.markdown.finish()
             self.running = False
             self.last_stop_reason = event.get("stop_reason", "") or ""
             if self._streaming_text:
@@ -524,6 +537,7 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
             console.print("Use [cyan]/model[/cyan] to configure, or set the environment variable.\n")
 
     def agent_events_callback(text: str):
+        if text.startswith("上下文已压缩：") and tui.compaction_ids: return
         console.print(text)
 
     # Auto-resume if requested via CLI flag
@@ -905,9 +919,9 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
             # Show whatever content was received (partial on abort, full on completion)
             display_text = final_answer or tui.current_turn_text.strip()
             if turn_was_aborted:
-                if display_text:
+                if display_text and display_text.strip() != tui.current_turn_text.strip():
                     console.print(Panel(
-                        Markdown(display_text),
+                        TerminalMarkdown(display_text, engine.session_cwd, links=terminal_links(console)),
                         title="[yellow]⚡ Interrupted[/yellow]",
                         border_style="yellow",
                         expand=False,
@@ -915,8 +929,8 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
                 console.print("[dim]Current turn aborted. You can continue or start a new prompt.[/dim]")
                 continue
 
-            if display_text:
-                console.print(Panel(Markdown(display_text), border_style="green", expand=False))
+            if display_text and display_text.strip() != tui.current_turn_text.strip():
+                console.print(Panel(TerminalMarkdown(display_text, engine.session_cwd, links=terminal_links(console)), border_style="green", expand=False))
 
         except KeyboardInterrupt:
             current_time = time.time()
@@ -940,6 +954,9 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
 
 
 def main():
+    # The bundled isolated interpreter ignores PYTHONIOENCODING/PYTHONUTF8.
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"): stream.reconfigure(encoding="utf-8")
     if len(sys.argv) > 1 and sys.argv[1] in {"exec", "goal", "schedule", "pipeline", "git-status", "chat-link", "summary", "transcript", "media", "remote", "sandbox-cleanup", "credentials", "mcp", "search-config", "context"}:
         from xuloom.cli import main as noninteractive
         raise SystemExit(noninteractive(sys.argv[1:]))
@@ -996,8 +1013,6 @@ def main():
 
     try:
         if linked and linked.get("transport") == "ssh":
-            for stream in (sys.stdin, sys.stdout, sys.stderr):
-                if hasattr(stream, "reconfigure"): stream.reconfigure(encoding="utf-8")
             from xuloom.remote.terminal import interactive_chat
             from xuloom.cli import EXIT_CODES
             result = asyncio.run(interactive_chat(linked["connection_id"], session_id=linked["session_id"], binding=linked["binding"],

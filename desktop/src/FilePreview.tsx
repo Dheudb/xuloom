@@ -10,8 +10,8 @@ import MediaPreview from "./MediaPreview";
 import PanelResizer from "./PanelResizer";
 import { clampReviewTreeWidth, reviewTreeLimits } from "./panel-width";
 
-export default function FilePreview({ sessionId, project, path, change, version, close, onOpen, initialView, changes, treeWidth, setTreeWidth, saveTreeWidth }: {
-  sessionId: string; project: string; path: string; change?: FileChange; version?: number;
+export default function FilePreview({ sessionId, project, path, change, version, close, onOpen, initialView, changes, treeWidth, setTreeWidth, saveTreeWidth, line, column, directory = false }: {
+  sessionId: string; project: string; path: string; line?: number; column?: number; directory?: boolean; change?: FileChange; version?: number;
   initialView: "diff" | "content"; changes: FileChange[];
   close: () => void; onOpen: (path: string, change?: FileChange) => void;
   treeWidth: number; setTreeWidth: (width: number) => void; saveTreeWidth: (width: number) => void;
@@ -34,7 +34,7 @@ export default function FilePreview({ sessionId, project, path, change, version,
   const markdown = /\.md(?:own)?$/i.test(path);
   const media = /\.(png|jpe?g|webp|gif|bmp|mp4|webm|m4a|weba|mp3|wav|flac|ogg)$/i.test(path);
   const html = /\.html?$/i.test(path), previewable = markdown || html || media;
-  const [tab, setTab] = useState(media ? "preview" : initialView === "diff" ? "diff" : previewable ? "preview" : "source");
+  const [tab, setTab] = useState(line ? "source" : media ? "preview" : initialView === "diff" ? "diff" : previewable ? "preview" : "source");
   useEffect(() => {
     if (change?.source !== "git") return;
     let cancelled = false;
@@ -42,15 +42,16 @@ export default function FilePreview({ sessionId, project, path, change, version,
     return () => { cancelled = true; };
   }, [sessionId, change?.source, refresh]);
   useEffect(() => {
-    setTab(media ? "preview" : initialView === "diff" ? "diff" : previewable ? "preview" : "source");
-  }, [path, initialView, change?.updatedAt]);
+    setTab(line ? "source" : media ? "preview" : initialView === "diff" ? "diff" : previewable ? "preview" : "source");
+  }, [path, line, column, initialView, change?.updatedAt]);
   useEffect(() => {
     let cancelled = false; setLoading(true); setError(""); setFile(undefined);
+    if (directory) { setLoading(false); return; }
     window.xuloom.invoke(media ? "files.mediaInfo" : "files.read", { session: sessionId, path }).then((value) => { if (!cancelled) setFile(media ? { ...value, content: "", truncated: false } : value); })
       .catch((reason) => { if (!cancelled) setError(String(reason)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [sessionId, path, refresh, version]);
+  }, [sessionId, path, directory, refresh, version]);
   useEffect(() => {
     let cancelled = false; setGitChange(undefined); setDiffError(""); setDiffLoading(change?.source === "git");
     if (change?.source === "git") window.xuloom.invoke("files.gitDiff", { session: sessionId, path }).then((value) => { if (!cancelled) setGitChange(value); })
@@ -61,6 +62,23 @@ export default function FilePreview({ sessionId, project, path, change, version,
     const escape = (event: KeyboardEvent) => { if (event.key === "Escape") { event.stopPropagation(); close(); } };
     document.addEventListener("keydown", escape); return () => document.removeEventListener("keydown", escape);
   }, [close]);
+  useEffect(() => {
+    if (!line || !file || tab !== "source") return;
+    const row = layoutRef.current?.querySelector<HTMLElement>(`[data-source-line="${line}"]`);
+    row?.scrollIntoView({ block: "center" });
+    if (row && column) {
+      const code = row.querySelector("code")?.firstChild;
+      if (code?.nodeType === Node.TEXT_NODE) {
+        const range = document.createRange(), offset = Math.min(column - 1, code.textContent?.length || 0);
+        range.setStart(code, offset); range.collapse(true);
+        const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range);
+      }
+    }
+  }, [file, line, column, tab]);
+  if (directory) return <section className="file-preview" role="region" aria-label="文件夹预览">
+    <header><h2 title={path}>{relativeFile(path, project) || path}</h2><button aria-label="关闭文件预览" className="icon-button" onClick={close}><X size={19} /></button></header>
+    <WorkspaceTree sessionId={sessionId} project={path} rootPath={path} onOpen={onOpen} />
+  </section>;
   const shownChange = change?.source === "git" ? gitChange : change;
   const listedChanges = change?.source === "git" ? gitFiles : changes;
   return <section className="file-preview docked-review" role="region" aria-label="文件预览">
@@ -90,7 +108,7 @@ export default function FilePreview({ sessionId, project, path, change, version,
             {file && !loading && <>
               <p className="preview-limitation">最新文件 · {file.size.toLocaleString()} 字节{file.truncated && !(tab === "preview" && html) ? " · 仅展示前 500 KB" : ""}</p>
               {tab === "preview" && (media ? <MediaPreview sessionId={sessionId} path={file.path} mime={file.mime || ""} revision={`${file.version || ""}:${refresh}`} /> : html ? <HtmlPreview sessionId={sessionId} path={file.path} revision={`${version || 0}:${refresh}`} /> : <div className="markdown"><Markdown text={file.content} onOpenFile={onOpen} sessionId={sessionId} basePath={file.path} /></div>)}
-              {tab === "source" && <div className="file-source">{file.content.split(/\r?\n/).map((line, index) => <div className="source-line" key={index}><span className="line-number">{index + 1}</span><code>{line || " "}</code></div>)}</div>}
+              {tab === "source" && <div className="file-source">{file.content.split(/\r?\n/).map((sourceText, index) => <div className={"source-line " + (line === index + 1 ? "source-selected" : "")} data-source-line={index + 1} aria-current={line === index + 1 ? "location" : undefined} key={index}><span className="line-number">{index + 1}</span><code>{sourceText || " "}</code></div>)}</div>}
             </>}
           </>}
         </div>

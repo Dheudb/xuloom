@@ -34,6 +34,8 @@ import { ReasoningControls } from "./ReasoningControls";
 import CapabilityPanel from "./CapabilityPanel";
 import { InteractionCard, SettingsDialog } from "./Dialogs";
 import Markdown from "./Markdown";
+import { ReferenceNavigation } from "./ReferenceNavigation";
+import type { FileReference } from "./references";
 import MessageActions from "./MessageActions";
 import ComposerMenu from "./ComposerMenu";
 import ExecutionDialog from "./ExecutionDialog";
@@ -95,7 +97,7 @@ export default function App() {
   const [attachmentPreview, setAttachmentPreview] = useState<{ name: string; source: string }>();
   const dragDepth = useRef(0);
   const fileInput = useRef<HTMLInputElement>(null);
-  const [filePreview, setFilePreview] = useState<{ path: string; change?: FileChange; initialView: "diff" | "content" }>();
+  const [filePreview, setFilePreview] = useState<{ path: string; change?: FileChange; initialView: "diff" | "content"; line?: number; column?: number; directory?: boolean; ownerId?: string }>();
   const input = useRef<HTMLTextAreaElement>(null);
   const navigation = useRef(0);
   const active = sessions.find((item) => item.id === activeId);
@@ -196,13 +198,24 @@ export default function App() {
   }, [activeId]);
   useEffect(() => {
     input.current?.focus();
-    setFilePreview(undefined);
+    setFilePreview(previous => previous?.ownerId === activeId ? previous : undefined);
   }, [activeId, active?.project]);
+  async function navigateReference(target: FileReference, remoteUrl?: string) {
+    if (!active) return;
+    const intent = navigation.current + (remoteUrl ? 1 : 0);
+    let owner = active.id;
+    if (remoteUrl) { const loaded = await workspaceAction("chat.open", { url: remoteUrl }); if (!loaded) return; owner = loaded.activeId || loaded.existingId || loaded.id; }
+    if (intent !== navigation.current) return;
+    const info = await window.xuloom.invoke("files.reference", { session: owner, path: target.path, basePath: target.basePath }).catch(error => { if (remoteUrl) onError(error); throw error; });
+    if (intent !== navigation.current) return;
+    setFilePreview({ path: info.path, initialView: "content", directory: info.directory, line: target.line, column: target.column, ownerId: owner });
+    setPanelOpen(true);
+  }
   function openFile(path: string, change?: FileChange) {
     if (!active) return;
     const initialView = change ? "diff" : "content";
     change ||= active.fileChanges?.find((file) => file.path === path || relativeFile(file.path, active.project) === path.replace(/^\.[\\/]/, ""));
-    setFilePreview({ path, change, initialView });
+    setFilePreview({ path, change, initialView, ownerId: active.id });
     setPanelOpen(true);
   }
   useEffect(() => {
@@ -265,6 +278,7 @@ export default function App() {
         if ("activeId" in result) setActiveId(result.activeId);
         else if (result.existingId || result.id) setActiveId(result.existingId || result.id);
       }
+      return result;
     } catch (error) {
       if (preferenceWrite) {
         setCatalog(preferences.current.fail(preferenceWrite.id));
@@ -504,6 +518,7 @@ export default function App() {
   const runningCommands = Object.values(active?.commands || {}).filter((command) => command.status === "running").length;
 
   return (
+    <ReferenceNavigation.Provider value={navigateReference}>
     <div className={"workbench " + (!panelOpen ? "panel-hidden" : "")} style={{ "--sidebar-width": effectiveSidebarWidth + "px", "--inspector-width": clampPanelWidth(filePreview ? filePanelWidth : panelWidth, viewport, effectiveSidebarWidth) + "px" } as React.CSSProperties}
       onDragEnter={(event) => { if (Array.from(event.dataTransfer.types).includes("Files")) { event.preventDefault(); dragDepth.current++; setFileDrag(true); } }}
       onDragLeave={() => { if (--dragDepth.current <= 0) { dragDepth.current = 0; setFileDrag(false); } }}
@@ -944,7 +959,7 @@ export default function App() {
         <div className="inspector-shell">
         <PanelResizer width={clampPanelWidth(filePreview ? filePanelWidth : panelWidth, viewport, effectiveSidebarWidth)} viewport={viewport} sidebarWidth={effectiveSidebarWidth} change={filePreview ? setFilePanelWidth : setPanelWidth}
           save={(width) => { void window.xuloom.invoke("layout.save", { [filePreview ? "filePreviewWidth" : "inspectorWidth"]: width }).catch(onError); }} />
-        {filePreview && active ? <FilePreview sessionId={activeId} project={active.project}
+        {filePreview && active && filePreview.ownerId === active.id ? <FilePreview sessionId={activeId} project={active.project}
           treeWidth={reviewTreeWidth} setTreeWidth={setReviewTreeWidth}
           saveTreeWidth={(value) => { void window.xuloom.invoke("layout.save", { reviewTreeWidth: value }).catch(onError); }}
           version={active.fileChanges?.find((file) => file.path === (filePreview.change?.path || filePreview.path) || relativeFile(file.path, active.project) === filePreview.path)?.updatedAt}
@@ -1004,5 +1019,6 @@ export default function App() {
         />
       )}
     </div>
+    </ReferenceNavigation.Provider>
   );
 }

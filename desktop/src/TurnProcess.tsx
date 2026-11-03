@@ -25,7 +25,7 @@ function ProcessTool({ tool, sessionId }: { tool: ToolActivity; sessionId: strin
         {tool.status === "waiting" && <span className="turn-tool-status">{statusText[tool.status]}</span>}
         {elapsed && <span className="turn-tool-duration">{elapsed}</span>}<ChevronDown size={12} className="turn-tool-chevron" />
       </summary>
-      <div className="turn-tool-detail"><small>调用参数</small><pre>{JSON.stringify(tool.input || {}, null, 2)}</pre><small>执行结果</small><pre>{tool.result || "尚未返回结果。"}</pre></div>
+      <div className="turn-tool-detail"><small>调用参数</small><pre>{JSON.stringify(tool.input || {}, null, 2)}</pre><small>执行结果</small><div className="markdown"><Markdown text={tool.result || "尚未返回结果。"} sessionId={sessionId} allowImages={false} /></div></div>
     </details>
     <ToolImages media={tool.media} sessionId={sessionId} />
   </div>;

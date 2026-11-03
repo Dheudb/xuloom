@@ -15,7 +15,7 @@ function toolView(entry: Entry) {
   return toolPresentation({ name: (entry.name || "").replace(/^mcp__xuloom__/, ""), status: "completed", input });
 }
 
-export default function WorkerHistory({ agentId, name, invoke, close }: { agentId: string; name: string; invoke: Invoke; close: () => void }) {
+export default function WorkerHistory({ agentId, name, invoke, close, remoteUrl }: { agentId: string; name: string; remoteUrl?: string; invoke: Invoke; close: () => void }) {
   const [page, setPage] = useState<Page>(), [entries, setEntries] = useState<Entry[]>([]);
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [images, setImages] = useState<Record<string, string>>({});
@@ -74,10 +74,10 @@ export default function WorkerHistory({ agentId, name, invoke, close }: { agentI
           <div className="history-entry-label">{entry.kind === "tool_call" ? <ToolIcon kind={toolView(entry).kind} /> : entry.kind === "image" ? <ImageIcon size={14} /> : <Bot size={14} />}
             <span>{entry.kind === "tool_call" ? entry.name : entry.kind === "tool_result" ? (entry.error ? "工具返回 · 失败" : "工具返回") : entry.kind === "thinking" ? "推理摘要" : entry.role === "user" ? "任务／输入" : "子代理"}</span>
             {!!entry.text && <button className="icon-button" aria-label="复制此条历史" onClick={() => invoke("clipboard.writeText", { text: entry.text }).catch(reason => setError(String(reason)))}><Copy size={13} /></button>}</div>
-          {["tool_call", "tool_result", "thinking"].includes(entry.kind)
+          {["tool_call", "thinking"].includes(entry.kind)
             ? <details><summary>{entry.kind === "thinking" ? "查看模型公开的推理" : "查看完整内容"}{entry.callId && <code>{entry.callId}</code>}</summary><pre>{entry.text}</pre></details>
             : entry.kind === "image" ? images[entry.id] ? <img className="history-image" alt="子代理历史中的图像" src={images[entry.id]} /> : <button className="text-button" onClick={() => void showImage(entry)}>查看此条记录的图像</button>
-            : entry.kind === "notice" ? <p className="fine-print">{entry.text}</p> : <Markdown text={entry.text} />}
+            : entry.kind === "notice" ? <p className="fine-print">{entry.text}</p> : <Markdown text={entry.text} remoteUrl={remoteUrl} allowImages={entry.kind !== "tool_result"} />}
           {entry.continues && <p className="fine-print">此条内容尚未加载完，请继续加载；原始记录没有截断。</p>}
         </article>)}
         {!busy && page && !entries.length && <p>尚无已保存的对话内容。</p>}

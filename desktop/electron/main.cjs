@@ -69,6 +69,7 @@ const engineMethods = new Set([
   "stop",
   "changes",
   "files.read",
+  "files.reference",
   "files.image",
   "files.mediaInfo", "files.mediaChunk",
   "files.htmlInfo", "files.htmlChunk",

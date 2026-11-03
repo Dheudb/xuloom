@@ -13,7 +13,7 @@
 
 Windows 下载包自带 Python 和 MCP SDK，无需安装 Python、选择解释器或安装 Node.js。第三方 MCP 程序可能另需 Node.js、uv 等环境，按服务说明准备。
 
-当前源码版本为 **v0.1.26**，可下载成品及校验和以 Releases 为准。成品面向 Windows x64；Linux/macOS 可使用源码 CLI，尚无对应的桌面发行包。
+当前源码版本为 **v0.1.27**，可下载成品及校验和以 Releases 为准。成品面向 Windows x64；Linux/macOS 可使用源码 CLI，尚无对应的桌面发行包。
 
 **原生条件续跑：** 普通工具调用可声明已确定的后续动作图，引擎在下一次模型请求前根据真实回执自动推进，支持条件分支、独立只读并行和核对式恢复。每步仍保留权限、隔离和持久化；未知结果、失败或新输入会交回模型。App 与 CLI 共用，无需先发现额外工具；模型未声明计划时保持原流程。详见[原生条件续跑](docs/native-continuations.md)，原[工具序列](docs/tool-sequences.md)仍可显式调用。
 
@@ -22,6 +22,8 @@ Windows 下载包自带 Python 和 MCP SDK，无需安装 Python、选择解释�
 **上下文：** 输入框「＋ → 上下文」可查看用量、手动压缩和停止压缩；CLI 使用 `/context`、`/compact` 或 `xuloom context`。窗口按连接和模型配置，近期内容按 token 保留；完整原文归档，保存失败不报告成功。兼容接口默认用文本摘要，明确支持的 OpenAI Responses 接口可选原生压缩，见[配置与边界](docs/memory-and-compaction.md)。
 
 执行过程按操作显示图标和简短说明：图片、编辑、终端、搜索等各有标识，点击过程行可展开参数与结果，完成后整轮过程自动折叠。读取图片会显示可点击放大的缩略图；会话保存图片快照，原文件被修改或删除后仍能回看。预览本身不会调用模型；模型理解图片还需所连接的接口支持图片输入。
+
+网页链接和文件引用带本地图标；主回复、过程和子代理历史均可打开文件、目录及带行号引用。CLI 提供终端链接、Markdown 块渲染和压缩状态提示，SSH 路径不会误开本机文件。格式与边界见[链接与文件引用](docs/references.md)。
 
 **后台截图检查：** 可以要求“渲染这个 HTML／打开本地开发服务，截图检查布局”。模型通过 `browser_tool` 的 `render` 操作，在隐藏窗口加载页面并直接收到截图；过程里也能放大回看。本机桌面复用自带 Chromium，无需额外安装浏览器；CLI/SSH 在执行主机安装 `pip install "xuloom[browser]"` 并执行 `python -m playwright install chromium`。SSH 的文件与 localhost 都在远端渲染，不回退到本机。该工具沿用权限审批，系统隔离模式下仍禁用浏览器；不支持图片输入的模型只能取得截图路径，不能进行视觉检查。详见 [后台渲染与验证](docs/browser-capture.md)。
 

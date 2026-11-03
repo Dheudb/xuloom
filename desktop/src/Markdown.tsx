@@ -5,8 +5,13 @@ import type { Root, RootContent } from "mdast";
 import type { VFile } from "vfile";
 import MathFormula from "./MathFormula";
 import MarkdownImage, { MarkdownImageContext } from "./MarkdownImage";
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type MouseEvent } from "react";
 import { Check, Copy } from "lucide-react";
+import { fileReference, webReference } from "./references";
+import ReferenceIcon from "./ReferenceIcon";
+import { ReferenceNavigation } from "./ReferenceNavigation";
+
+const ReferenceLabel = createContext(false);
 
 // remark-math treats same-line $$...$$ as inline; retain the author's display intent.
 function remarkDisplayMath() {
@@ -49,28 +54,19 @@ function CodeBlock({ text, language }: { text: string; language: string }) {
   </div>;
 }
 
-function webpageURL(href?: string) {
-  try {
-    const url = new URL(href || "");
-    return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password ? url.href : null;
-  } catch { return null; }
-}
-
 function chatURL(value?: string) {
   return value && value.length <= 512 && !/[\r\n]/.test(value) && /^xuloom:\/\/chat\/(v1\/[0-9a-f]{16}|ssh\/v1\/[0-9a-f]{64})\/[A-Za-z0-9_-]{1,128}$/.test(value) ? value : null;
 }
 
-function fileReference(value: string) {
-  return value.length <= 1000 && !/[\n\r<>]/.test(value) && /\.[a-z0-9]{1,12}$/i.test(value) &&
-    (!/^[a-z][\w+.-]*:/i.test(value) || /^[a-z]:[\\/]/i.test(value));
-}
-function localLink(value?: string) {
-  if (!value) return null;
-  try { value = decodeURIComponent(value); } catch { return null; }
-  return fileReference(value) ? value : null;
-}
-export default function Markdown({ text, onOpenFile, sessionId, basePath }: { text: string; onOpenFile?: (path: string) => void; sessionId?: string; basePath?: string }) {
+export default function Markdown({ text, onOpenFile, sessionId, basePath, remoteUrl, allowImages = true }: { text: string; onOpenFile?: (path: string) => void; sessionId?: string; basePath?: string; remoteUrl?: string; allowImages?: boolean }) {
   const [linkError, setLinkError] = useState("");
+  const navigate = useContext(ReferenceNavigation);
+  const canOpen = !!navigate || !!onOpenFile;
+  function openFile(target: NonNullable<ReturnType<typeof fileReference>>) {
+    setLinkError("");
+    if (navigate) void navigate({ ...target, basePath }, remoteUrl).catch(error => setLinkError(String(error).replace(/^Error: Error invoking remote method '[^']+': Error: /, "")));
+    else onOpenFile?.(target.path);
+  }
   function openLink(event: MouseEvent<HTMLAnchorElement>, url: string) {
     event.preventDefault();
     setLinkError("");
@@ -81,7 +77,7 @@ export default function Markdown({ text, onOpenFile, sessionId, basePath }: { te
     <MarkdownImageContext.Provider value={{ sessionId, basePath }}>
     <ReactMarkdown
       remarkPlugins={[remarkGfm, remarkMath, remarkDisplayMath]}
-      urlTransform={(url, key) => key === "src" ? url : webpageURL(url) || chatURL(url) || (onOpenFile && fileReference(url) ? url : "")}
+      urlTransform={(url, key) => key === "src" ? url : webReference(url) || chatURL(url) || (canOpen && fileReference(url) ? url : "")}
       components={{
         pre: ({ children, node }) => {
           const code = node?.children[0];
@@ -94,24 +90,28 @@ export default function Markdown({ text, onOpenFile, sessionId, basePath }: { te
           return <CodeBlock text={text} language={language} />;
         },
         code: ({ children, className, node }) => {
+          const inLink = useContext(ReferenceLabel);
           const path = String(children);
           if (className?.split(" ").some((name) => name === "math-inline" || name === "math-display")) {
             return <MathFormula text={path} display={className.split(" ").includes("math-display")} />;
           }
-          return onOpenFile && !className && node?.position?.start.line === node?.position?.end.line && fileReference(path)
-            ? <button className="inline-file-link" title={"查看文件 " + path} onClick={() => onOpenFile(path)}><code>{children}</code></button>
+          if (inLink) return <code className={className}>{children}</code>;
+          const file = fileReference(path, true), url = webReference(path);
+          if (!className && url) return <a href={url} title={url} className="markdown-link" target="_blank" rel="noopener noreferrer" onClick={event => openLink(event, url)} onAuxClick={event => { if (event.button === 1) openLink(event, url); }}><ReferenceIcon url={url} /><code>{children}</code></a>;
+          return canOpen && !className && node?.position?.start.line === node?.position?.end.line && file
+            ? <button className="inline-file-link" title={"查看 " + path} onClick={() => openFile(file)}><ReferenceIcon path={file.path} /><code>{children}</code></button>
             : <code className={className}>{children}</code>;
         },
         a: ({ children, href }) => {
-          const url = webpageURL(href) || chatURL(href);
-          const path = localLink(href);
-          return url ? <a href={url} title={url} className="markdown-link" target="_blank" rel="noopener noreferrer"
+          const url = webReference(href || "") || chatURL(href);
+          const file = href ? fileReference(href) : undefined;
+          return <ReferenceLabel.Provider value={true}>{url ? <a href={url} title={url} className="markdown-link" target="_blank" rel="noopener noreferrer"
             onClick={(event) => openLink(event, url)}
-            onAuxClick={(event) => { if (event.button === 1) openLink(event, url); }}>{children}</a>
-            : onOpenFile && path ? <button className="inline-file-link" onClick={() => onOpenFile(path)}>{children}</button>
-            : <span title={href}>{children}</span>;
+            onAuxClick={(event) => { if (event.button === 1) openLink(event, url); }}><ReferenceIcon url={url} />{children}</a>
+            : canOpen && file ? <button className="inline-file-link" title={href} onClick={() => openFile(file)}><ReferenceIcon path={file.path} />{children}</button>
+            : <span title={href}>{children}</span>}</ReferenceLabel.Provider>;
         },
-        img: MarkdownImage,
+        img: allowImages ? MarkdownImage : () => null,
       }}
     >
       {text}

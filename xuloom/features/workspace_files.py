@@ -36,6 +36,22 @@ def list_directory(cwd, requested=""):
     return {"path": str(directory), "entries": entries[:1000], "truncated": len(entries) > 1000}
 
 
+def inspect_reference(cwd, requested, known=(), base_path=None):
+    """Resolve a selected reference through existing preview/workspace boundaries."""
+    from xuloom.features.file_changes import preview_path
+    if base_path:
+        base = preview_path(cwd, base_path, known)
+        if not isinstance(requested, str): raise ValueError("请选择本地路径")
+        requested = str(base.parent / requested)
+    try:
+        path = preview_path(cwd, requested, known)
+        return {"path": str(path), "directory": False}
+    except ValueError:
+        path = workspace_path(cwd, requested)
+        if not path.is_dir(): raise ValueError("文件或目录不存在，或不在当前会话的预览范围内")
+        return {"path": str(path), "directory": True}
+
+
 async def git(cwd, *args):
     env = {key: value for key, value in os.environ.items() if key not in {
         "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE"}}

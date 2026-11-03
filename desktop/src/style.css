@@ -2074,3 +2074,7 @@ body.panel-resizing iframe { pointer-events: none; }
 .generation-model-form { border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin: 10px 0; }
 .generation-model-form legend { font-size: 13px; font-weight: 600; padding: 0; margin-bottom: 8px; }
 .generation-model-form fieldset { min-width: 0; border: 0; padding: 0; margin: 0; }
+
+.reference-icon { display: inline-block; vertical-align: -.12em; margin-right: .28em; flex-shrink: 0; }
+.source-line.source-selected { background: var(--action-soft); box-shadow: inset 3px 0 var(--accent); }
+.file-preview > .workspace-tree { flex: 1; min-height: 0; overflow: auto; }

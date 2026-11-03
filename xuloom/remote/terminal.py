@@ -8,7 +8,7 @@ import shlex
 import uuid
 
 from rich.console import Console
-from rich.markdown import Markdown
+from xuloom.terminal_markdown import TerminalMarkdown, MarkdownStream, terminal_links
 
 from xuloom.remote.proxy import SSHBridge
 from xuloom.remote.ssh import RemoteDisconnected, RemoteRequestError
@@ -136,25 +136,35 @@ async def interactive_chat(identity, *, session_id=None, binding=None, machine=N
         if method == "prompt": attachment_ids = []
         active_turn = True
         receipt, streamed = None, ""
-        while True:
-            value = await queue.get(); kind = value["type"]
-            if kind == "engine_exit": raise RemoteDisconnected(value.get("message", "SSH disconnected; outcome unknown"))
-            if kind in {"questions", "permission", "plan_approval"}: await interaction(value)
-            elif kind == "text_delta":
-                text = value.get("text", ""); streamed += text; console.print(text, end="", markup=False)
-            elif kind in {"tool_start", "tool_scheduled"}: console.print("\n· " + value.get("tool_name", "tool"), markup=False)
-            elif kind == "final":
-                receipt = value.get("result")
-                text = value.get("text", "")
-                if text and text != streamed: console.print(Markdown(text))
-            elif kind == "turn_error": receipt = value.get("result") or {"ok": False, "reason": "error", "text": value.get("message", "")}
-            elif kind == "turn_cancelled": receipt = receipt or {"ok": False, "reason": "cancelled"}
-            elif kind == "turn_finished":
-                active_turn = False
-                console.print()
-                if not receipt or not receipt.get("ok"):
-                    console.print((receipt or {}).get("text") or "Execution ended: " + (receipt or {}).get("reason", "missing_result"), markup=False)
-                return
+        renderer = MarkdownStream(console, initial["project"], terminal_links(console), local_files=False)
+        try:
+            while True:
+                value = await queue.get(); kind = value["type"]
+                if kind == "engine_exit": raise RemoteDisconnected(value.get("message", "SSH disconnected; outcome unknown"))
+                if kind in {"questions", "permission", "plan_approval"}: await interaction(value)
+                elif kind == "message_start":
+                    renderer.finish(); streamed = ""
+                elif kind == "message_stop": renderer.finish()
+                elif kind == "context_compaction":
+                    renderer.finish()
+                    console.print({"running":"正在压缩上下文…", "completed":"上下文已自动压缩", "failed":"上下文压缩失败，原始记录已保留", "cancelled":"上下文压缩已取消", "interrupted":"上下文压缩已中断"}.get(value.get("status"), "上下文压缩状态变化"),markup=False)
+                elif kind == "text_delta":
+                    text = value.get("text", ""); streamed += text; renderer.append(text)
+                elif kind in {"tool_start", "tool_scheduled"}:
+                    renderer.finish(); console.print("\n· " + value.get("tool_name", "tool"), markup=False)
+                elif kind == "final":
+                    receipt = value.get("result")
+                    text = value.get("text", "")
+                    if text and text != streamed: console.print(TerminalMarkdown(text, initial["project"], links=terminal_links(console), local_files=False))
+                elif kind == "turn_error": receipt = value.get("result") or {"ok": False, "reason": "error", "text": value.get("message", "")}
+                elif kind == "turn_cancelled": receipt = receipt or {"ok": False, "reason": "cancelled"}
+                elif kind == "turn_finished":
+                    active_turn = False
+                    console.print()
+                    if not receipt or not receipt.get("ok"):
+                        console.print((receipt or {}).get("text") or "Execution ended: " + (receipt or {}).get("reason", "missing_result"), markup=False)
+                    return
+        finally: renderer.finish()
 
     result = {"ok": True, "reason": "closed"}
     try:
@@ -166,7 +176,7 @@ async def interactive_chat(identity, *, session_id=None, binding=None, machine=N
         if execution is not None: await bridge.dispatch("execution.set", {"mode": execution})
         console.print(f"SSH · {connection['profile']['host']} · {connection['machine']['hostname']}\n{initial['project']}\nSession: {session_id}", markup=False)
         for message in initial["history"]:
-            console.print(message["role"] + ":", markup=False); console.print(Markdown(message.get("text", "")))
+            console.print(message["role"] + ":", markup=False); console.print(TerminalMarkdown(message.get("text", ""), initial["project"], links=terminal_links(console), local_files=False))
         console.print("/help 查看命令；$ 选择远端 Skill；Ctrl+C 停止当前回合。", markup=False)
         plan = False
         while True:

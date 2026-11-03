@@ -50,7 +50,7 @@ export default function CapabilityPanel({
     null,
   );
   const [guide, setGuide] = useState<"skills" | "agents" | null>(null);
-  const [historyWorker, setHistoryWorker] = useState<{ id: string; name: string } | null>(null);
+  const [historyWorker, setHistoryWorker] = useState<{ id: string; name: string; remoteUrl?: string } | null>(null);
   useEffect(() => setHistoryWorker(null), [session?.id]);
   async function importDirectory(kind: string) {
     try {
@@ -270,7 +270,7 @@ export default function CapabilityPanel({
                         {!!worker.pending_message_count && <p className="fine-print">{worker.pending_message_count} 条消息待处理{worker.status !== "running" && " · 请在主会话继续此代理"}</p>}
                         {worker.external_recovery && <p className="fine-print">{worker.external_recovery.resumable ? "停止已确认，可在主会话继续此代理。" : "停止结果尚未确认，请先核对已有产物，不会自动重放。"}</p>}
                         {worker.remote_reference && <div className="card-meta" title={worker.remote_reference.cwd}><span>SSH · {worker.remote_reference.machine || worker.remote_reference.host}</span><button className="text-button" onClick={() => onNavigateChat(worker.remote_reference!.url)}>查看远端历史与文件</button></div>}
-                        <button className="text-button" onClick={() => setHistoryWorker({ id: worker.agent_id, name: worker.description || worker.agent_type || "子代理" })}>查看完整对话历史</button>
+                        <button className="text-button" onClick={() => setHistoryWorker({ id: worker.agent_id, name: worker.description || worker.agent_type || "子代理", remoteUrl: worker.remote_reference?.url })}>查看完整对话历史</button>
                         {worker.status === "queued" && worker.phase === "awaiting_resume" && <button className="text-button" disabled={session.busy}
                           onClick={() => invoke("agents.resume_queue", { agentIds: [worker.agent_id] }).then(refresh).catch(onError)}>恢复排队</button>}
                         {(["queued", "running"].includes(worker.status) || worker.outcome_unknown) && (
@@ -290,7 +290,7 @@ export default function CapabilityPanel({
                           <details>
                             <summary>查看结果</summary>
                             <div className="worker-result">
-                              <Markdown text={worker.result} sessionId={session.id} />
+                              <Markdown text={worker.result} sessionId={session.id} remoteUrl={worker.remote_reference?.url} />
                             </div>
                           </details>
                         )}
@@ -392,7 +392,7 @@ export default function CapabilityPanel({
           </section>
         </div>
       )}
-      {historyWorker && <WorkerHistory key={session?.id + ":" + historyWorker.id} agentId={historyWorker.id} name={historyWorker.name} invoke={invoke} close={() => setHistoryWorker(null)} />}
+      {historyWorker && <WorkerHistory key={session?.id + ":" + historyWorker.id} agentId={historyWorker.id} name={historyWorker.name} remoteUrl={historyWorker.remoteUrl} invoke={invoke} close={() => setHistoryWorker(null)} />}
     </aside>
   );
 }

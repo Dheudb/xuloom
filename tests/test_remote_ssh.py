@@ -68,6 +68,18 @@ class SSHProtocolTests(unittest.IsolatedAsyncioTestCase):
 
 @unittest.skipUnless(ssh_fixture.paramiko is not None and shutil.which("ssh"), "dev-only paramiko and system OpenSSH are required")
 class SSHWireTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reference_inspection_uses_remote_scope_without_model_requests(self):
+        sid = await self.empty_chat()
+        client = await self.connect()
+        await client.request("initialize", {"sessionId": sid})
+        result = await client.request("files.reference", {"path": "note.txt"})
+        self.assertEqual(Path(result["path"]), self.remote.resolve()/"note.txt")
+        self.assertFalse(result["directory"])
+        self.assertTrue((await client.request("files.reference", {"path": "."}))["directory"])
+        with self.assertRaises(RemoteRequestError):
+            await client.request("files.reference", {"path": "../outside.txt"})
+        self.assertEqual(self.local.records, [])
+
     async def asyncSetUp(self):
         self.local = local.RuntimeConnectionTests(); await self.local.asyncSetUp()
         self.root = self.local.root

@@ -42,13 +42,13 @@ function Directory({ sessionId, path, depth, revision, selected, changes, onOpen
   </div>;
 }
 
-export default function WorkspaceTree({ sessionId, project, selected, changes = [], onOpen }: {
-  sessionId: string; project: string; selected?: string; changes?: FileChange[]; onOpen: (path: string) => void;
+export default function WorkspaceTree({ sessionId, project, selected, changes = [], onOpen, rootPath = "" }: {
+  sessionId: string; project: string; rootPath?: string; selected?: string; changes?: FileChange[]; onOpen: (path: string) => void;
 }) {
   const [revision, setRevision] = useState(0);
   return <section className="workspace-tree" aria-label="工作区文件">
     <header><strong title={project}>工作区文件</strong><button className="icon-button" aria-label="刷新工作区文件" onClick={() => setRevision(revision + 1)}><RefreshCw size={14} /></button></header>
     <small className="tree-root" title={project}>{project.split(/[\\/]/).filter(Boolean).pop()}</small>
-    <div className="tree-scroll"><Directory key={sessionId + project} {...{ sessionId, selected, changes, onOpen }} path="" depth={0} revision={revision + (changes[0]?.updatedAt || 0)} /></div>
+    <div className="tree-scroll"><Directory key={sessionId + project + rootPath} {...{ sessionId, selected, changes, onOpen }} path={rootPath} depth={0} revision={revision + (changes[0]?.updatedAt || 0)} /></div>
   </section>;
 }
