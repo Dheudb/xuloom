@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { X, KeyRound, Check, FolderOpen, Archive, Puzzle, Bot, Plug, Link2, Server, ImagePlus } from "lucide-react";
+import { X, KeyRound, Check, FolderOpen, Archive, Puzzle, Bot, Plug, Link2, Server, ImagePlus, Plus, Trash2, ChevronDown } from "lucide-react";
 import type { EngineEvent, ModelConfig, SessionCatalog } from "./types";
 import Markdown from "./Markdown";
 import ArchivePanel from "./ArchivePanel";
@@ -60,6 +60,8 @@ export function SettingsDialog({
     nativeSearch: config?.nativeSearch || { backend: 'builtin', model: '', baseUrl: '' },
   });
   const [modelsText, setModelsText] = useState((config?.models || (config?.model ? [config.model] : [])).join("\n"));
+  const [managingModels, setManagingModels] = useState(false);
+  const modelNames = [...new Set([...modelsText.split(/[\n,，]/).map(name => name.trim()).filter(Boolean), ...(form.model.trim() ? [form.model.trim()] : [])])];
   const [discovering, setDiscovering] = useState(false);
   const [discoveryStatus, setDiscoveryStatus] = useState("");
   const [saving, setSaving] = useState(false);
@@ -130,19 +132,17 @@ export function SettingsDialog({
               <button key={id} role="tab" id={"settings-tab-" + id} aria-selected={tab === id} aria-controls={"settings-panel-" + id} tabIndex={tab === id ? 0 : -1}
                 onClick={(event) => { setTab(id); setError(""); event.currentTarget.focus(); }}><Icon size={16} />{label}</button>)}
           </nav>
-          <div className="settings-content">
+          <div className={"settings-content" + (tab === "model" ? " model-settings-content" : "")}>
         {tab === "media" && <div role="tabpanel" id="settings-panel-media" aria-labelledby="settings-tab-media"><MediaSettings invoke={extensions?.invoke || ((method, params) => window.xuloom.invoke(method, params))} busy={extensions?.busy} hasSession={!!extensions} control={mediaControl} /></div>}
         {tab === "remote" && <div role="tabpanel" id="settings-panel-remote" aria-labelledby="settings-tab-remote"><RemoteSettings navigationAction={workspaceAction} open={async (id, sessionId) => { await workspaceAction("remote.open", { id, sessionId }); close(); }} /></div>}
         {["skills", "agents", "mcp"].includes(tab) && <div role="tabpanel" id={"settings-panel-" + tab} aria-labelledby={"settings-tab-" + tab}>
           {!extensions ? <p>请先新建或打开一个会话，再管理扩展；无需配置模型或打开代码仓库。</p> : tab === "mcp" ? <><h3>MCP 服务</h3><p>连接外部工具。支持本地 stdio 与远程 Streamable HTTP，可浏览市场、自定义服务、测试连接及启停。</p><p>配置保存在当前工作区的 .xuloom/mcp_servers.json；API Key 与本地运行环境由服务提供方决定。</p><button onClick={extensions.openMcp}>打开 MCP 管理</button></> : <ExtensionSettings key={tab} kind={tab as "skills" | "agents"} {...extensions} />}
         </div>}
-        <div className="form-section" role="tabpanel" id="settings-panel-model" aria-labelledby="settings-tab-model" hidden={tab !== "model"}>
-          <fieldset disabled={saving || discovering || deleting}>
-          <h3>
-            <KeyRound size={16} /> 模型连接
-          </h3>
-          <p className="notice">保存模型连接后，新建会话即可使用。</p>
-          {config?.credentialStorage?.unavailable.length ? <p role="alert" className="error">部分受保护凭据无法读取，模型和地址已保留。请选择对应连接重新填写 Key，或删除该连接。</p> : null}
+        <div className="form-section model-connection-form" role="tabpanel" id="settings-panel-model" aria-labelledby="settings-tab-model" hidden={tab !== 'model'}>
+          <fieldset className="model-form" disabled={saving || discovering || deleting}>
+          <div className="model-form-body">
+          <div className="model-form-heading"><h3>模型连接</h3></div>
+          {config?.credentialStorage?.unavailable.length ? <p role="alert" className="error">部分 Key 无法读取，请重新填写或删除对应连接。</p> : null}
           <div className="api-connection-row"><label>API 连接
             <select aria-label="API 连接" disabled={discovering || saving} value={form.connectionId} onChange={(event) => {
               const connection = config?.connections?.find((item) => item.connectionId === event.target.value);
@@ -151,11 +151,11 @@ export function SettingsDialog({
               {(config?.connections || []).map((connection) => <option key={connection.connectionId} value={connection.connectionId}>{connection.connectionName}</option>)}
               {!config?.connections?.some((connection) => connection.connectionId === form.connectionId) && <option value={form.connectionId}>{form.connectionName}</option>}
             </select></label>
-            <button disabled={discovering || saving} onClick={() => {
+            <button aria-label="新增 API" disabled={discovering || saving} onClick={() => {
               setForm({ connectionId: crypto.randomUUID(), connectionName: "新 API", provider: "openai", model: "", baseUrl: "", hasKey: false, apiKey: "", networkMode: "direct", modelInputs: {}, modelReasoning: {}, nativeSearch: { backend: 'builtin', model: '', baseUrl: '' } });
               setModelsText(""); setDiscoveryStatus(""); setError(""); setDeleteId("");
-            }}>新增 API</button>
-            <button className="danger" disabled={!savedConnection || saving || discovering || deleting} onClick={() => { setDeleteId(form.connectionId); setError(""); }}>删除 API</button>
+            }}><Plus size={14} />新增</button>
+            <button aria-label="删除 API" title="删除此连接" className="danger" disabled={!savedConnection || saving || discovering || deleting} onClick={() => { setDeleteId(form.connectionId); setError(""); }}><Trash2 size={15} /></button>
           </div>
           {deleteId === savedConnection?.connectionId && <div className="api-delete-confirm" role="group" aria-label="确认删除 API 连接">
             <p>删除「{savedConnection.connectionName}」及其 {savedConnection.models.length} 个模型配置？保存的 Key 也会删除，聊天记录会保留。</p>
@@ -172,8 +172,7 @@ export function SettingsDialog({
               }}>{deleting ? "删除中…" : "确认删除 API"}</button>
             </div>
           </div>}
-          <label>连接名称<input aria-label="连接名称" value={form.connectionName} onChange={(event) => setForm({ ...form, connectionName: event.target.value })} /></label>
-          <label>
+<div className="model-protocol">          <label>
             API 协议
             <select
               aria-label="API 协议"
@@ -192,12 +191,50 @@ export function SettingsDialog({
                 }); setModelsText(""); setDiscoveryStatus(""); }
               }
             >
-              <option value="openai">OpenAI / 兼容 API / 本地模型</option>
+              <option value="openai">OpenAI 兼容</option>
               <option value="anthropic">Anthropic</option>
             </select>
           </label>
-          <label>可选模型（每行一个 ID）
-            <textarea aria-label="可选模型列表" rows={5} value={modelsText} placeholder="model-a\nmodel-b\nmodel-c" onChange={(event) => setModelsText(event.target.value)} />
+</div>
+<div className="model-fields">          <label>
+            API 地址
+            <input
+              aria-label="API 地址"
+              placeholder="填写服务提供的 API 地址"
+              value={form.baseUrl}
+              onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
+            />
+          </label>
+          <label>
+            <span className="model-field-label">API Key{" "}
+            <span className="muted">
+              {form.hasKey
+                ? "已保存"
+                : "本地无鉴权填 not-needed"}
+            </span></span>
+            <input
+              aria-label="API Key"
+              type="password"
+              autoComplete="off"
+              placeholder={form.hasKey ? "留空保留已保存的 Key" : "输入 API Key"}
+              value={form.apiKey}
+              onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
+            />
+          </label>
+<div className="model-current-row">          <label>
+            模型
+            <input
+              aria-label="模型 ID"
+              list="configured-model-names"
+              placeholder="输入或选择模型名称"
+              value={form.model}
+              onChange={(e) => setForm({ ...form, model: e.target.value })}
+            />
+          </label>
+<button className="manage-models-toggle" aria-label="管理模型" aria-expanded={managingModels} aria-controls="connection-model-list" onClick={() => setManagingModels(!managingModels)}>管理模型 <span>{modelNames.length}</span><ChevronDown size={14} /></button></div>
+          <datalist id="configured-model-names">{modelNames.map(name => <option value={name} key={name} />)}</datalist>
+          {managingModels && <div id="connection-model-list" className="connection-model-list">          <label>模型列表（每行一个）
+            <textarea aria-label="可选模型列表" rows={3} value={modelsText} placeholder="model-a\nmodel-b\nmodel-c" onChange={(event) => setModelsText(event.target.value)} />
           </label>
           <div className="model-discovery-actions"><button disabled={discovering || saving} onClick={async () => {
             setDiscovering(true); setDiscoveryStatus(""); setError("");
@@ -206,22 +243,27 @@ export function SettingsDialog({
               const models = [...new Set([...modelsText.split(/[\n,，]/).map((name) => name.trim()).filter(Boolean), ...value.models])];
               setModelsText(models.join("\n"));
               if (!form.model && models.length) setForm((previous) => ({ ...previous, model: models[0] }));
-              setDiscoveryStatus(`已读取 ${value.models.length} 个模型；点击保存配置后可切换。`);
+              setDiscoveryStatus(`已读取 ${value.models.length} 个模型。`);
             } catch (e) { setError(String(e)); } finally { setDiscovering(false); }
           }}>{discovering ? "正在获取…" : "从 API 获取模型"}</button>
           {discoveryStatus && <span role="status">{discoveryStatus}</span>}</div>
-          <p className="fine-print">这些模型共用同一 API 地址和 Key，当前模型会自动加入列表。</p>
+          <p className="fine-print">共用此连接的地址和 Key。</p>
+</div>}
+          {discoveryStatus && !managingModels && <p role="status" className="model-status">{discoveryStatus}</p>}
+          </div>
+          <details className="model-options"><summary><span>更多设置</span><small>思考、图片、搜索与代理</small><ChevronDown size={15} /></summary><div className="model-options-body">
+            <section className="model-option-section"><h4>连接选项</h4><div className="model-options-grid">          <label>连接名称<input aria-label="连接名称" value={form.connectionName} onChange={(event) => setForm({ ...form, connectionName: event.target.value })} /></label>
           <label>
-            模型 ID
-            <input
-              aria-label="模型 ID"
-              placeholder="输入供应商提供的完整模型 ID"
-              value={form.model}
-              onChange={(e) => setForm({ ...form, model: e.target.value })}
-            />
+            连接方式
+            <select aria-label="连接方式" value={form.networkMode}
+              onChange={(e) => setForm({ ...form, networkMode: e.target.value as "direct" | "system" })}>
+              <option value="direct">直接连接</option>
+              <option value="system">系统代理</option>
+            </select>
           </label>
-          <label>
-            当前模型的输入能力
+</div></section>
+            <section className="model-option-section"><h4>模型能力</h4>          <label>
+            输入类型
             <select aria-label="模型输入能力" value={!form.modelInputs[form.model] ? "unknown" : form.modelInputs[form.model].includes("document") ? "document" : form.modelInputs[form.model].includes("image") ? "image" : "text"}
               onChange={(event) => {
                 const modelInputs = { ...form.modelInputs };
@@ -229,53 +271,28 @@ export function SettingsDialog({
                 else modelInputs[form.model] = event.target.value === "document" ? ["text", "image", "document"] : event.target.value === "image" ? ["text", "image"] : ["text"];
                 setForm({ ...form, modelInputs });
               }} disabled={!form.model.trim()}>
-              <option value="unknown">未声明（交给接口判断）</option><option value="text">仅文本</option>
+              <option value="unknown">跟随接口</option><option value="text">仅文本</option>
               <option value="image">文本与图片</option>{form.provider === "anthropic" && <option value="document">文本、图片与原生文档</option>}
             </select>
           </label>
-          <p className="fine-print">按当前模型 ID 分别保存。仅文本模型会拦截图片附件和历史图片；未知能力不根据模型名称猜测，也不自动切换模型。</p>
           {!!form.model.trim() && <ReasoningSettings provider={form.provider} profile={form.modelReasoning[form.model]} change={profile => {
             const modelReasoning = { ...form.modelReasoning };
             if (profile) modelReasoning[form.model] = profile; else delete modelReasoning[form.model];
             setForm({ ...form, modelReasoning });
           }} />}
-          <label>
-            API 地址
-            <input
-              aria-label="API 地址"
-              placeholder="API 根地址或完整的 /chat/completions 地址"
-              value={form.baseUrl}
-              onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
-            />
-          </label>
-          <label>
-            API Key{" "}
-            <span className="muted">
-              {form.hasKey
-                ? "✓ 已保存；输入新 Key 可替换"
-                : "本地无鉴权服务可填 not-needed"}
-            </span>
-            <input
-              aria-label="API Key"
-              type="password"
-              autoComplete="off"
-              placeholder={form.hasKey ? "••••••••••••••••（已保存）" : "输入 API Key"}
-              value={form.apiKey}
-              onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
-            />
-          </label>
-          <label>联网搜索
+</section>
+            <section className="model-option-section"><h4>搜索</h4>          <label>联网搜索
             <select aria-label="联网搜索" value={form.nativeSearch.backend} onChange={event => setForm({ ...form, nativeSearch: { ...form.nativeSearch, backend: event.target.value } })}>
               <option value="builtin">内置搜索</option>
-              <option value="openai">OpenAI 原生搜索（Responses）</option>
-              <option value="openai-chat">OpenAI 搜索模型（Chat Completions）</option>
-              <option value="anthropic">Anthropic 原生搜索</option>
-              <option value="deepseek">DeepSeek 搜索与网页读取</option>
-              <option value="qwen">通义千问原生搜索（Responses）</option>
+              <option value="openai">OpenAI（Responses）</option>
+              <option value="openai-chat">OpenAI（搜索模型）</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="deepseek">DeepSeek</option>
+              <option value="qwen">通义千问（Responses）</option>
             </select>
           </label>
           {form.nativeSearch.backend !== 'builtin' && <>
-            <p className="fine-print">通过现有搜索工具调用所选服务，共用此连接的 Key。接口与模型需支持相应搜索协议；保存不会发起请求，失败不会自动换供应商。模型搜索可能产生额外调用费用。</p>
+            <p className="fine-print">共用此连接的 Key。接口需支持原生搜索，调用可能计费。</p>
             {form.nativeSearch.backend !== 'deepseek' && <label>搜索模型（可选）
               <input aria-label="搜索模型" placeholder="留空使用当前模型" value={form.nativeSearch.model} onChange={event => setForm({ ...form, nativeSearch: { ...form.nativeSearch, model: event.target.value } })} />
             </label>}
@@ -283,22 +300,16 @@ export function SettingsDialog({
               <input aria-label="搜索 API 根地址" placeholder="留空复用上面的 API 地址" value={form.nativeSearch.baseUrl} onChange={event => setForm({ ...form, nativeSearch: { ...form.nativeSearch, baseUrl: event.target.value } })} />
             </label></details>
           </>}
-          <label>
-            连接方式
-            <select aria-label="连接方式" value={form.networkMode}
-              onChange={(e) => setForm({ ...form, networkMode: e.target.value as "direct" | "system" })}>
-              <option value="direct">直连（本地模型和兼容 API 默认）</option>
-              <option value="system">系统代理 / 环境代理</option>
-            </select>
-          </label>
-          <p className="fine-print">
-            {config?.credentialStorage?.mode === "windows-dpapi" ? "保存时由 Windows 当前用户加密保护凭据；密钥不会返回聊天界面。" : ["macos-keychain", "secret-service"].includes(config?.credentialStorage?.mode || "") ? "保存时使用系统密钥环保护凭据；密钥环需保持可用，密钥不会返回聊天界面。" : config?.credentialStorage?.mode === "unavailable" ? "已要求系统凭据保护，但原生后端不可用；本次不能保存凭据。请安装 secrets 可选依赖并解锁系统密钥环。" : "凭据保存在本机配置，当前未启用原生加密；可安装 secrets 可选依赖或使用环境变量。"}
-          </p>
-        {error && tab === "model" && <p role="alert" className="error">{error}</p>}
-        <footer>
-          <button onClick={close}>取消</button>
-          <button className="primary" disabled={saving || discovering || deleting || !!deleteId || !form.model.trim()} onClick={submit}><Check size={15} />{saving ? "保存中…" : "保存配置"}</button>
-        </footer>
+</section>
+          </div></details>
+          </div>
+          <footer className="model-form-footer">
+            {error && <p role="alert" className="error">{error}</p>}
+            <div className="model-footer-row"><span className="model-key-storage">{config?.credentialStorage?.mode === 'unavailable' ? '系统凭据存储不可用' : ['windows-dpapi', 'macos-keychain', 'secret-service'].includes(config?.credentialStorage?.mode || '') ? '密钥由系统凭据存储保护' : '配置仅保存在本机'}</span><div className="model-footer-actions">
+              <button onClick={close}>取消</button>
+              <button className="primary" disabled={saving || discovering || deleting || !!deleteId || !form.model.trim()} onClick={submit}><Check size={15} />{saving ? '保存中…' : '保存配置'}</button>
+            </div></div>
+          </footer>
           </fieldset>
         </div>
         <div className="form-section" role="tabpanel" id="settings-panel-workspace" aria-labelledby="settings-tab-workspace" hidden={tab !== "workspace"}>

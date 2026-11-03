@@ -95,6 +95,7 @@ async function choose(mode) {
     assert.deepEqual(await page.getByLabel("Thinking 模式", { exact: true }).locator("option").allTextContents(), ["开启思考", "关闭思考"]);
     assert.equal(await page.getByLabel("Thinking 模式", { exact: true }).inputValue(), "enabled", "Legacy default thinking must show an explicit enabled state");
     await page.getByRole("button", { name: "设置与模型", exact: true }).click();
+    await page.locator('.model-options > summary').click();
     const efforts = page.getByRole("group", { name: "模型支持的推理强度", exact: true });
     await efforts.scrollIntoViewIfNeeded();
     const gap = await efforts.evaluate(element => element.querySelector("label").getBoundingClientRect().top - element.querySelector("span").getBoundingClientRect().bottom);
@@ -122,21 +123,21 @@ async function choose(mode) {
     await page.getByRole("button", { name: "停止任务", exact: true }).click();
     await picker().waitFor(); await page.waitForFunction(() => !document.querySelector(".collaboration-picker").disabled);
     assert(requests.length > 0 && JSON.stringify(requests[0]).includes("# Collaboration: ultra"));
-    assert(JSON.stringify(requests[0].messages).includes("Proactive delegation is enabled"));
+    assert(JSON.stringify(requests[0].messages).includes("Proactively delegate independent"));
     const system = requests[0].messages.filter((message) => message.role === "system").map((message) => message.content).join("\n");
     assert.equal(system.split("# Collaboration: ultra").length - 1, 1);
     assert(system.indexOf("# Collaboration: ultra") > system.indexOf("# Tool-Specific Rules"));
-    assert(system.includes("instead of doing every branch yourself"));
-    assert(JSON.stringify(requests[0].messages).includes("run_in_background=true"));
+    assert(system.includes("work alongside agents"));
     assert(!JSON.stringify(requests[0].messages).includes("run_in_background=false when the current answer requires"));
-    assert(requests[0].tools.some((tool) => tool.function.name === "agent_tool" && tool.function.description.includes("bounded independent assignment")));
+    assert(requests[0].tools.some((tool) => tool.function.name === 'tool_search_tool'));
+    assert(!requests[0].tools.some((tool) => tool.function.name === 'agent_tool'), 'Lifecycle details are loaded on demand');
+    assert(requests[0].tools.some((tool) => tool.function.name === 'spawn_agent' && tool.function.description.includes('background')));
     assert(requests[0].tools.some((tool) => tool.function.name === "spawn_agent" && !tool.function.parameters.properties.action));
-    for (const name of ["agent_tool", "spawn_agent"]) {
+    for (const name of ["spawn_agent"]) {
       const schema = requests[0].tools.find(tool => tool.function.name === name).function.parameters;
       const roles = schema.properties.subagent_type.anyOf.find(option => option.type === "string").enum;
       for (const role of ["explore", "general-purpose", "plan", "verification", "software-engineer"]) assert(roles.includes(role));
       assert(!roles.includes("research"));
-      if (name === "agent_tool") assert.equal(schema.properties.run_in_background.default, true);
     }
     assert.deepEqual(requests[0].thinking, { type: "disabled" });
     assert.equal(requests[0].reasoning_effort, undefined, "Disabled thinking must omit conflicting effort");
@@ -156,6 +157,7 @@ async function choose(mode) {
     await page.getByLabel("Thinking 模式", { exact: true }).waitFor({ state: "detached" });
     assert.equal(await page.getByLabel("推理强度", { exact: true }).count(), 0, "Unknown models must not inherit another model's controls");
     await page.getByRole("button", { name: "设置与模型", exact: true }).click();
+    await page.locator('.model-options > summary').click();
     await page.getByLabel("推理参数格式", { exact: true }).selectOption("qwen-local");
     await page.getByRole("button", { name: "保存配置", exact: true }).click();
     await page.getByRole("dialog", { name: "工作台设置", exact: true }).waitFor({ state: "hidden" });
@@ -165,6 +167,7 @@ async function choose(mode) {
     assert.equal(saved.model_connections[0].model_reasoning["unknown-fixture"].adapter, "qwen-local");
     assert.equal(saved.model_connections[0].model_reasoning["collaboration-fixture"].effort, "max");
     await page.getByRole("button", { name: "设置与模型", exact: true }).click();
+    await page.locator('.model-options > summary').click();
     await page.getByLabel("推理参数格式", { exact: true }).selectOption("openai");
     await page.getByRole("button", { name: "保存配置", exact: true }).click();
     await page.getByRole("dialog", { name: "工作台设置", exact: true }).waitFor({ state: "hidden" });

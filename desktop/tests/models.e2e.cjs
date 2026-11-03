@@ -45,7 +45,11 @@ async function launch() {
   await page.addStyleTag({ content: "*, *::before, *::after { animation: none !important; transition: none !important; }" });
 }
 const readConfig = () => JSON.parse(fs.readFileSync(path.join(config, "config.json"), "utf8"));
-async function settings() { await page.getByRole("button", { name: "设置与模型", exact: true }).click(); }
+async function settings() {
+  await page.getByRole("button", { name: "设置与模型", exact: true }).click();
+  await page.locator('.model-options > summary').click();
+  await page.getByRole('button', { name: '管理模型', exact: true }).click();
+}
 async function save() { await page.getByRole("button", { name: "保存配置", exact: true }).click(); await page.getByRole("dialog", { name: "工作台设置" }).waitFor({ state: "hidden" }); }
 async function select(connection, model) {
   await page.getByLabel("选择模型", { exact: true }).selectOption(JSON.stringify([connection, model]));
@@ -197,7 +201,7 @@ async function main() {
       atomicJSON(path.join(config, "config.json"), damaged);
       const beforeRepair = requests.length;
       await launch(); await settings();
-      await page.getByText("部分受保护凭据无法读取，模型和地址已保留。请选择对应连接重新填写 Key，或删除该连接。", { exact: true }).waitFor();
+      await page.getByRole('alert').filter({ hasText: /Key.*无法读取/ }).waitFor();
       assert.equal(await page.getByLabel("API 地址", { exact: true }).inputValue(), firstUrl);
       assert.equal(requests.length, beforeRepair, "Unreadable credentials do not issue requests during restart");
       await page.getByLabel("API Key", { exact: true }).fill("first-fixture-key"); await save();

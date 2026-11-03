@@ -103,6 +103,7 @@ async function screenshot() {
     await page.getByRole("button", { name: "发送任务", exact: true }).click(); await page.getByText("IMAGE_ONLY_VERIFIED", { exact: true }).waitFor();
     await page.waitForFunction(() => !document.querySelector(".send-button.stop"));
     await page.getByRole("button", { name: "设置与模型", exact: true }).click();
+    await page.locator('.model-options > summary').click();
     await page.getByLabel("模型输入能力", { exact: true }).selectOption("text");
     await page.getByRole("button", { name: "保存配置", exact: true }).click();
     await page.getByRole("dialog", { name: "工作台设置" }).waitFor({ state: "hidden" });
