@@ -247,6 +247,12 @@ function remoteWorkspaces(context) {
         await dispose(session); broadcast(); throw new Error("远端权限更改未确认，连接已关闭；请重新打开会话核对状态。" + error.message);
       }
     }
+    if (method === "context.compact") {
+      if (running(source) || source.attachmentImport) throw new Error("请等待远端任务结束后压缩上下文");
+      source.busy = true;
+      try { return { handled: true, value: await source.transport.request(method, payload) }; }
+      finally { source.busy = false; }
+    }
     if (method === "prompt" || method === "prompt.resume" || method === "media.control") {
       if (source.busy || source.attachmentImport) throw new Error("远端会话已有运行中的任务或附件传输");
       if (params.attachments?.length && !source.remote.attachments) throw new Error("请先更新远端 Xuloom；未提交带附件的任务");

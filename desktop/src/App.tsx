@@ -39,6 +39,8 @@ import ComposerMenu from "./ComposerMenu";
 import ExecutionDialog from "./ExecutionDialog";
 import SchedulePanel from "./SchedulePanel";
 import GoalEditor from "./GoalEditor";
+import ContextDialog from "./ContextDialog";
+import CreateProjectDialog from "./CreateProjectDialog";
 import GoalStrip from "./GoalStrip";
 import GitStatus from "./GitStatus";
 import SessionSummary from "./SessionSummary";
@@ -70,6 +72,8 @@ export default function App() {
   const [modelChanging, setModelChanging] = useState(false);
   const [permissionChanging, setPermissionChanging] = useState(false);
   const [goalDialog, setGoalDialog] = useState<"goal" | "all" | null>(null);
+  const [contextOpen, setContextOpen] = useState(false);
+  const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [collaborationChanging, setCollaborationChanging] = useState(false);
   const [executionDialog, setExecutionDialog] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
@@ -205,7 +209,7 @@ export default function App() {
     const handler = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "n") {
         event.preventDefault();
-        if (!opening && !settingsOpen && !mcpOpen) openSession();
+        if (!opening && !settingsOpen && !mcpOpen && !createProjectOpen) openSession();
       }
     };
     window.addEventListener("keydown", handler);
@@ -240,7 +244,7 @@ export default function App() {
     if (changesSelection) setOpening(true);
     setNotice("");
     try {
-      if (active && ["remote.open", "chat.open", "project.open", "session.new", "session.open", "session.select", "session.move", "session.fork"].includes(method))
+      if (active && ["remote.open", "chat.open", "project.open", "project.create", "session.new", "session.open", "session.select", "session.move", "session.fork"].includes(method))
         await window.xuloom.invoke("session.update", { id: active.id, patch: { draft: active.draft, draftEditId: active.editingId || "", draftAttachments: active.attachments.map((item) => item.id) } });
       const result = await window.xuloom.invoke(method, params);
       if (!result) return;
@@ -272,6 +276,7 @@ export default function App() {
     }
   }
   async function openProject(project?: string) {
+    if (!project) { setCreateProjectOpen(true); return; }
     try {
       await workspaceAction("project.open", { path: project });
     } catch (error) {
@@ -304,6 +309,7 @@ export default function App() {
     } });
   }
   function composerAction(name: string) {
+    if (name === "context") { setContextOpen(true); return; }
     if (name === "isolation") { setExecutionDialog(true); return; }
     if (name === "files") fileInput.current?.click();
     else if (name === "goal") {
@@ -529,7 +535,7 @@ export default function App() {
           onClick={() => openProject()}
         >
           <FolderOpen size={16} />
-          打开项目{opening && <LoaderCircle size={14} className="spin" />}
+          创建项目{opening && <LoaderCircle size={14} className="spin" />}
         </button>
         <SessionSidebar catalog={catalog} activeId={activeId} live={sessions} opening={opening}
           action={workspaceAction} openProject={openProject} onError={onError} />
@@ -918,6 +924,8 @@ export default function App() {
         </section>
       </div>}
       {executionDialog && active && <ExecutionDialog key={active.id} invoke={invoke} close={() => setExecutionDialog(false)} saved={(mode) => update({ executionMode: mode })} onError={onError} />}
+      {createProjectOpen && <CreateProjectDialog create={(name, path) => workspaceAction("project.create", { name, path })} close={() => setCreateProjectOpen(false)} />}
+      {contextOpen && active && <ContextDialog key={activeId} invoke={invoke} busy={active.busy || !!runningWorkers || !!runningCommands} close={() => setContextOpen(false)} />}
       {goalDialog && active && <div className="overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setGoalDialog(null); }}>
         <section className="dialog composer-goal-dialog" role="dialog" aria-modal="true" aria-label={goalDialog === "goal" ? "调整目标" : "定时唤醒"}
           onKeyDown={(event) => {

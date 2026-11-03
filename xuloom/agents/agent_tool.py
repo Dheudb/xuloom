@@ -264,6 +264,8 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
         same_model = connection_binding is None and child_model == self.context.get("primary_model")
         input_contract = self.context.get("model_input_contract")
         inherited_contract = {"inputs": input_contract(child_model), "reasoning": copy.deepcopy(self.context.get("reasoning_profile"))} if same_model and callable(input_contract) else None
+        if inherited_contract is not None and callable(self.context.get("context_profile")):
+            inherited_contract["context"] = copy.deepcopy(self.context["context_profile"]())
         if inherited_contract is not None and callable(self.context.get('native_search_options')):
             inherited_contract['search'] = copy.deepcopy(self.context['native_search_options']()['profile'])
         sub_engine = QueryEngine(

@@ -65,7 +65,7 @@ class MemoryExtractor:
         self._closed = False
         self._generation = 0
         self.last_error = None
-        self._min_turns_between_extractions = 1
+        self._min_turns_between_extractions = 3
         self._memory_dir: Optional[str] = None
 
     @property
@@ -237,7 +237,7 @@ class MemoryExtractor:
                 self.compactor.client, self.compactor.model,
                 self.compactor.provider,
                 [{"role": "user", "content": full_prompt}],
-                default_tokens,
+                self.compactor.output_grant([{"role": "user", "content": full_prompt}], min(default_tokens, 4096)), usage_callback=getattr(self.compactor, "usage_callback", None), purpose="long_term_memory",
             )).strip()
 
             if not raw:

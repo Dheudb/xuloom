@@ -116,13 +116,15 @@ class SessionCatalog {
     if (!row) throw new Error("会话不存在，可能已被删除");
     return row;
   }
-  addProject(project) {
+  addProject(project, name) {
+    if (name !== undefined && (typeof name !== "string" || !name.trim() || name.trim().length > 100)) throw new Error("项目名称需为 1–100 个字符");
     project = fs.realpathSync(project);
     if (!fs.statSync(project).isDirectory()) throw new Error("项目目录不存在");
     const before = this.readSettings(), settings = structuredClone(before);
     settings.projects = [project, ...(settings.projects || []).filter((p) => projectKey(p) !== projectKey(project))];
     settings.projectMeta ||= {};
     settings.projectMeta[projectKey(project)] = { ...settings.projectMeta[projectKey(project)], open: true, archived: false };
+    if (name !== undefined) settings.projectMeta[projectKey(project)].name = name.trim();
     this.writeSettings(settings, before);
     return project;
   }

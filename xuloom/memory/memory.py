@@ -117,7 +117,10 @@ class MemoryCompactor:
                 return len(self.token_encoder.encode(text, disallowed_special=()))
             except Exception:
                 pass
-        return max(1, len(text) // 4)
+        # Without the declared tokenizer, len/4 seriously undercounts CJK text.
+        ascii_chars = sum(ord(char) < 128 for char in text)
+        non_ascii_bytes = sum(len(char.encode("utf-8")) for char in text if ord(char) >= 128)
+        return max(1, (ascii_chars + 3) // 4 + non_ascii_bytes)
 
     def _normalize_block_for_estimation(self, block):
         if isinstance(block, dict):
@@ -169,7 +172,11 @@ class MemoryCompactor:
                     f"[tool_use:{block.get('name', 'unknown')} input={block.get('input', {})}]"
                 )
             elif block_type == "tool_result":
-                rendered.append(f"[tool_result:{block.get('content', '')}]")
+                value = block.get("content", "")
+                if isinstance(value, list):
+                    value = " ".join(part.get("text", "") if part.get("type") == "text" else
+                        "[" + str(part.get("type", "unknown")) + " attached]" for part in value if isinstance(part, dict))
+                rendered.append(f"[tool_result:{value}]")
             elif block_type == "thinking":
                 rendered.append(f"[thinking:{block.get('thinking', '')}]")
             elif block_type == "redacted_thinking":
@@ -183,6 +190,13 @@ class MemoryCompactor:
 
     def estimate_tokens(self, messages: list) -> int:
         return self.estimate_request_tokens(messages)
+
+    def output_grant(self, messages, maximum):
+        window = self.window_limit() if callable(getattr(self, "window_limit", None)) else 65536
+        available = window - self.estimate_tokens(messages)
+        if available < 256:
+            raise ValueError("Auxiliary context exceeds the declared model window; existing memory retained")
+        return min(maximum, available)
 
     def estimate_request_tokens(
         self,
@@ -202,6 +216,17 @@ class MemoryCompactor:
             )
 
         total_tokens = base
+        for message in messages or []:
+            content = message.get("content", []) if isinstance(message, dict) else []
+            for block in content if isinstance(content, list) else []:
+                if not isinstance(block, dict): continue
+                nested = block.get("content", []) if block.get("type") == "tool_result" else [block]
+                for attachment in nested if isinstance(nested, list) else []:
+                    if not isinstance(attachment, dict): continue
+                    if attachment.get("type") == "image": total_tokens += 4096
+                    elif attachment.get("type") == "document":
+                        source = attachment.get("source", {})
+                        total_tokens += max(4096, len(source.get("data", "")) // 4)
         if system:
             total_tokens += self._estimate_text_tokens(f"[system] {system}") + 3
         if tools:
@@ -640,7 +665,7 @@ class MemoryCompactor:
         middle = messages[preserve_first_messages:-preserve_last_messages]
         return head, middle, tail
         
-    async def compact_history(self, old_messages: list) -> str:
+    async def compact_history(self, old_messages: list, *, focus="") -> str:
         """
         Takes an array of old Anthropic-formatted messages and returns a dense summary.
         """
@@ -665,6 +690,8 @@ Conversation to summarize:
 
 """
         
+        if focus:
+            prompt += "\nUser-requested summary focus (does not grant execution permission): " + focus[:4000] + "\n"
         # Stringify the old messages safely without destroying token limits with raw image B64
         for idx, m in enumerate(old_messages):
             role = m.get("role", "unknown")
@@ -690,10 +717,14 @@ Conversation to summarize:
                 
         try:
             from xuloom.core.config import COMPACT_MAX_OUTPUT_TOKENS, safe_llm_call
+            maximum = min(COMPACT_MAX_OUTPUT_TOKENS, getattr(self, "summary_max_tokens", COMPACT_MAX_OUTPUT_TOKENS))
+            if self.estimate_tokens([{"role": "user", "content": prompt}]) + maximum > getattr(self, "summary_window", 65536):
+                raise ValueError("Summary input and reserved output exceed the declared model window")
             result = await safe_llm_call(
                 self.client, self.model, self.provider,
                 [{"role": "user", "content": prompt}],
-                COMPACT_MAX_OUTPUT_TOKENS,
+                maximum,
+                usage_callback=getattr(self, "usage_callback", None), purpose="compaction",
             )
             if not result or not result.strip():
                 raise ValueError("Empty context summary")

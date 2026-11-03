@@ -4,6 +4,20 @@ from xuloom.desktop.turns import TurnRecorder, conversation_history
 
 
 class TurnTests(unittest.TestCase):
+    def test_compaction_has_one_durable_step_without_duplicate_plain_log(self):
+        recorder = TurnRecorder()
+        recorder.record["userMessageId"] = "user"
+        for state in ("running", "completed"):
+            self.assertTrue(recorder.accept({"type":"context_compaction", "id":"owned", "status":state, "before":12000, "after":2000}))
+        self.assertFalse(recorder.accept({"type":"log", "text":"上下文已压缩：约 12,000 → 2,000 tokens；原文已归档。"}))
+        recorder.accept({"type":"final", "text":"Answer"}); recorder.accept({"type":"turn_finished"})
+        self.assertEqual(len(recorder.record["steps"]), 1)
+        rows = conversation_history([{"role":"user", "_uuid":"user", "content":"Task"}, {"role":"assistant", "content":"Answer"}], [recorder.record])
+        self.assertEqual(rows[-1]["trace"]["steps"][0]["compaction"]["status"], "completed")
+        for kind, expected in (("turn_cancelled", "cancelled"), ("turn_error", "interrupted")):
+            pending = TurnRecorder(); pending.accept({"type":"context_compaction", "id":"pending", "status":"running"}); pending.accept({"type":kind})
+            self.assertEqual(pending.record["steps"][0]["compaction"]["status"], expected)
+
     def test_resume_keeps_response_identity_partial_text_and_excludes_paused_time(self):
         previous = {"id": "same", "userMessageId": "user", "startedAt": 1000, "status": "cancelled", "elapsedMs": 5000,
             "answer": "First ", "pendingText": "", "steps": [], "files": [], "modelStreams": [{"turn": 1, "status": "cancelled"}]}

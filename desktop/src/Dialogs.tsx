@@ -8,6 +8,7 @@ import RemoteSettings from "./RemoteSettings";
 import MediaSettings from "./MediaSettings";
 import type { Capabilities } from "./types";
 import { ReasoningSettings } from "./ReasoningControls";
+import { ContextSettings } from "./ContextSettings";
 
 export function SettingsDialog({
   config,
@@ -57,6 +58,7 @@ export function SettingsDialog({
     networkMode: config?.networkMode || "direct",
     modelInputs: config?.modelInputs || {} as NonNullable<ModelConfig["modelInputs"]>,
     modelReasoning: config?.modelReasoning || {} as NonNullable<ModelConfig["modelReasoning"]>,
+    modelContext: config?.modelContext || {} as NonNullable<ModelConfig["modelContext"]>,
     nativeSearch: config?.nativeSearch || { backend: 'builtin', model: '', baseUrl: '' },
   });
   const [modelsText, setModelsText] = useState((config?.models || (config?.model ? [config.model] : [])).join("\n"));
@@ -84,7 +86,8 @@ export function SettingsDialog({
     try {
       const models = [...new Set([...modelsText.split(/[\n,，]/).map((name) => name.trim()).filter(Boolean), form.model.trim()])];
       await save({ ...form, models, modelInputs: Object.fromEntries(Object.entries(form.modelInputs).filter(([name]) => models.includes(name))),
-        modelReasoning: Object.fromEntries(Object.entries(form.modelReasoning).filter(([name]) => models.includes(name))) });
+        modelReasoning: Object.fromEntries(Object.entries(form.modelReasoning).filter(([name]) => models.includes(name))),
+        modelContext: Object.fromEntries(Object.entries(form.modelContext).filter(([name]) => models.includes(name))) });
       close();
     } catch (e) {
       setError(String(e));
@@ -146,13 +149,13 @@ export function SettingsDialog({
           <div className="api-connection-row"><label>API 连接
             <select aria-label="API 连接" disabled={discovering || saving} value={form.connectionId} onChange={(event) => {
               const connection = config?.connections?.find((item) => item.connectionId === event.target.value);
-              if (connection) { setForm({ ...connection, apiKey: "", networkMode: connection.networkMode || "direct", modelInputs: connection.modelInputs || {}, modelReasoning: connection.modelReasoning || {}, nativeSearch: connection.nativeSearch || { backend: 'builtin', model: '', baseUrl: '' } }); setModelsText(connection.models.join("\n")); setDiscoveryStatus(""); setError(""); setDeleteId(""); }
+              if (connection) { setForm({ ...connection, apiKey: "", networkMode: connection.networkMode || "direct", modelInputs: connection.modelInputs || {}, modelReasoning: connection.modelReasoning || {}, modelContext: connection.modelContext || {}, nativeSearch: connection.nativeSearch || { backend: 'builtin', model: '', baseUrl: '' } }); setModelsText(connection.models.join("\n")); setDiscoveryStatus(""); setError(""); setDeleteId(""); }
             }}>
               {(config?.connections || []).map((connection) => <option key={connection.connectionId} value={connection.connectionId}>{connection.connectionName}</option>)}
               {!config?.connections?.some((connection) => connection.connectionId === form.connectionId) && <option value={form.connectionId}>{form.connectionName}</option>}
             </select></label>
             <button aria-label="新增 API" disabled={discovering || saving} onClick={() => {
-              setForm({ connectionId: crypto.randomUUID(), connectionName: "新 API", provider: "openai", model: "", baseUrl: "", hasKey: false, apiKey: "", networkMode: "direct", modelInputs: {}, modelReasoning: {}, nativeSearch: { backend: 'builtin', model: '', baseUrl: '' } });
+              setForm({ connectionId: crypto.randomUUID(), connectionName: "新 API", provider: "openai", model: "", baseUrl: "", hasKey: false, apiKey: "", networkMode: "direct", modelInputs: {}, modelReasoning: {}, modelContext: {}, nativeSearch: { backend: 'builtin', model: '', baseUrl: '' } });
               setModelsText(""); setDiscoveryStatus(""); setError(""); setDeleteId("");
             }}><Plus size={14} />新增</button>
             <button aria-label="删除 API" title="删除此连接" className="danger" disabled={!savedConnection || saving || discovering || deleting} onClick={() => { setDeleteId(form.connectionId); setError(""); }}><Trash2 size={15} /></button>
@@ -165,7 +168,7 @@ export function SettingsDialog({
                 try {
                   const next = await deleteConnection(deleteId);
                   setForm({ connectionId: next.connectionId || crypto.randomUUID(), connectionName: next.connectionName || "我的 API", provider: next.provider,
-                    model: next.model, baseUrl: next.baseUrl, hasKey: next.hasKey, apiKey: "", networkMode: next.networkMode || "direct", modelInputs: next.modelInputs || {}, modelReasoning: next.modelReasoning || {}, nativeSearch: next.nativeSearch || { backend: 'builtin', model: '', baseUrl: '' } });
+                    model: next.model, baseUrl: next.baseUrl, hasKey: next.hasKey, apiKey: "", networkMode: next.networkMode || "direct", modelInputs: next.modelInputs || {}, modelReasoning: next.modelReasoning || {}, modelContext: next.modelContext || {}, nativeSearch: next.nativeSearch || { backend: 'builtin', model: '', baseUrl: '' } });
                   setModelsText((next.models || []).join("\n")); setDeleteId("");
                   setDiscoveryStatus(next.connections?.length ? "已删除 API 连接。" : "已删除所有 API 连接，请添加新的连接。");
                 } catch (e) { setError(String(e)); } finally { setDeleting(false); }
@@ -186,7 +189,7 @@ export function SettingsDialog({
                   hasKey: false,
                   apiKey: "",
                   modelInputs: {},
-                  modelReasoning: {},
+                  modelReasoning: {}, modelContext: {},
                   nativeSearch: { backend: 'builtin', model: '', baseUrl: '' },
                 }); setModelsText(""); setDiscoveryStatus(""); }
               }
@@ -216,7 +219,8 @@ export function SettingsDialog({
               aria-label="API Key"
               type="password"
               autoComplete="off"
-              placeholder={form.hasKey ? "留空保留已保存的 Key" : "输入 API Key"}
+              placeholder={form.hasKey ? "••••••••" : "输入 API Key"}
+              title={form.hasKey ? "已保存；留空沿用原 Key，输入新内容可替换" : "输入 API Key"}
               value={form.apiKey}
               onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
             />
@@ -251,7 +255,8 @@ export function SettingsDialog({
 </div>}
           {discoveryStatus && !managingModels && <p role="status" className="model-status">{discoveryStatus}</p>}
           </div>
-          <details className="model-options"><summary><span>更多设置</span><small>思考、图片、搜索与代理</small><ChevronDown size={15} /></summary><div className="model-options-body">
+          <details className="model-options"><summary><span>更多设置</span><small>思考、上下文、搜索与代理</small><ChevronDown size={15} /></summary><div className="model-options-body">
+            <ContextSettings provider={form.provider} value={form.modelContext[form.model]} change={value => setForm({ ...form, modelContext: { ...form.modelContext, [form.model]: value } })} />
             <section className="model-option-section"><h4>连接选项</h4><div className="model-options-grid">          <label>连接名称<input aria-label="连接名称" value={form.connectionName} onChange={(event) => setForm({ ...form, connectionName: event.target.value })} /></label>
           <label>
             连接方式

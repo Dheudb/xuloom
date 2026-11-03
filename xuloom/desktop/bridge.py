@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sys
+import time
 import uuid
 from pathlib import Path
 from xuloom.branding import configuration_file
@@ -156,7 +157,7 @@ class DesktopBridge:
             self.mcp_testing = False
 
     def busy(self):
-        return self.turn_task is not None and not self.turn_task.done()
+        return self.turn_task is not None and not self.turn_task.done() or bool(self.engine and getattr(self.engine, "_context_compacting", False))
 
     def require_idle(self):
         if self.attachment_upload is not None: raise ValueError("Wait for the attachment upload to finish or abort it")
@@ -416,6 +417,17 @@ class DesktopBridge:
         return receipt or {"ok": False, "reason": "cancelled" if self.stop_requested else "error"}
 
     async def dispatch(self, method, params):
+        if method in {"context.get", "context.compact"}:
+            from xuloom.context.compaction import status
+            if method == "context.compact": self.require_idle()
+            engine = await self.ensure_engine(write=method == "context.compact")
+            if method == "context.compact":
+                engine.abort_event.clear()
+                try:
+                    await engine._apply_layered_compaction_if_needed(lambda _: None, force=True, focus=str(params.get("focus") or "")[:4000])
+                except asyncio.CancelledError:
+                    raise ValueError("上下文压缩已取消，原始记录已保留") from None
+            return status(engine)
         if method == "runtime.info":
             import socket
             from xuloom import __version__
@@ -537,7 +549,8 @@ class DesktopBridge:
             if method == "schedule.control": return schedules.change(params["id"], params["action"])
             if method == "schedule.add":
                 engine = await self.ensure_engine(write=True)
-                return schedules.add(engine, params["prompt"], due_at=params["due_at"], interval=params.get("interval"), skills=params.get("skills"))
+                return schedules.add(engine, params["prompt"], due_at=params.get("due_at", time.time()), interval=params.get("interval"), skills=params.get("skills"),
+                    trigger=params.get("trigger"), request_id=params.get("request_id"))
             if method == "schedule.deliver":
                 if self.busy() or self.mcp_testing: return {"status": "queued"}
                 engine = await self.ensure_engine(write=True)
@@ -941,7 +954,7 @@ class DesktopBridge:
             # Stop the parent immediately as well as its owned resources.
             # Waiting for resource cleanup first can leave an interactive
             # tool waiting for a parent turn that hasn't been cancelled yet.
-            if self.busy():
+            if self.turn_task is not None and not self.turn_task.done():
                 self.turn_task.cancel()
                 cleanup.append(self.turn_task)
             results = await asyncio.gather(*cleanup, return_exceptions=True)

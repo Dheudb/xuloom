@@ -18,7 +18,7 @@ class DomainMemoryTests(unittest.IsolatedAsyncioTestCase):
         messages = [create_user_message(goal)]
         for index in range(20):
             messages.extend([create_user_message("Constraint {}: preserve source references and do not publish".format(index)),
-                create_assistant_message("Unverified claim {}; needs checking".format(index))])
+                create_assistant_message("Unverified claim {}; needs checking".format(index) + " Source evidence remains unverified."*15)])
         return messages
 
     async def test_research_writing_and_data_continue_with_evidence_and_actual_worker_state(self):
@@ -34,7 +34,6 @@ class DomainMemoryTests(unittest.IsolatedAsyncioTestCase):
                 self.engine.subagent_registry = [{"agent_id": "evidence-reader", "status": "interrupted", "turn": 1}]
                 self.engine.in_progress_tools = {"uncertain-effect": {"tool_use_id": "uncertain-effect", "tool_name": "command_tool", "recovery_uncertain": True, "phase": "executing"}}
                 summary = "Goal: " + goal + "\nConstraint: do not publish. Prior assistant claims are unverified. Evidence reader is interrupted; uncertain-effect must not be replayed."
-                self.engine.compactor.should_compact_precise = AsyncMock(side_effect=[(True, 90000, "fixture"), (False, 10000, "fixture")])
                 with patch("xuloom.core.config.safe_llm_call", AsyncMock(return_value=summary)) as model:
                     self.assertTrue(await self.engine._apply_layered_compaction_if_needed(lambda _: None, force=True))
                 compact_prompt = model.call_args.args[3][0]["content"]
@@ -48,7 +47,6 @@ class DomainMemoryTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("evidence-reader", current)
                 self.assertIn("grants no new authorization", current)
                 # Continue through the actual model loop. The deterministic model is only a stand-in.
-                self.engine.compactor.should_compact_precise = AsyncMock(return_value=(False, 10000, "fixture"))
                 self.requests.clear()
                 self.fixture(["CONTINUED_" + domain])
                 result = await self.engine.run("Continue within the retained constraints", sys_print_callback=lambda _: None)
@@ -63,7 +61,6 @@ class DomainMemoryTests(unittest.IsolatedAsyncioTestCase):
         for failure in ("", RuntimeError("fixture summary endpoint failed")):
             self.engine.messages = self.history("Research goal; preserve source evidence")
             before = copy.deepcopy(self.engine.messages)
-            self.engine.compactor.should_compact_precise = AsyncMock(return_value=(True, 90000, "fixture"))
             call = AsyncMock(side_effect=failure) if isinstance(failure, Exception) else AsyncMock(return_value=failure)
             with patch("xuloom.core.config.safe_llm_call", call):
                 with self.assertRaisesRegex(RuntimeError, "original history was retained"):
@@ -73,7 +70,6 @@ class DomainMemoryTests(unittest.IsolatedAsyncioTestCase):
     async def test_archive_failure_stops_before_destructive_compaction(self):
         self.engine.messages = self.history("Data analysis with original inputs retained")
         before = copy.deepcopy(self.engine.messages)
-        self.engine.compactor.should_compact_precise = AsyncMock(return_value=(True, 90000, "fixture"))
         with patch("xuloom.core.config.safe_llm_call", AsyncMock(return_value="valid summary")), patch("xuloom.core.storage.atomic_json", side_effect=OSError("fixture disk failure")):
             with self.assertRaisesRegex(OSError, "fixture disk failure"):
                 await self.engine._apply_layered_compaction_if_needed(lambda _: None, force=True)

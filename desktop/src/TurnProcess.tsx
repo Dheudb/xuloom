@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, LoaderCircle } from "lucide-react";
-import type { TurnTrace, ToolActivity } from "./types";
+import { ChevronDown, LoaderCircle, ListCollapse } from "lucide-react";
+import type { TurnTrace, ToolActivity, CompactionNotice } from "./types";
 import Markdown from "./Markdown";
 import { statusText } from "./ActivityPanel";
 import { toolPresentation } from "./tool-presentation";
@@ -31,6 +31,15 @@ function ProcessTool({ tool, sessionId }: { tool: ToolActivity; sessionId: strin
   </div>;
 }
 
+function CompactStatus({ notice, turnStatus }: { notice: CompactionNotice; turnStatus: string }) {
+  const status = notice.status === "running" && turnStatus !== "running" ? turnStatus === "cancelled" ? "cancelled" : "interrupted" : notice.status;
+  const title = notice.before !== undefined && notice.after !== undefined ? `约 ${notice.before.toLocaleString()} → ${notice.after.toLocaleString()} tokens · ${durationText(notice.elapsedMs || 0)}` : undefined;
+  return <div className="turn-compaction" data-compaction-id={notice.id} data-compaction-status={status} role={turnStatus === "running" ? "status" : undefined} title={title}>
+    <ListCollapse size={16} /><span>{{ running: "正在压缩上下文…", completed: "上下文已自动压缩", failed: "上下文压缩失败，原始记录已保留", cancelled: "上下文压缩已取消", interrupted: "上下文压缩已中断" }[status]}</span>
+    {status === "running" && <LoaderCircle size={13} className="spin" />}
+  </div>;
+}
+
 export default function TurnProcess({ trace, sessionId }: { trace: TurnTrace; sessionId: string }) {
   const running = trace.status === "running";
   const [open, setOpen] = useState(running);
@@ -45,15 +54,17 @@ export default function TurnProcess({ trace, sessionId }: { trace: TurnTrace; se
     ? Math.max(0, (trace.finishedAt || now) - trace.startedAt) : undefined);
   const state = running ? "执行中" : trace.status === "cancelled" ? "已停止" : ["error", "interrupted"].includes(trace.status) ? "已中断" : "";
   const stream = trace.modelStreams?.at(-1);
-  const phase = stream && running ? ({ waiting: "等待接口响应", connected: "等待模型输出", reasoning: "模型正在推理", finishing: "正在结束接收" } as Record<string, string>)[stream.status] : "";
+  const notices = trace.steps.filter((step) => step.kind === "compaction");
+  const phase = running && notices.some(step => step.compaction.status === "running") ? "正在压缩上下文" : stream && running ? ({ waiting: "等待接口响应", connected: "等待模型输出", reasoning: "模型正在推理", finishing: "正在结束接收" } as Record<string, string>)[stream.status] : "";
   const timing = stream ? `本轮 ${trace.modelStreams?.length} 次模型请求；最近一次：${stream.firstTextMs !== undefined ? `首个文本 ${(stream.firstTextMs / 1000).toFixed(1)} 秒` : "尚未收到文本"}；已收到 ${stream.textChars || 0} 字符；推理数据 ${stream.reasoningChunks || 0} 段${stream.finishReason ? `；结束标记 ${stream.finishReason}` : ""}${stream.error ? `；${stream.error}` : ""}` : undefined;
   const label = <span title={timing}>{trace.status === "cancelled" && elapsed !== undefined
     ? `你在 ${durationText(elapsed)} 后停止了`
     : <>{state}{state && elapsed !== undefined ? " · " : ""}{elapsed !== undefined ? `${trace.approximate ? "约" : ""}用时 ${durationText(elapsed)}` : state ? "" : "执行过程"}{phase ? ` · ${phase}` : ""}</>}</span>;
   if (!trace.steps.some((step) => step.kind === "tool")) {
-    return elapsed === undefined && !state ? null : <div className="turn-process turn-process-time" data-turn-status={trace.status}>{label}</div>;
+    return elapsed === undefined && !state && !notices.length ? null : <div className="turn-process turn-process-time" data-turn-status={trace.status}>{label}
+      {notices.map(step => <CompactStatus key={step.compaction.id} notice={step.compaction} turnStatus={trace.status} />)}</div>;
   }
-  return <details className="turn-process" open={open} onToggle={(event) => setOpen(event.currentTarget.open)} data-turn-status={trace.status}>
+  return <><details className="turn-process" open={open} onToggle={(event) => setOpen(event.currentTarget.open)} data-turn-status={trace.status}>
     <summary aria-label="查看本轮执行过程">
       {label}
       <ChevronDown size={14} /><span className="turn-step-count">{trace.steps.length ? `${trace.steps.length} 项过程` : ""}</span>
@@ -61,7 +72,8 @@ export default function TurnProcess({ trace, sessionId }: { trace: TurnTrace; se
     <div className="turn-process-content">
       {trace.steps.map((step, index) => step.kind === "text"
         ? <div className="turn-commentary markdown" key={index}><Markdown text={step.text} sessionId={sessionId} /></div>
+        : step.kind === "compaction" ? <CompactStatus key={step.compaction.id} notice={step.compaction} turnStatus={trace.status} />
         : <ProcessTool tool={step.tool} sessionId={sessionId} key={step.tool.id || index} />)}
     </div>
-  </details>;
+  </details>{!open && notices.map(step => <CompactStatus key={step.compaction.id} notice={step.compaction} turnStatus={trace.status} />)}</>;
 }

@@ -32,6 +32,7 @@ class MemoryLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.engine = QueryEngine(model='fixture', model_provider='openai', api_key='fixture',
             api_base_url='http://127.0.0.1:9/v1', cwd=str(self.root))
         self.extractor = self.engine.memory_extractor
+        self.extractor._min_turns_between_extractions = 1  # Exercise acknowledgement at every controlled turn.
         self.summary = self.engine.session_memory_manager
         self.summary.config = SessionMemoryConfig(0, 0, 0)
         self.engine.require_writer()

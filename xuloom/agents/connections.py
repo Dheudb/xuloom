@@ -32,6 +32,9 @@ def resolve_connection(identity, model=None, *, frozen=None):
         "api_base_url": normalize_api_base_url(provider, item.get("base_url", "")),
         "network_mode": model_network_mode(item.get("network_mode", "direct")),
         "contract": {"inputs": copy.deepcopy(inputs), "reasoning": profile}}
+    if model in item.get("model_context", {}) or frozen is not None and "context" in frozen.get("contract", {}):
+        from xuloom.context.compaction import normalize
+        binding["contract"]["context"] = normalize(item.get("model_context", {}).get(model), provider)
     from xuloom.tools.native_search import normalize as normalize_search
     search = normalize_search(item.get('native_search'))
     if search['backend'] != 'builtin' or frozen is not None and 'search' in frozen.get('contract', {}):

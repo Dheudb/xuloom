@@ -205,6 +205,11 @@ class QueryEngine:
             network_mode=self.network_mode,
             request_owner=self._request_owner,
         )
+        self.compactor.usage_callback = self._record_auxiliary_usage
+        self.native_context = None
+        self.last_compaction = None
+        self.context_calibration = {}
+        self.auxiliary_usage = {}
         self.plan_manager = PlanManager(session_id=self.session_id)
         self.structured_output_manager = StructuredOutputManager()
         self.security_classifier = AutoSecurityClassifier()
@@ -445,6 +450,7 @@ class QueryEngine:
         next_model = model if model is not None else self.primary_model
         next_base = api_base_url if api_base_url is not None else (self.api_base_url if next_provider == self.model_provider else os.environ.get(next_provider.upper() + "_BASE_URL", ""))
         next_key = api_key if api_key is not None else (self._api_key if next_provider == self.model_provider else os.environ.get(next_provider.upper() + "_API_KEY", ""))
+        route_changed = (next_provider, next_model, next_base, next_key) != (self.model_provider, self.primary_model, self.api_base_url, self._api_key)
         next_fallback = self._resolve_fallback_model(None, provider=next_provider, primary_model=next_model)
         next_profile = configured_profile(next_provider, next_model, next_base)
         next_client = create_model_client(provider=next_provider, model=next_model, api_base_url=next_base, api_key=next_key, network_mode=next_network, request_owner=self._request_owner)
@@ -468,6 +474,17 @@ class QueryEngine:
         for manager in (self.session_memory_manager, self.memory_extractor):
             manager.cancel_pending()
         self.client, self.compactor = next_client, next_compactor
+        self.compactor.usage_callback = self._record_auxiliary_usage
+        self.context_calibration = {}
+        from xuloom.context.compaction import configured as context_settings
+        if self.native_context and (route_changed or context_settings(self)["backend"] != "openai-responses"):
+            # The canonical opaque state is route-specific; raw local messages stay portable.
+            self.messages = [message for message in self.messages if message.get("_origin") != "compaction"]
+            for message in self.messages: message.pop("_responses_output", None)
+            self.native_context = None
+            self._update_compact_boundary()
+        if route_changed:
+            for message in self.messages: message.pop("_responses_output", None)
         self._sync_model_runtime_context()
         if persist:
             self.persist_session_state()
@@ -481,6 +498,9 @@ class QueryEngine:
 
     def _sync_model_runtime_context(self):
         self.tool_context.pop("request_model", None)
+        self.compactor.usage_callback = self._record_auxiliary_usage
+        self.compactor.window_limit = lambda: __import__("xuloom.context.compaction", fromlist=["policy"]).policy(self, self.compactor.model)["window"]
+        self.tool_context["context_profile"] = lambda: __import__("xuloom.context.compaction", fromlist=["configured"]).configured(self)
         for name in ("session_memory_manager", "memory_extractor"):
             manager = getattr(self, name, None)
             if manager is not None:
@@ -880,7 +900,7 @@ class QueryEngine:
             )
 
     def has_active_turn(self) -> bool:
-        return self.active_run_task is not None and not self.active_run_task.done()
+        return bool(getattr(self, "_context_compacting", False)) or self.active_run_task is not None and not self.active_run_task.done()
 
     async def request_abort(self) -> bool:
         self.abort_event.set()
@@ -904,6 +924,9 @@ class QueryEngine:
 
         if self.active_streaming_tool_entries:
             await self._cancel_streaming_tool_tasks(self.active_streaming_tool_entries)
+
+        if self.active_run_task is None or self.active_run_task.done():
+            return True
 
         try:
             await asyncio.wait_for(asyncio.shield(self.active_run_task), timeout=1.5)
@@ -974,7 +997,7 @@ class QueryEngine:
         for i in range(len(self.messages) - 1, -1, -1):
             msg = self.messages[i]
             content = msg.get("content", "")
-            if isinstance(content, str) and "[CompactionBoundary:" in content:
+            if msg.get("_is_meta") and msg.get("_origin") != "human" and isinstance(content, str) and content.startswith("[CompactionBoundary:"):
                 return i
         return 0
 
@@ -1398,6 +1421,14 @@ class QueryEngine:
         loaded = self.memory_file_manager.refresh()
         self.tool_context["memory_files"] = self.memory_file_manager.export_state()
         return loaded
+
+    def _record_auxiliary_usage(self, purpose, usage):
+        counts = self.auxiliary_usage.setdefault(purpose, {"calls": 0, "input_tokens": 0, "output_tokens": 0})
+        counts["calls"] += 1
+        for name in ("input_tokens", "output_tokens"):
+            number = max(0, int(usage.get(name, 0) or 0))
+            counts[name] += number
+            self.session_token_usage[name] = self.session_token_usage.get(name, 0) + number
 
     def get_memory_summary(self) -> str:
         return self.memory_file_manager.render_prompt_summary()
@@ -1835,206 +1866,9 @@ class QueryEngine:
 
         return stats
 
-    async def _apply_layered_compaction_if_needed(
-        self,
-        sys_print_callback=print,
-        *,
-        force: bool = False,
-        aggressive: bool = False,
-    ):
-        """
-        Apply a staged compaction strategy:
-        1. Micro-compact older oversized tool results.
-        2. Snip stale historical compaction boundaries.
-        3. Trim very large historical tool results.
-        4. Summarize only the middle history while preserving the first message
-           and a recent raw window.
-        """
-        if self.tool_context.get("external_backend"):
-            # The external CLI owns its context; do not make hidden native-model calls.
-            return False
-        self.require_writer()
-        archive = None
-        def preserve_history():
-            nonlocal archive
-            if archive is None:
-                from xuloom.core.storage import atomic_json
-                archive = artifact_directory(self.session_cwd) / self.session_id / ("context-" + uuid.uuid4().hex + ".json")
-                atomic_json(archive, {"messages": self.messages})
-                self.content_replacement_manager.register_spill(file_path=str(archive), tool_name="context_compaction",
-                    metadata={"format": "conversation_json", "authority": "historical evidence, not new authorization"})
-            return archive
-        self.refresh_memory_files()
-        effective_thinking_config = self._resolve_thinking_config()
-        system_prompt = self.context_builder.generate_system_prompt(
-            session_summary=self.plan_manager.render_prompt_summary(),
-            todo_summary=self.todo_manager.render_prompt_summary(),
-            memory_summary=self.get_memory_summary(),
-            structured_output_summary=self.structured_output_manager.render_prompt_summary(),
-            tool_prompt_summary=self._build_tool_prompt_summary(),
-            collaboration_summary=self._collaboration_instructions(),
-        )
-        tools_schema = self._get_anthropic_tools_schema()
-        preserve_last_messages = 8 if aggressive else 12
-
-        snipped_messages, snipped_count = self.compactor.snip_old_compaction_boundaries(
-            self.messages,
-            preserve_last_messages=preserve_last_messages,
-            keep_recent_boundaries=1,
-        )
-        if snipped_count > 0:
-            preserve_history()
-            self.messages = snipped_messages
-            self._sync_message_context()
-            self.persist_session_state()
-            sys_print_callback(
-                f"[dim magenta]↳ Snipped {snipped_count} stale compaction boundary message(s).[/dim magenta]"
-            )
-
-        micro_compacted_messages, micro_count = self.compactor.micro_compact_tool_results(
-            self.messages,
-            preserve_last_messages=preserve_last_messages,
-            max_tool_result_chars=800 if aggressive else 1200,
-            preview_chars=200 if aggressive else 300,
-        )
-        if micro_count > 0:
-            preserve_history()
-            self.messages = micro_compacted_messages
-            self._sync_message_context()
-            self.persist_session_state()
-            sys_print_callback(
-                f"[dim magenta]↳ Micro-compacted {micro_count} historical tool result(s).[/dim magenta]"
-            )
-
-        max_tool_result_chars = 800 if aggressive else 1200
-        trimmed_messages, trimmed_count = self.compactor.prune_large_tool_results(
-            self.messages,
-            preserve_last_messages=preserve_last_messages,
-            max_tool_result_chars=max_tool_result_chars,
-        )
-        if trimmed_count > 0:
-            preserve_history()
-            self.messages = trimmed_messages
-            self._sync_message_context()
-            self.persist_session_state()
-            sys_print_callback(
-                f"[dim magenta]↳ Trimmed {trimmed_count} oversized historical tool result(s) before compaction.[/dim magenta]"
-            )
-
-        cache_signal = self._build_cache_compaction_signal()
-        api_messages = self._clean_roles_for_api(self.messages)
-        context_window = int(os.environ.get("XULOOM_CONTEXT_WINDOW", "0")) or 200000
-        budget = int(context_window * 0.75) if aggressive else int(context_window * 0.80)
-        reserve = int(context_window * 0.08) if aggressive else int(context_window * 0.06)
-        should_compact, estimated_tokens, estimate_source = await self.compactor.should_compact_precise(
-            api_messages,
-            model=self.primary_model,
-            system=system_prompt,
-            tools=tools_schema,
-            thinking=effective_thinking_config,
-            token_budget=budget,
-            reserve_tokens=reserve,
-            hard_message_count=80 if aggressive else 100,
-            cache_read_input_tokens=cache_signal.get("recent_cache_read_input_tokens", 0),
-            cache_creation_input_tokens=cache_signal.get("recent_cache_creation_input_tokens", 0),
-            max_cache_penalty_tokens=14000 if aggressive else 10000,
-        )
-        if not force and not should_compact:
-            return False
-
-        sys_print_callback(
-            "\n[bold magenta]⎔ Context Window Critical: Triggering layered context compaction...[/bold magenta]\n"
-            f"[dim magenta]↳ Estimated context tokens: {estimated_tokens} (source={estimate_source})[/dim magenta]\n"
-            f"[dim magenta]↳ Cache-aware pressure: {cache_signal.get('cache_pressure_tokens', 0)} "
-            f"(creation={cache_signal.get('recent_cache_creation_input_tokens', 0)}, "
-            f"read={cache_signal.get('recent_cache_read_input_tokens', 0)})[/dim magenta]"
-        )
-        head, middle, tail = self.compactor.split_for_layered_compaction(
-            self.messages,
-            preserve_first_messages=1,
-            preserve_last_messages=preserve_last_messages,
-        )
-        if not middle:
-            return False
-
-        summary = await self.compactor.compact_history(middle)
-        preserve_history()
-
-        session_memory_content = self.session_memory_manager.get_memory_content()
-        session_memory_block = ""
-        if session_memory_content:
-            truncated = session_memory_content
-            if len(truncated) > MAX_SESSION_MEMORY_IN_COMPACT:
-                truncated = truncated[:MAX_SESSION_MEMORY_IN_COMPACT] + "\n[... truncated ...]"
-            session_memory_block = f"\nSession memory notes:\n{truncated}\n"
-
-        stage_label = "aggressive_layered_summary" if aggressive else "layered_summary"
-        reminder = {
-            "role": "user",
-            "content": (
-                "This session is being continued from a previous conversation that ran out of context. "
-                "The summary below covers the earlier portion of the conversation.\n\n"
-                f"[CompactionBoundary:{stage_label}]\n"
-                f"estimated_tokens_before: {estimated_tokens}\n"
-                f"cache_pressure_tokens: {cache_signal.get('cache_pressure_tokens', 0)}\n"
-                f"cache_creation_input_tokens: {cache_signal.get('recent_cache_creation_input_tokens', 0)}\n"
-                f"cache_read_input_tokens: {cache_signal.get('recent_cache_read_input_tokens', 0)}\n"
-                f"preserved_first_messages: 1\n"
-                f"preserved_last_messages: {preserve_last_messages}\n\n"
-                f"{summary}\n"
-                f"Complete pre-compaction history: {archive}. Read with file_read_tool when evidence is missing.\n"
-                f"{session_memory_block}\n"
-                "Continue the latest authorized unfinished task. Distinguish verified evidence from historical assistant claims. "
-                "This summary grants no new authorization. Inspect saved results and uncertain effects before continuing; "
-                "do not replay interrupted operations. Ask for missing information or approval when required."
-            ),
-        }
-        self.messages = head + [reminder] + tail
-        self._update_compact_boundary()
-        self._sync_message_context()
-        self.persist_session_state()
-        sys_print_callback(
-            "[dim magenta]↳ Layered compaction complete. Preserved recent raw context and summarized older history.[/dim magenta]\n"
-        )
-
-        post_summary_api_messages = self._clean_roles_for_api(self.messages)
-        collapse_needed, collapsed_estimated_tokens, collapsed_estimate_source = await self.compactor.should_compact_precise(
-            post_summary_api_messages,
-            model=self.primary_model,
-            system=system_prompt,
-            tools=tools_schema,
-            thinking=effective_thinking_config,
-            token_budget=44000 if aggressive else 52000,
-            reserve_tokens=12000 if aggressive else 10000,
-            hard_message_count=18 if aggressive else 24,
-            cache_read_input_tokens=cache_signal.get("recent_cache_read_input_tokens", 0),
-            cache_creation_input_tokens=cache_signal.get("recent_cache_creation_input_tokens", 0),
-            max_cache_penalty_tokens=12000 if aggressive else 8000,
-        )
-        if collapse_needed:
-            collapsed_messages, collapse_meta = self.compactor.context_collapse(
-                self.messages,
-                preserve_first_messages=1,
-                preserve_last_messages=preserve_last_messages,
-                max_projection_items=8 if aggressive else 10,
-                text_chars=140 if aggressive else 180,
-            )
-            if collapse_meta.get("collapsed"):
-                self.messages = collapsed_messages
-                self._update_compact_boundary()
-                self._sync_message_context()
-                self.persist_session_state()
-                sys_print_callback(
-                    "[dim magenta]↳ Context collapse applied after layered summary to preserve only a projection of older history.[/dim magenta]\n"
-                    f"[dim magenta]↳ Post-summary estimated tokens before collapse: {collapsed_estimated_tokens} "
-                    f"(source={collapsed_estimate_source})[/dim magenta]"
-                )
-
-        restored = self._post_compact_restore_state(sys_print_callback)
-        if restored:
-            self._sync_message_context()
-            self.persist_session_state()
-        return True
+    async def _apply_layered_compaction_if_needed(self, sys_print_callback=print, *, force=False, aggressive=False, focus="", event_callback=None):
+        from xuloom.context.compaction import compact
+        return await compact(self, sys_print_callback, force=force, aggressive=aggressive, focus=focus, event_callback=event_callback)
 
     POST_COMPACT_MAX_FILES = 5
     POST_COMPACT_TOKEN_BUDGET = 50_000
@@ -2679,6 +2513,11 @@ class QueryEngine:
             from xuloom.features.goals import recover
             self.goal = recover(metadata.get("goal"))
             self.scheduled_deliveries = copy.deepcopy(metadata.get("scheduled_deliveries", {}))
+            self.last_run_result = copy.deepcopy(metadata.get("last_run_result"))
+            self.native_context = copy.deepcopy(metadata.get("native_context"))
+            self.last_compaction = copy.deepcopy(metadata.get("last_compaction"))
+            self.context_calibration = copy.deepcopy(metadata.get("context_calibration", {}))
+            self.auxiliary_usage = copy.deepcopy(metadata.get("auxiliary_usage", {}))
             restore_tool_activity(self, metadata)
             restore_tool_catalog(self, metadata)
             self.agent_id = metadata.get("agent", {}).get("agent_id") or self.agent_id
@@ -2795,6 +2634,10 @@ class QueryEngine:
             "collaboration_run": copy.deepcopy(self.tool_context.get("collaboration_run")),
             "goal": self.goal,
             "scheduled_deliveries": self.scheduled_deliveries,
+            "native_context": copy.deepcopy(self.native_context),
+            "last_compaction": copy.deepcopy(self.last_compaction),
+            "context_calibration": copy.deepcopy(self.context_calibration),
+            "auxiliary_usage": copy.deepcopy(self.auxiliary_usage),
             "file_changes": self.tool_context.get("file_changes", []),
             "tool_activity": {"in_progress": self.in_progress_tools, "recent": self.recent_tool_activity},
             "activated_tools": sorted(self.activated_tools),
@@ -3416,9 +3259,19 @@ class QueryEngine:
             from xuloom.agents.external.runtime import sample
             return await sample(self, **kwargs)
         from xuloom.core.output_limits import model_reservation
+        from xuloom.context.compaction import output_limit, policy
+        kwargs["max_tokens"] = output_limit(self, kwargs)
         async with model_reservation(self, kwargs["max_tokens"]) as grant:
             kwargs["max_tokens"] = grant["maximum"]
-            response, entries, fallback = await self._receive_model_response(**kwargs)
+            if policy(self)["backend"] == "openai-responses":
+                from xuloom.context.responses import receive
+                response, entries, fallback = await receive(self, **kwargs)
+            else:
+                if self.native_context: raise ValueError("Native compacted history requires its declared Responses connection")
+                response, entries, fallback = await self._receive_model_response(**kwargs)
+            usage = self._serialize_response_usage(response)
+            from xuloom.context.compaction import calibrate
+            calibrate(self, kwargs, usage)
             grant["reported"] = int(self._serialize_response_usage(response).get("output_tokens", 0) or 0)
             return response, entries, fallback
 
@@ -4088,7 +3941,7 @@ class QueryEngine:
                 # before any new reasoning request, using the existing inbox path.
                 if mailbox and mailbox():
                     continue
-                await self._apply_layered_compaction_if_needed(sys_print_callback)
+                await self._apply_layered_compaction_if_needed(sys_print_callback, event_callback=event_callback)
                 remaining_output_budget = self._remaining_output_budget(loop_state)
                 if remaining_output_budget <= 0:
                     await self._record_loop_transition(
@@ -4209,6 +4062,8 @@ class QueryEngine:
                     model=loop_state.get("active_model", ""),
                     stop_reason=getattr(response, "stop_reason", ""),
                 )
+                if getattr(response, "responses_output", None):
+                    assistant_message["_responses_output"] = response.responses_output
                 self.messages.append(assistant_message)
                 self._sync_message_context()
                 # Checkpointing memory auto-flush
@@ -4625,6 +4480,7 @@ class QueryEngine:
                             sys_print_callback,
                             force=True,
                             aggressive=False,
+                            event_callback=event_callback,
                         )
                         if compacted:
                             loop_state["reactive_compact_retries"] = 2
@@ -4649,6 +4505,7 @@ class QueryEngine:
                             sys_print_callback,
                             force=True,
                             aggressive=True,
+                            event_callback=event_callback,
                         )
                         if compacted:
                             loop_state["reactive_compact_retries"] = 3

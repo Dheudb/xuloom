@@ -46,6 +46,7 @@ export type ReasoningProfile = {
   budgetTokens: number;
 };
 export type ModelConfig = {
+  modelContext?: Record<string, { window: number; reserve: number; keepRecent: number; backend: "summary" | "openai-responses" }>;
   nativeSearch?: { backend: string; model: string; baseUrl: string };
   connectionId?: string;
   connectionName?: string;
@@ -62,6 +63,7 @@ export type ModelConfig = {
   connections?: ModelConnection[];
 };
 export type ModelConnection = Omit<ModelConfig, "connections"> & { connectionId: string; connectionName: string; models: string[] };
+export type CompactionNotice = { id: string; status: "running" | "completed" | "failed" | "cancelled" | "interrupted"; before?: number; after?: number; elapsedMs?: number };
 export type TurnTrace = {
   modelStreams?: { turn: number; status: string; elapsedMs?: number; connectedMs?: number; firstChunkMs?: number; firstTextMs?: number; lastProgressMs?: number; textChars?: number; reasoningChunks?: number; finishReason?: string; error?: string }[];
   userMessageId?: string;
@@ -76,7 +78,7 @@ export type TurnTrace = {
   approximate?: boolean;
   answer?: string;
   pendingText?: string;
-  steps: ({ kind: "text"; text: string } | { kind: "tool"; tool: ToolActivity })[];
+  steps: ({ kind: "text"; text: string } | { kind: "tool"; tool: ToolActivity } | { kind: "compaction"; compaction: CompactionNotice })[];
 };
 export type Attachment = { id: string; name: string; path: string; size: number; kind: "image" | "file"; preview?: string; available?: boolean; state?: string };
 export type HistoryItem = { id?: string; role: "user" | "assistant"; text: string; trace?: TurnTrace; attachments?: Attachment[] };

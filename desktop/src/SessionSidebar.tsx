@@ -174,7 +174,7 @@ export default function SessionSidebar({ catalog, activeId, live, opening, actio
       </div>}
     </div>
     <div className="sidebar-scroll catalog-scroll">
-      {!projects.length && !standalone.length && <p className="sidebar-hint">新建独立会话，或打开项目开始工作。</p>}
+      {!projects.length && !standalone.length && <p className="sidebar-hint">新建独立会话，或创建项目开始工作。</p>}
       {!!standalone.length && <section className="standalone-group" aria-label="独立会话">
         <div className="section-label">独立会话</div><div className="standalone-sessions">{standalone.map(renderSession)}</div>
       </section>}

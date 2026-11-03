@@ -23,6 +23,13 @@ EXIT_CODES = {"completed": 0, "cancelled": 130, "session_busy": 4, "session_conf
 def parser():
     p = argparse.ArgumentParser(prog="xuloom", description="Non-interactive tasks, persisted goals and timed messages")
     sub = p.add_subparsers(dest="command", required=True)
+    context = sub.add_parser("context", help="Inspect context or explicitly compact an existing session")
+    context.add_argument("action", choices=("status", "compact"), nargs="?", default="status")
+    context.add_argument("--session", required=True)
+    context.add_argument("--cwd", default=os.getcwd())
+    context.add_argument("--focus", default="", help="Optional summary focus; does not authorize tool execution")
+    context.add_argument("--permission", choices=("ask", "full"), default="ask")
+    context.add_argument("--json", action="store_true")
     search = sub.add_parser('search-config', help='Configure the active connection search backend; no model request')
     search.add_argument('--connection', help='Existing connection ID; defaults to the active connection')
     search.add_argument('--backend', choices=('builtin', 'openai', 'openai-chat', 'anthropic', 'deepseek', 'qwen'))
@@ -98,7 +105,7 @@ def parser():
             item.add_argument("--spec", help="UTF-8 JSON file containing items and stages (start only)")
         elif name == "exec": item.add_argument("prompt", nargs="?", help="Task text, or - to read UTF-8 stdin")
         else:
-            item.add_argument("action", choices=("start", "run", "pause", "resume", "cancel", "accept", "status") if name == "goal" else ("add", "list", "pause", "resume", "cancel", "serve"))
+            item.add_argument("action", choices=("start", "run", "pause", "resume", "cancel", "accept", "status") if name == "goal" else ("add", "watch", "list", "pause", "resume", "cancel", "serve"))
             item.add_argument("prompt", nargs="?", help="Goal objective or scheduled message")
             if name == "goal":
                 item.add_argument("--criterion", action="append", default=[])
@@ -114,6 +121,9 @@ def parser():
                 when.add_argument("--at", help="ISO 8601 due time with timezone")
                 item.add_argument("--interval", type=float, help="Repeat every N seconds, minimum 60; missed occurrences coalesce")
                 item.add_argument("--once", action="store_true", help="Process current due messages then exit")
+                item.add_argument("--worker", action="append", default=[], help="Wait for all these existing worker IDs (watch only)")
+                item.add_argument("--marker-file", help="Workspace completion marker (watch only, max 64 KiB)")
+                item.add_argument("--request-id", help="Stable deduplication identity for an authorized follow-up")
     from xuloom.remote.cli import add_parser as add_remote_parser
     add_remote_parser(sub)
     return p
@@ -129,7 +139,7 @@ async def stream(engine, prompt, skills, emit):
     return {**final, "ok": False, "execution_reason": final["reason"], "reason": needed} if needed else final
 
 
-async def open_engine(args, emit):
+async def open_engine(args, emit, *, read_only=False):
     cwd = Path(args.cwd).resolve(strict=True)
     if not cwd.is_dir(): raise ValueError("Working directory must be a directory")
     load_config_into_env()
@@ -154,6 +164,7 @@ async def open_engine(args, emit):
                 if client and client is not engine.client and client is not engine.compactor.client:
                     await client.close()
             engine.permission_manager.approval_policy.set_mode(args.permission)
+        if read_only: return engine
         engine.require_writer()
         if getattr(args, "sandbox", None) is not None:
             engine.execution_sandbox.mode = args.sandbox
@@ -173,6 +184,15 @@ async def open_engine(args, emit):
 
 
 async def dispatch(args, emit):
+    if args.command == "context":
+        from xuloom.context.compaction import status
+        engine = await open_engine(args, emit, read_only=args.action == "status")
+        try:
+            if args.action == "compact":
+                engine.abort_event.clear()
+                await engine._apply_layered_compaction_if_needed(lambda _: None, force=True, focus=args.focus[:4000])
+            return {"ok": True, "reason": "completed", "context": status(engine), "session_id": engine.session_id}
+        finally: await engine.aclose()
     if args.command == 'search-config':
         from xuloom.core.config import load_config, update_config
         from xuloom.core.model_catalog import connections, active_connection
@@ -356,7 +376,7 @@ async def dispatch(args, emit):
                 try:
                     engine = await open_engine(args, emit)
                     receipt = await schedules.deliver(engine, row["id"], lambda text, skills: stream(engine, text, skills, emit))
-                    await emit({"type": "scheduled_delivery", "id": row["id"], "receipt": receipt})
+                    if receipt["status"] != "waiting": await emit({"type": "scheduled_delivery", "id": row["id"], "receipt": receipt})
                     if receipt["status"] in {"failed", "blocked", "interrupted"}: failures += 1
                 except (SessionBusyError, SessionConflictError):
                     await emit({"type": "schedule_queued", "id": row["id"], "reason": "session_busy_or_conflict"})
@@ -397,6 +417,13 @@ async def dispatch(args, emit):
                 goal = await goals.run(engine, emit)
             else: goal = await goals.control(engine, args.action, args.reason)
             result = {"ok": goal["status"] == "completed", "reason": goal["status"], "goal": goal, "text": (goal.get("last_result") or {}).get("text", "")}
+        elif args.action == "watch":
+            if bool(args.worker) == bool(args.marker_file): raise ValueError("Choose --worker or --marker-file")
+            if args.interval is not None or args.delay is not None or args.at is not None:
+                raise ValueError("watch follows its condition; do not supply time or interval options")
+            trigger = {"kind": "workers", "agent_ids": args.worker} if args.worker else {"kind": "file", "path": args.marker_file}
+            result = {"ok": True, "reason": "completed", "schedule": schedules.add(engine, args.prompt,
+                due_at=time.time(), trigger=trigger, request_id=args.request_id, skills=args.skill)}
         else:
             if args.delay is None and args.at is None: raise ValueError("Supply --delay or --at")
             if args.delay is not None:

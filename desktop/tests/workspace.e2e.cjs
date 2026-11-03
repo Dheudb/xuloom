@@ -88,7 +88,9 @@ async function main() {
     await app.evaluate(({ dialog }, directory) => {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [directory] });
     }, explicit);
-    await page.getByRole("button", { name: "打开项目", exact: true }).click();
+    await page.getByRole("button", { name: "创建项目", exact: true }).click();
+    await page.getByRole("button", { name: "添加文件夹", exact: true }).click();
+    await page.getByRole("dialog", { name: "创建项目", exact: true }).getByRole("button", { name: "创建项目", exact: true }).click();
     await page.locator(`[data-project="${explicit.replace(/\\/g, "\\\\")}"] .session-item.active`).waitFor();
     await page.getByRole("textbox", { name: "任务输入" }).fill("项目会话的草稿");
     await page.getByRole("button", { name: "在项目 explicit-project 中新建会话", exact: true }).click();

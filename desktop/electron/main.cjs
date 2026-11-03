@@ -58,6 +58,7 @@ const attachments = new Attachments(catalog, nativeImage);
 let workspaceQueue = Promise.resolve();
 let catalogRevision = 0;
 const engineMethods = new Set([
+  "context.get", "context.compact",
   "remote.profiles", "remote.models",
   "collaboration.get", "collaboration.set", "agents.resume_queue", "execution.get", "execution.set", "execution.cleanup",
   "goal.get", "goal.create", "goal.run", "goal.control", "goal.update",
@@ -512,8 +513,19 @@ async function invoke(method, params) {
     throw new Error("请先停止运行中的任务，再更改模型推理设置");
   if (["config.save", "config.select", "config.reasoning"].includes(method) && !params.session)
     return globalConfig().request(method, params);
-  if (method === "project.open") {
+  if (method === "project.choose") {
+    const result = await dialog.showOpenDialog(window, { title: "选择源文件夹", properties: ["openDirectory"], defaultPath: workspaceSettings().defaultDirectory });
+    return result.canceled ? null : result.filePaths[0] || null;
+  }
+  if (method === "project.open" || method === "project.create") {
+    const creating = method === "project.create";
+    if (creating && (typeof params.name !== "string" || !params.name.trim() || params.name.trim().length > 100)) throw new Error("项目名称需为 1–100 个字符");
+    if (creating && params.path !== undefined && (typeof params.path !== "string" || !path.isAbsolute(params.path))) throw new Error("请选择有效的源文件夹");
     let project = params.path;
+    if (creating && !project) {
+      project = path.join(ensureWorkspace(workspaceSettings().defaultDirectory), "project-" + require("node:crypto").randomUUID());
+      fs.mkdirSync(project);
+    }
     if (!project) {
       const result = await dialog.showOpenDialog(window, {
         title: "打开项目目录",
@@ -524,7 +536,7 @@ async function invoke(method, params) {
     }
     if (catalog.snapshot().projects.some((entry) => projectKey(entry.path) === projectKey(fs.realpathSync(project)) && entry.archived))
       throw new Error("项目已归档，请在设置的已归档会话页面恢复");
-    project = catalog.addProject(project);
+    project = catalog.addProject(project, creating ? params.name : undefined);
     const active = sessions.get(activeSessionId);
     const resumeId = active && active.scope !== "standalone" && projectKey(active.project) === projectKey(project) ? active.resumeId : latestSavedSession(project);
     return selectRow(resumeId ? catalog.find(sessionKey(project, resumeId)) : catalog.create(project));
@@ -738,6 +750,12 @@ async function invoke(method, params) {
   }
   if (!engineMethods.has(method)) throw new Error("不支持的操作");
   const { session: _session, ...payload } = params;
+  if (method === "context.compact") {
+    if (running(source) || source.attachmentImport) throw new Error("请等待当前任务结束后压缩上下文");
+    source.busy = true;
+    try { return await source.transport.request(method, payload); }
+    finally { source.busy = false; }
+  }
   if (method === "prompt" || method === "prompt.resume" || method === "media.control") {
     if (source.busy || source.attachmentImport) throw new Error("此会话已有运行中的任务或附件正在添加");
     source.busy = true;
@@ -800,7 +818,7 @@ app.whenReady().then(() => {
     if (typeof method !== "string" || !params || typeof params !== "object")
       throw new Error("Invalid request");
     if (quitting) throw new Error("正在保存并退出，请稍候");
-    if (/^(remote\.(open|forget)|app\.initialize|chat\.(open|copy)|layout\.save|attachments\.import|execution\.set|collaboration\.set|permissions\.set|config\.(save|select|delete|reasoning)|workspace\.save|archive\.restore|project\.(open|update|close|remove|delete)|session\.(open|new|select|update|fork|move|delete|close|activate)|catalog\.)/.test(method)) {
+    if (/^(remote\.(open|forget)|app\.initialize|chat\.(open|copy)|layout\.save|attachments\.import|execution\.set|collaboration\.set|permissions\.set|config\.(save|select|delete|reasoning)|workspace\.save|archive\.restore|project\.(open|create|update|close|remove|delete)|session\.(open|new|select|update|fork|move|delete|close|activate)|catalog\.)/.test(method)) {
       const operation = workspaceQueue.then(() => invoke(method, params));
       workspaceQueue = operation.catch(() => {});
       return operation;

@@ -82,7 +82,7 @@ class EngineTransport {
           this.pending.delete(id);
           reject(new Error("请求超时：" + method));
         },
-        method === "mcp.reload" ? 180000 : 60000,
+        method === "context.compact" ? 1200000 : method === "mcp.reload" ? 180000 : 60000,
       );
       this.pending.set(id, { resolve, reject, timer });
       this.child.stdin.write(JSON.stringify({ id, method, params }) + "\n");

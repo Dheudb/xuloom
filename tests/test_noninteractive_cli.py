@@ -26,6 +26,19 @@ class CliTests(unittest.TestCase):
                 if not raw: return
                 body = json.loads(raw)
                 owner.wire.append({"path": self.path, "headers": dict(self.headers), "body": body})
+                if owner.mode == "responses" and self.path == "/v1/responses/compact":
+                    self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
+                    self.wfile.write(json.dumps({"id":"compact-owned", "created_at":1, "object":"response.compaction",
+                        "output":[{"type":"compaction", "id":"opaque-owned", "encrypted_content":"KEEP_CANONICAL"}],
+                        "usage":{"input_tokens":4000,"output_tokens":200,"total_tokens":4200}}).encode()); return
+                if owner.mode == "responses" and self.path == "/v1/responses":
+                    owner.requests.append(body)
+                    output = [{"type":"message", "id":"msg-owned", "role":"assistant", "status":"completed", "content":[{"type":"output_text", "text":"NATIVE_CONTEXT_OK", "annotations":[]}]}]
+                    self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.end_headers()
+                    for event in [{"type":"response.output_text.delta", "sequence_number":1, "item_id":"msg-owned", "output_index":0,"content_index":0,"delta":"NATIVE_CONTEXT_OK"},
+                        {"type":"response.completed", "sequence_number":2, "response":{"id":"resp-owned", "created_at":1, "object":"response", "status":"completed", "model":"fixture", "output":output, "usage":{"input_tokens":30,"output_tokens":5,"total_tokens":35}}}]:
+                        self.wfile.write(("data: "+json.dumps(event)+"\n\n").encode())
+                    return
                 if owner.mode == 'native-search' and self.path == '/v1/tools/search':
                     self.send_response(200); self.send_header('Content-Type', 'application/json'); self.end_headers()
                     self.wfile.write(json.dumps({'results': [{'url': 'https://evidence.invalid/paper', 'title': 'Paper', 'summary': 'LOCAL_SEARCH_EVIDENCE'}]}).encode()); return
@@ -85,6 +98,53 @@ class CliTests(unittest.TestCase):
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertEqual(result["session_id"], sid)
         self.assertIn("Analyze this sentence", json.dumps(self.requests[-1], ensure_ascii=False))
+
+    def test_context_cli_native_checkpoint_roundtrip_through_actual_sdk(self):
+        self.mode = "responses"
+        directory = self.root / "config"; directory.mkdir()
+        (directory/"config.json").write_text(json.dumps({"active_model_connection":"owned", "model_connections":[{
+            "id":"owned", "name":"Owned fixture", "provider":"openai", "model":"fixture", "models":["fixture"],
+            "base_url":self.env["OPENAI_BASE_URL"], "api_key":"fixture", "model_context":{"fixture":{"window":32768,"backend":"openai-responses"}}}]}))
+        process, _, result = self.cli("exec", "Original evidence: " + "source "*2500)
+        self.assertEqual(process.returncode, 0, process.stderr + str(result))
+        sid = result["session_id"]
+        process, _, report = self.cli("context", "status", "--session", sid)
+        self.assertEqual(process.returncode, 0, process.stderr)
+        self.assertEqual(report["context"]["window"], 32768)
+        process, _, report = self.cli("context", "compact", "--session", sid, "--focus", "Keep evidence")
+        self.assertEqual(process.returncode, 0, process.stderr + str(report))
+        self.assertLess(report["context"]["last"]["after"], report["context"]["last"]["before"])
+        process, _, result = self.cli("exec", "Continue", "--session", sid)
+        self.assertEqual(process.returncode, 0, process.stderr + str(result))
+        self.assertEqual(result["text"], "NATIVE_CONTEXT_OK")
+        self.assertEqual(self.requests[-1]["input"][0], {"type":"compaction","id":"opaque-owned","encrypted_content":"KEEP_CANONICAL"})
+        self.assertEqual(self.requests[-1]["input"][-1]["content"], "Continue")
+        self.assertFalse(any(row["path"].endswith("/chat/completions") for row in self.wire))
+
+    def test_followup_watch_waits_without_requests_and_serves_once_after_restart(self):
+        process, _, registered = self.cli("schedule", "watch", "Inspect experiment", "--marker-file", "experiment.done", "--request-id", "experiment")
+        self.assertEqual(process.returncode, 0, process.stderr)
+        sid, identity = registered["session_id"], registered["schedule"]["id"]
+        _, _, duplicate = self.cli("schedule", "watch", "Inspect experiment", "--marker-file", "experiment.done", "--request-id", "experiment", "--session", sid)
+        self.assertEqual(duplicate["schedule"]["id"], identity)
+        process, events, _ = self.cli("schedule", "serve", "--once")
+        self.assertEqual(process.returncode, 0, process.stderr)
+        self.assertFalse(self.requests)
+        self.assertFalse(any(e["type"] == "scheduled_delivery" for e in events))
+        (self.root / "experiment.done").write_text("ready")
+        path = self.root / "data/schedules.json"
+        rows = json.loads(path.read_text()); rows["items"][identity]["due_at"] = 0
+        path.write_text(json.dumps(rows))
+        process, events, _ = self.cli("schedule", "serve", "--once")
+        self.assertEqual(process.returncode, 0, process.stderr)
+        receipt = next(e["receipt"] for e in events if e["type"] == "scheduled_delivery")
+        self.assertEqual(receipt["input_status"], "processed")
+        self.assertEqual(receipt["acceptance"], "execution_only")
+        self.assertEqual(len(self.requests), 1)
+        self.assertIn("marker_observed_not_task_verified", json.dumps(self.requests[0]))
+        process, _, _ = self.cli("schedule", "serve", "--once")
+        self.assertEqual(process.returncode, 0, process.stderr)
+        self.assertEqual(len(self.requests), 1)
 
     def test_native_search_discovery_from_formal_cli_uses_saved_connection(self):
         self.mode = 'native-search'

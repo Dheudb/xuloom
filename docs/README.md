@@ -10,6 +10,9 @@
 | [v0.1.23 发布检查](release-v0.1.23-validation.md) | 版本边界、包内专项、App／CLI 与公开资源范围 |
 | [工具续跑本地验收](tool-sequences-validation-2026-11-02.md) | HarnessMM／DeepSeek 参考范围、最终全量与原安装验证 |
 | [目标与调度](goals-and-schedules.md) | 目标预算与验收、正式非交互 CLI、延迟和重复唤醒 |
+| [条件满足后跟进](followups.md) | 子代理全部结束或实验标记出现后续办，去重、授权与不重放 |
+| [记忆与上下文压缩](memory-and-compaction.md) | 两层记忆、触发阈值、模型开销、归档与当前边界 |
+| [压缩改进验收](compaction-validation-2026-11-03.md) | 窗口与保存故障、完整工具边界、原生 Responses、App／CLI 的本地证据 |
 | [模型配置](models.md) | 支持的协议、本地模型与兼容边界 |
 | [后台渲染与验证](browser-capture.md) | 隐藏窗口截图、原生图像输入、权限与 CLI 依赖 |
 | [本机与 SSH 网页预览验证](remote-html-validation-2026-11-02.md) | 远端相对资源、App／CLI 读取、截图路径及版本／关闭边界 |

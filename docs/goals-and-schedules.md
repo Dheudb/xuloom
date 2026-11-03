@@ -56,7 +56,7 @@ xuloom goal accept --session SESSION_ID --cwd C:/work --reason "人工检查通�
 
 ## 定时唤醒
 
-桌面“目标”面板可创建延迟消息或每 24 小时重复。聊天可通过工具发现加载 schedule_tool；创建与控制继续遵守权限，子代理不能创建主会话定时消息。
+桌面输入框的“＋ → 定时唤醒”可创建延迟或重复消息。聊天可通过工具发现加载 schedule_tool；创建与控制继续遵守权限，子代理不能创建主会话定时消息。等待指定子代理结束或实验完成标记后跟进，见[条件满足后跟进](followups.md)。
 
 ```powershell
 xuloom schedule add "检查实验结果" --delay 1800 --cwd C:/work --session SESSION_ID --json

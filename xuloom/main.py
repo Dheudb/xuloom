@@ -740,6 +740,16 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
                 console.print_json(data=await inspect(engine.session_cwd, engine.session_id,
                     agent_id=values['agentId'], cursor=values['cursor']))
                 continue
+            elif normalized_input == "/context" or normalized_input.startswith("/compact"):
+                from xuloom.context.compaction import status
+                if normalized_input.startswith("/compact"):
+                    focus = user_input.strip().partition(" ")[2]
+                    try:
+                        engine.abort_event.clear()
+                        await engine._apply_layered_compaction_if_needed(lambda text: console.print(text, markup=False), force=True, focus=focus)
+                    except Exception as error: console.print(str(error), markup=False)
+                console.print_json(data=status(engine))
+                continue
             elif normalized_input == "/status":
                 console.print(Panel(engine.get_runtime_summary(), title="Runtime Status", border_style="cyan", expand=False))
                 continue
@@ -930,7 +940,7 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
 
 
 def main():
-    if len(sys.argv) > 1 and sys.argv[1] in {"exec", "goal", "schedule", "pipeline", "git-status", "chat-link", "summary", "transcript", "media", "remote", "sandbox-cleanup", "credentials", "mcp", "search-config"}:
+    if len(sys.argv) > 1 and sys.argv[1] in {"exec", "goal", "schedule", "pipeline", "git-status", "chat-link", "summary", "transcript", "media", "remote", "sandbox-cleanup", "credentials", "mcp", "search-config", "context"}:
         from xuloom.cli import main as noninteractive
         raise SystemExit(noninteractive(sys.argv[1:]))
     import argparse

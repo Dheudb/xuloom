@@ -172,16 +172,18 @@ def get_model_max_output_tokens(model: str) -> tuple:
 
 
 async def safe_llm_call(client, model: str, provider: str, messages: list,
-                        max_tokens: int, _retried: bool = False):
+                        max_tokens: int, _retried: bool = False, *, usage_callback=None, purpose="summary"):
     from xuloom.core.output_limits import active_budgets, reserve, settle
     budgets = active_budgets()
     reserved = reserve(max_tokens, budgets) if budgets else max_tokens
     usage = []
     try:
-        return await _safe_llm_call(client, model, provider, messages, reserved, _retried, usage)
+        result = await _safe_llm_call(client, model, provider, messages, reserved, _retried, usage)
+        if usage_callback and usage and isinstance(usage[-1], dict): usage_callback(purpose, usage[-1])
+        return result
     finally:
         if budgets:
-            settle(budgets, reserved, usage[-1] if usage else 0)
+            settle(budgets, reserved, usage[-1]["output_tokens"] if usage and isinstance(usage[-1], dict) else 0)
 
 
 async def _safe_llm_call(client, model, provider, messages, max_tokens, _retried, usage):
@@ -195,7 +197,8 @@ async def _safe_llm_call(client, model, provider, messages, max_tokens, _retried
             resp = await client.chat.completions.create(
                 model=model, messages=messages, max_tokens=max_tokens,
             )
-            usage.append(int(getattr(getattr(resp, "usage", None), "completion_tokens", 0) or 0))
+            usage.append({"input_tokens": int(getattr(getattr(resp, "usage", None), "prompt_tokens", 0) or 0),
+                "output_tokens": int(getattr(getattr(resp, "usage", None), "completion_tokens", 0) or 0)})
             return str(
                 getattr(getattr(resp.choices[0], "message", None), "content", "") or ""
             )
@@ -203,7 +206,8 @@ async def _safe_llm_call(client, model, provider, messages, max_tokens, _retried
             resp = await client.messages.create(
                 model=model, messages=messages, max_tokens=max_tokens,
             )
-            usage.append(int(getattr(getattr(resp, "usage", None), "output_tokens", 0) or 0))
+            usage.append({"input_tokens": int(getattr(getattr(resp, "usage", None), "input_tokens", 0) or 0),
+                "output_tokens": int(getattr(getattr(resp, "usage", None), "output_tokens", 0) or 0)})
             for block in resp.content:
                 if getattr(block, "type", "") == "text":
                     return getattr(block, "text", "")

@@ -39,6 +39,15 @@ class TurnRecorder:
     def accept(self, event):
         kind = event.get("type")
         record = self.record
+        if kind == "context_compaction":
+            if event.get("agent_id"): return False
+            self.flush()
+            step = next((step for step in record["steps"] if step.get("kind") == "compaction" and step["compaction"].get("id") == event["id"]), None)
+            if step is None:
+                step = {"kind": "compaction", "compaction": {"id": event["id"]}}
+                record["steps"].append(step)
+            step["compaction"].update({key: event[key] for key in ("status", "before", "after", "elapsedMs") if key in event})
+            return True
         if kind == "stream_status":
             streams = record.setdefault("modelStreams", [])
             turn = event["turn"] + self.stream_offset
@@ -93,6 +102,7 @@ class TurnRecorder:
                             finishedAt=event.get("timestamp") or int(time.time() * 1000))
         elif kind == "log":
             text = re.sub(r"\[/?(?:bold|dim|red|green|yellow|cyan|magenta|blue)(?:[ a-z]*)\]", "", str(event.get("text", "")))
+            if text.startswith("上下文已压缩：") and any(step.get("kind") == "compaction" for step in record["steps"]): return False
             if not re.search(r"compaction complete|Context collapse applied|上下文.*压缩", text, re.I):
                 return False
             self.flush()
@@ -141,6 +151,8 @@ class TurnRecorder:
             record["finishedAt"] = int(time.time() * 1000)
             record["elapsedMs"] = self.elapsed_before_resume + max(0, int((time.monotonic() - self.clock) * 1000))
             for step in record["steps"]:
+                if step.get("kind") == "compaction" and step["compaction"].get("status") == "running":
+                    step["compaction"]["status"] = "cancelled" if record["status"] == "cancelled" else "interrupted"
                 tool = step.get("tool", {})
                 if tool.get("status") in {"running", "queued", "waiting"}:
                     tool["status"] = "cancelled" if record["status"] == "cancelled" else "interrupted"

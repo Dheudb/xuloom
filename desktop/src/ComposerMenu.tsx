@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { Plus, Paperclip, Target, Lightbulb, Puzzle, Store, Settings2, Clock3, Check, ShieldCheck } from "lucide-react";
+import { Plus, Paperclip, Target, Lightbulb, Puzzle, Store, Settings2, Clock3, Check, ShieldCheck, Gauge } from "lucide-react";
 
 export default function ComposerMenu({ sessionId, disabled, plan, action }: {
   sessionId: string; disabled: boolean; plan: boolean;
-  action: (name: "files" | "goal" | "plan" | "skills" | "mcp" | "settings" | "schedule" | "isolation") => void;
+  action: (name: "files" | "goal" | "plan" | "skills" | "mcp" | "settings" | "schedule" | "isolation" | "context") => void;
 }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null), trigger = useRef<HTMLButtonElement>(null);
@@ -24,6 +24,7 @@ export default function ComposerMenu({ sessionId, disabled, plan, action }: {
     { name: "skills", label: "Skills", description: "选择挂载的技能，也可输入 $", icon: Puzzle },
     { name: "mcp", label: "MCP 市场", description: "连接和管理外部工具", icon: Store },
     { name: "settings", label: "模型设置", description: "管理 API 供应商与模型", icon: Settings2 },
+    { name: "context", label: "上下文", description: "查看用量或手动压缩", icon: Gauge },
   ] as const;
   return <div className="composer-add" ref={root} onKeyDown={(event) => {
     if (!open) return;
