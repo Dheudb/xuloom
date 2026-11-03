@@ -82,6 +82,8 @@ export default function SessionSidebar({ catalog, activeId, live, opening, actio
   const selectedRows = allRows.filter((row) => selected.includes(row.id));
   const projects = catalog.projects.filter((entry) => !entry.archived)
     .sort((a, b) => Number(b.pinned) - Number(a.pinned));
+  const visibleProjects = projects.filter((entry) => !needle || entry.name.toLocaleLowerCase().includes(needle) ||
+    entry.sessions.some((row) => !row.archived && row.title.toLocaleLowerCase().includes(needle)));
   async function submitDialog() {
     setWorking(true); setError("");
     try {
@@ -174,11 +176,11 @@ export default function SessionSidebar({ catalog, activeId, live, opening, actio
       </div>}
     </div>
     <div className="sidebar-scroll catalog-scroll">
-      {!projects.length && !standalone.length && <p className="sidebar-hint">新建独立会话，或创建项目开始工作。</p>}
+      {!visibleProjects.length && !standalone.length && <p className="sidebar-hint" role="status">{needle ? "未找到匹配的项目或会话。" : "新建独立会话，或创建项目开始工作。"}</p>}
       {!!standalone.length && <section className="standalone-group" aria-label="独立会话">
         <div className="section-label">独立会话</div><div className="standalone-sessions">{standalone.map(renderSession)}</div>
       </section>}
-      {projects.map((project) => {
+      {visibleProjects.map((project) => {
         const projectMatches = project.name.toLocaleLowerCase().includes(needle);
         const rows = sortRows(project.sessions.filter((row) => !row.archived &&
           (!needle || projectMatches || row.title.toLocaleLowerCase().includes(needle))));

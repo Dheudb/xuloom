@@ -37,7 +37,14 @@ async function launch() {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   fs.writeFileSync(path.join(config, 'config.json'), JSON.stringify({ model_provider: 'openai', openai_model: '', openai_api_key: '', openai_base_url: `http://127.0.0.1:${server.address().port}/v1` }));
   try {
-    await launch(); await open();
+    await launch();
+    const search = page.getByRole('textbox', { name: '搜索项目或会话', exact: true });
+    const noMatches = () => page.getByRole('status').filter({ hasText: '未找到匹配的项目或会话。' });
+    await page.getByText('新建独立会话，或创建项目开始工作。', { exact: true }).waitFor();
+    await search.fill('不存在的会话'); await noMatches().waitFor();
+    assert.equal(await page.getByText('新建独立会话，或创建项目开始工作。', { exact: true }).count(), 0);
+    await search.fill('   '); await page.getByText('新建独立会话，或创建项目开始工作。', { exact: true }).waitFor();
+    await search.fill(''); await open();
     assert.equal(await app.evaluate(() => globalThis.pickerCalls), 0, 'Opening the app dialog must not invoke the OS picker');
     assert.equal(await dialog().getByRole('button', { name: '创建项目', exact: true }).isDisabled(), true);
     assert(await page.getByLabel('项目名称', { exact: true }).evaluate(element => element === document.activeElement));
@@ -68,6 +75,13 @@ async function launch() {
     const managed = settings().activeConversation.project;
     assert.equal(path.dirname(managed), fs.realpathSync(defaultRoot)); assert(fs.statSync(managed).isDirectory());
     assert.notEqual(managed, directory); assert.equal(await app.evaluate(() => globalThis.pickerCalls), 2);
+    await search.fill('科研资料'); await page.getByRole('button', { name: '打开项目 科研资料', exact: true }).waitFor();
+    assert.equal(await noMatches().count(), 0);
+    await search.fill('不存在的会话'); await noMatches().waitFor();
+    assert.equal(await page.locator('.project-group, .standalone-group').count(), 0);
+    await capture('sidebar-search-no-match');
+    await search.fill(''); await page.getByRole('button', { name: '打开项目 写作计划', exact: true }).waitFor();
+    assert.equal(await noMatches().count(), 0);
     const before = fs.readdirSync(defaultRoot);
     await assert.rejects(invoke('project.create', { name: '   ' }), /项目名称/);
     assert.deepEqual(fs.readdirSync(defaultRoot), before);
@@ -85,6 +99,6 @@ async function launch() {
     await page.getByRole('button', { name: '打开项目 科研资料', exact: true }).waitFor();
     await page.getByRole('button', { name: '打开项目 写作计划', exact: true }).waitFor();
     assert.deepEqual(requests, []); assert.deepEqual(errors, []);
-    console.log('PASS: app dialog precedes native picker; cancel has no side effects; optional folder, custom name, default isolated project, validation, preserved files/drafts and names after restart; no model traffic');
+    console.log('PASS: search distinguishes empty catalog from unmatched results, matches projects, and restores results on clear; app project dialog, cancel, validation, files/drafts and restart verified; no model traffic');
   } finally { if (app) await app.close().catch(() => {}); server.closeAllConnections(); server.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

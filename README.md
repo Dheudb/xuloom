@@ -13,7 +13,7 @@
 
 Windows 下载包自带 Python 和 MCP SDK，无需安装 Python、选择解释器或安装 Node.js。第三方 MCP 程序可能另需 Node.js、uv 等环境，按服务说明准备。
 
-当前源码版本为 **v0.1.25**，可下载成品及校验和以 Releases 为准。成品面向 Windows x64；Linux/macOS 可使用源码 CLI，尚无对应的桌面发行包。
+当前源码版本为 **v0.1.26**，可下载成品及校验和以 Releases 为准。成品面向 Windows x64；Linux/macOS 可使用源码 CLI，尚无对应的桌面发行包。
 
 **原生条件续跑：** 普通工具调用可声明已确定的后续动作图，引擎在下一次模型请求前根据真实回执自动推进，支持条件分支、独立只读并行和核对式恢复。每步仍保留权限、隔离和持久化；未知结果、失败或新输入会交回模型。App 与 CLI 共用，无需先发现额外工具；模型未声明计划时保持原流程。详见[原生条件续跑](docs/native-continuations.md)，原[工具序列](docs/tool-sequences.md)仍可显式调用。
 
