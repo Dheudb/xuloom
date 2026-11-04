@@ -9,11 +9,14 @@ type Node = { id: string; ssh?: string | null; location?: "local" | "ssh"; max_a
 type ModelConnection = { connectionId: string; connectionName: string; model: string; models: string[] };
 type Run = { id: string; goal: string; status: string; counts: Record<string, number>; target: number; round: number; report?: string; error?: string; completion_basis?: string; nodes: any[]; health?: any[]; groups?: { id: string; label: string }[] };
 type ConversationMessage = {id:string; text:string; status:string; reply?:string; error?:string; applied_round?:number; nodes:Record<string,{status:string;error?:string}>};
-type Task = { id: string; kind: string; label: string; status: string; remote_status?: string; node?: string; group?: string; session_id?: string; cwd?: string; error?: string; child_run_id?: string; child_counts?: Record<string, number>; receipt?: { text?: string; reason?: string; persisted?: boolean } };
-const state: Record<string, string> = { running: "运行中", starting: "准备中", paused: "已暂停派发", blocked: "需要处理", completed: "模型报告完成", cancelling: "正在取消", cancelled: "已取消", queued: "排队中", dispatching: "确认派发中", failed: "失败", interrupted: "执行器中断", connected: "已连接", unconfirmed: "存活未确认" };
+type Task = { id: string; kind: string; label: string; status: string; remote_status?: string; node?: string; group?: string; session_id?: string; cwd?: string; error?: string; shared_error?:string; child_run_id?: string; child_counts?: Record<string, number>; receipt?: { text?: string; reason?: string; persisted?: boolean } };
+const state: Record<string, string> = { deduplicated:"已去重（未执行）", held:"已认领", needs_review:"需核对", reported:"代理报告", released:"已释放", running: "运行中", starting: "准备中", paused: "已暂停派发", blocked: "需要处理", completed: "模型报告完成", cancelling: "正在取消", cancelled: "已取消", queued: "排队中", dispatching: "确认派发中", failed: "失败", interrupted: "执行器中断", connected: "已连接", unconfirmed: "存活未确认" };
 const empty = (ssh = "", location: "local" | "ssh" = "ssh"): Node => ({ id: location === "local" ? "local" : "", ssh, location, max_agents: 8, automatic: true, reserve_percent: 25, backend: "native", api_source: "inherit", api_pool: [], group_width: 50 });
 
 export default function ScalingWorkbench({ close }: { close: () => void }) {
+  const [shared,setShared]=useState<any[]>([]), [sharedQuery,setSharedQuery]=useState(""), [sharedKind,setSharedKind]=useState("");
+  const [sharedDetail,setSharedDetail]=useState<any>();
+  const [sharedOffset,setSharedOffset]=useState(0),[sharedMore,setSharedMore]=useState(false);
   const createKey = useRef(crypto.randomUUID());
   const messageKey = useRef({text:"",id:crypto.randomUUID()});
   const [messages,setMessages] = useState<ConversationMessage[]>([]), [messageText,setMessageText] = useState(""), [sending,setSending] = useState(false);
@@ -42,6 +45,11 @@ export default function ScalingWorkbench({ close }: { close: () => void }) {
     }
     void poll(); return () => { stopped = true; clearTimeout(timer); };
   }, [active?.id, offset]);
+  async function loadShared(offset=0) {
+    const run=active?.id;if(!run)return;
+    await action(async()=>{const page=await call("shared",{id:run,query:sharedQuery,kind:sharedKind || undefined,offset});if(activeRun.current===run){setShared(page.entries);setSharedOffset(offset);setSharedMore(page.more);}});
+  }
+  useEffect(()=>{setShared([]);setSharedDetail(undefined);setSharedOffset(0);setSharedMore(false);},[active?.id]);
   async function inspectTask(task: Task, parent: Task | null | undefined = leader) {
     setDetail(task);
     await action(async () => {
@@ -112,9 +120,17 @@ export default function ScalingWorkbench({ close }: { close: () => void }) {
           </article>)}</div>
           <form className="scaling-message-form" onSubmit={e=>{e.preventDefault();void sendMessage();}}><textarea aria-label="给蜂群主 agent 发送消息" rows={2} placeholder="询问当前进度，或告诉主 agent 如何调整方向…" value={messageText} disabled={sending || ["cancelled","cancelling"].includes(active.status)} onChange={e=>setMessageText(e.target.value)} onKeyDown={e=>{if(e.key==="Enter" && !e.shiftKey && !e.nativeEvent.isComposing){e.preventDefault();void sendMessage();}}}/><button className="primary" type="submit" disabled={sending || !messageText.trim() || ["cancelled","cancelling"].includes(active.status)}><Send size={16}/>{sending ? "正在发送" : "发送给主 agent"}</button></form>
         </section>
+        <details className="scaling-shared" onToggle={e=>{if(e.currentTarget.open)void loadShared();}}><summary>共享协作 · 任务、发现与产物</summary>
+          <p className="fine-print">同机原子认领，跨机缓存同步；断线期间可能重复。发现是代理报告，文件哈希仅验证字节，不代表内容正确。每个代理保留独立工作目录。</p>
+          <form onSubmit={e=>{e.preventDefault();void loadShared();}}><input aria-label="搜索共享记录" placeholder="搜索任务或发现" value={sharedQuery} onChange={e=>setSharedQuery(e.target.value)}/><select aria-label="共享记录类型" value={sharedKind} onChange={e=>setSharedKind(e.target.value)}><option value="">全部</option><option value="claim">任务认领</option><option value="note">发现与失败</option><option value="artifact">产物清单</option></select><button type="submit" disabled={busy}>刷新共享记录</button></form>
+          <div className="scaling-tasks">{shared.map(entry=><button key={entry.id} onClick={()=>void action(async()=>setSharedDetail(await call("shared",{id:active.id,entry:entry.id})))}><span>{entry.summary}</span><small>{entry.kind} · {entry.node} · {state[entry.status] || entry.status}{entry.conflict ? " · 跨机重复认领" : ""} · 输入版本 {entry.input_version}</small></button>)}</div>
+          <div className="actions"><button disabled={busy || !sharedOffset} onClick={()=>void loadShared(Math.max(0,sharedOffset-20))}>上一批共享记录</button><span>{sharedOffset+1}–{sharedOffset+shared.length}</span><button disabled={busy || !sharedMore} onClick={()=>void loadShared(sharedOffset+20)}>下一批共享记录</button></div>
+          {!shared.length && <p className="fine-print">尚无匹配的共享记录。</p>}
+          {sharedDetail && <div className="scaling-shared-detail"><button onClick={()=>setSharedDetail(undefined)}>关闭共享详情</button><p>{sharedDetail.actor} · {sharedDetail.node}</p>{sharedDetail.sha256 && <p>SHA256: {sharedDetail.sha256}</p>}<pre>{sharedDetail.detail || JSON.stringify(sharedDetail,null,2)}</pre></div>}
+        </details>
         <section><h2>运行树与执行证据</h2><p className="fine-print">点击任务查看原始结果、执行主机与原生历史位置。断线节点不会被误报为任务已中断。</p><div className="scaling-tasks">{tasks.map(t => <button key={t.id} data-kind={t.kind} onClick={() => { if(t.kind === "leader") {setLeader(t); setChildren([]); setChildOffset(0); setDetail(undefined);} else {setLeader(undefined); void inspectTask(t, null);} }}><span>{t.group ? (active.groups?.find(g => g.id === t.group)?.label || "分组") + " / " : ""}{t.label}</span><small>{t.kind} · {t.node || "待分配"} · {t.remote_status === "queued" ? "节点排队中" : state[t.status] || t.status}</small></button>)}</div><div className="actions"><button disabled={!offset} onClick={() => setOffset(Math.max(0, offset - 100))}>上一页</button><span>{offset + 1}–{offset + tasks.length}</span><button disabled={tasks.length < 100} onClick={() => setOffset(offset + 100)}>下一页</button></div></section>
         {leader && <section className="scaling-nested"><div className="scaling-heading"><h2>{leader.label} → worker</h2><button onClick={() => {setLeader(undefined); setDetail(undefined);}}>返回总运行树</button><button onClick={() => void inspectTask(leader, null)}>节点汇总</button></div><div className="scaling-tasks">{children.map(t => <button key={t.id} data-kind={t.kind} onClick={() => void inspectTask(t, leader)}><span>{t.group ? "分组 / " : "分组负责人 / "}{t.label}</span><small>{t.kind} · {state[t.status] || t.status}</small></button>)}</div><div className="actions"><button disabled={!childOffset} onClick={() => setChildOffset(Math.max(0, childOffset - 100))}>上一页</button><span>{childOffset+1}–{childOffset+children.length}</span><button disabled={children.length < 100} onClick={() => setChildOffset(childOffset+100)}>下一页</button></div></section>}
-        {detail && <section className="scaling-detail"><div className="scaling-heading"><h2>{detail.label}</h2><button onClick={() => setDetail(undefined)}>关闭详情</button></div><p>{detail.node} · {detail.session_id || "尚未创建历史"}</p><code>{detail.cwd}</code>{detail.error && <p className="error">{detail.error}</p>}<Markdown text={detail.receipt?.text || "尚未返回结果。"} allowImages={false} /></section>}
+        {detail && <section className="scaling-detail"><div className="scaling-heading"><h2>{detail.label}</h2><button onClick={() => setDetail(undefined)}>关闭详情</button></div><p>{detail.node} · {detail.session_id || "尚未创建历史"}</p><code>{detail.cwd}</code>{detail.error && <p className="error">{detail.error}</p>}{detail.shared_error && <p className="error">共享发布失败：{detail.shared_error}</p>}<Markdown text={detail.receipt?.text || "尚未返回结果。"} allowImages={false} /></section>}
         {detail && !leader && ["failed", "interrupted"].includes(detail.status) && <section className="scaling-question"><p>重试会创建新的执行记录。先核对旧历史与文件，已有副作用不会自动撤销。</p><label className="scaling-checkbox"><input type="checkbox" checked={retryReviewed} onChange={e => setRetryReviewed(e.target.checked)} />我已检查旧结果，确认可以重试</label><button disabled={busy || !retryReviewed} onClick={() => void action(async () => { await call("retry", { id: active.id, task: detail.id, confirm_side_effects: true }); setDetail(undefined); setActive(await call("status", { id: active.id })); })}>重试此任务</button></section>}
       </>}{busy && <p role="status">处理中…</p>}{error && <p className="error" role="alert">{error}</p>}</main>
     </div>}

@@ -660,7 +660,7 @@ async function invoke(method, params) {
     return true;
   }
   if (method.startsWith("scaling.")) {
-    const allowed = new Set(["config", "save", "check", "create", "list", "status", "tasks", "result", "children", "child_result", "child_retry", "message", "messages", "events", "questions", "answer", "pause", "resume", "cancel", "retry"]);
+    const allowed = new Set(["config", "save", "check", "create", "list", "status", "tasks", "result", "children", "child_result", "child_retry", "message", "messages", "events", "questions", "answer", "pause", "resume", "cancel", "retry", "shared"]);
     if (!allowed.has(method.slice(8))) throw new Error("不支持的 Scaling 操作");
     return globalConfig().request(method, params);
   }

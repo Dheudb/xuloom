@@ -82,6 +82,8 @@ class HierarchyTests(unittest.IsolatedAsyncioTestCase):
         workers = [r for r in self.host.leadership.store.walk("task", child_run["id"]) if r["kind"] == "explore"]
         self.assertEqual(len(workers), 6)
         self.assertTrue(all(r["status"] == "completed" for r in workers))
+        from xuloom.scaling.shared import query
+        self.assertEqual(query(self.host.store,run['id'],kind='note')['total'],6)
         # The root's confirmed state has not been guessed from the disconnected host.
         self.assertNotEqual(self.controller.store.get("run", run["id"])["status"], "completed")
         self.disconnected = False
@@ -89,6 +91,7 @@ class HierarchyTests(unittest.IsolatedAsyncioTestCase):
             final = await self.parent_tick(run)
             if final["status"] in {"completed", "blocked"}: break
         self.assertEqual(final["status"], "completed", final)
+        self.assertEqual((await self.controller.dispatch('shared',{'id':run['id'],'kind':'note'}))['total'],6)
         self.assertEqual(len(FakeExecution.started), len(set(FakeExecution.started)))
 
     async def test_inherited_key_is_protected_and_models_can_be_heterogeneous(self):

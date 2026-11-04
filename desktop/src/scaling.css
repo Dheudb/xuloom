@@ -40,3 +40,7 @@
 .scaling-message-form textarea{min-height:84px;flex:1;}
 .scaling-message-form button{margin-bottom:3px;}
 @media(max-width:900px){.scaling-message-form{flex-wrap:wrap;}.scaling-message-form textarea{flex-basis:100%;}}
+
+.scaling-shared{margin:24px 0;padding:18px 0;border-top:1px solid var(--border,#e4eaf0);min-width:0}.scaling-shared>summary{cursor:pointer;font-weight:600}.scaling-shared form{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0}.scaling-shared form input{flex:1;min-width:160px}.scaling-shared-detail pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:420px;overflow:auto}.scaling-shared-detail p{overflow-wrap:anywhere}
+
+.scaling-workbench .scaling-shared form input{width:auto;flex:1 1 200px}.scaling-workbench .scaling-shared form select{width:auto;flex:0 1 170px}

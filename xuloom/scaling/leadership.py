@@ -64,6 +64,8 @@ class Leadership(Controller):
             values["provided_models"] = [entry]
             values["settings"]["host_capacity"] = node["host_capacity"]
             values["settings"]["reference_cwd"] = parent["settings"].get("reference_cwd")
+            values["settings"].update(shared_run=parent["settings"].get("shared_run",parent["id"]),
+                shared_node=parent["settings"].get("shared_node","primary"),shared_group=self.store.get("run",original)["parent_task"])
             if node.get("direct_group") and node["id"]=="primary": values["settings"]["coordinator_root"]=True
         result = await self.host.dispatch(method, values)
         if method == "poll":
@@ -208,6 +210,7 @@ async def accept(host, parent, task):
     run = {"id": run_id, "status": "starting", "goal": description["goal"], "nodes": nodes, "target": target,
         "permission": parent["settings"]["permission"], "token": secrets.token_hex(32), "round": 1, "group_width": width,
         "parent_job": parent["id"], "parent_task": task["id"], "completion_basis": None}
+    run["shared_version"]=task.get("input_version","1")
     if description.get("direct_group"):
         run.update(direct_group=True,partition=part,partitions=parts)
     controller.store.put("run", run)

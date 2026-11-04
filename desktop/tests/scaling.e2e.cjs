@@ -64,8 +64,9 @@ let app, page; const errors = [];
     const run = { id: 'fixture-run', goal: 'Compare independent evidence', status: 'running', target: 1000, round: 1, counts: { running: 1, completed: 2 }, nodes: [], health: [{ id: 'fixture-run_lab-node', status: 'connected', running: 1, resources: { suggested: 4 } }] };
     ipcMain.removeHandler('workbench:invoke');
     ipcMain.handle('workbench:invoke', async (event, method, params) => {
-      if (!['scaling.create','scaling.status','scaling.tasks','scaling.result','scaling.children','scaling.child_result','scaling.questions','scaling.message','scaling.messages','scaling.pause','scaling.resume','scaling.cancel'].includes(method)) return original(event, method, params);
+      if (!['scaling.shared','scaling.create','scaling.status','scaling.tasks','scaling.result','scaling.children','scaling.child_result','scaling.questions','scaling.message','scaling.messages','scaling.pause','scaling.resume','scaling.cancel'].includes(method)) return original(event, method, params);
       global.__scalingCalls.push({ method, params });
+      if(method==='scaling.shared')return params.entry ? {id:'shared-fixture',kind:'note',actor:'child-fixture',node:'lab-node',detail:'Full reported evidence, not verified'} : {entries:[{id:'shared-fixture',kind:'note',summary:'Shared observation',status:'reported',node:'lab-node',input_version:'1'}],total:1};
       if (method === 'scaling.pause') run.status = 'paused';
       if (method === 'scaling.resume') run.status = 'running';
       if (method === 'scaling.cancel') run.status = 'cancelled';
@@ -99,10 +100,17 @@ let app, page; const errors = [];
   await panel.getByRole('button', { name: '暂停派发', exact: true }).click();
   await panel.getByText('已停止新派发；已开始的工具和模型请求可完成。取消运行才会向执行器发送停止请求。', { exact: true }).waitFor();
   await panel.getByRole('button', { name: '恢复', exact: true }).click();
+  await panel.locator('.scaling-shared>summary').click();
+  await panel.getByRole('button',{name:/Shared observation/}).click();
+  await panel.getByText('Full reported evidence, not verified',{exact:true}).waitFor();
+  await panel.getByLabel('搜索共享记录').fill('evidence');
+  await panel.getByLabel('共享记录类型').selectOption('note');
+  await panel.getByRole('button',{name:'刷新共享记录',exact:true}).click();
   const calls = await app.evaluate(() => global.__scalingCalls);
   const creation = calls.find(c => c.method === 'scaling.create');
   assert.equal(calls.filter(c=>c.method==='scaling.message').length,1);
   assert.equal(calls.find(c=>c.method==='scaling.message').params.text,'请改成验证方向');
+  assert(calls.some(c=>c.method==='scaling.shared' && c.params.query==='evidence' && c.params.kind==='note'));
   assert.equal(creation.params.accept_high_usage, true); assert.match(creation.params.request_id, /^[a-f0-9-]+$/);
   assert.deepEqual(creation.params.nodes, ['lab-node']);
   for (const width of [1100, 850]) {

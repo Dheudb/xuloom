@@ -4,7 +4,7 @@ import asyncio
 
 def add_parser(sub):
     p = sub.add_parser("scaling", help="Opt-in high-usage SSH swarm workbench")
-    p.add_argument("action", choices=("nodes", "save-node", "remove-node", "check", "start", "list", "status", "tasks", "result", "children", "child_result", "child_retry", "events", "message", "messages", "questions", "answer", "pause", "resume", "cancel", "retry", "watch"))
+    p.add_argument("action", choices=("nodes", "save-node", "remove-node", "check", "start", "list", "status", "tasks", "result", "children", "child_result", "child_retry", "events", "message", "messages", "questions", "answer", "pause", "resume", "cancel", "retry", "watch", "shared"))
     p.add_argument("id", nargs="?", help="Run ID, or node ID for check/remove-node")
     p.add_argument("--node", action="append", default=[], help="Configured node ID; repeat for multiple hosts")
     p.add_argument("--ssh", help="Existing SSH profile ID")
@@ -31,6 +31,9 @@ def add_parser(sub):
     p.add_argument("--choice", choices=("allow", "deny"), help="Permission response; never imply approval from a timeout")
     p.add_argument("--offset", type=int, default=0)
     p.add_argument("--cursor", type=int, default=0)
+    p.add_argument("--kind", choices=("claim","note","artifact"), help="Shared record kind")
+    p.add_argument("--query", default="", help="Search shared records")
+    p.add_argument("--entry", help="Read one full shared record")
     p.add_argument("--json", action="store_true")
 
 
@@ -67,6 +70,7 @@ async def dispatch(args, emit):
     else:
         if not args.id: raise ValueError("Supply a run ID")
         params = {"id": args.id, "offset": args.offset, "cursor": args.cursor}
+        if action=="shared":params.update(kind=args.kind,query=args.query,entry=args.entry)
         if action == "message": params.update(text=args.text or "", request_id=args.request_id or __import__("uuid").uuid4().hex)
         if action == "answer":
             if not args.question or not args.choice: raise ValueError("Supply --question and --choice allow|deny")

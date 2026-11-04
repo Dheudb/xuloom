@@ -323,6 +323,12 @@ async def execute_tool(self, tool_block, sys_print_callback=print, *, turn: int 
         if native_content is not None:
             native_content.insert(0, {"type": "text", "text": before_tool_prefix})
 
+    extra_context = self.tool_context.get("tool_result_context")
+    if callable(extra_context):
+        extra_context = extra_context()
+        if extra_context:
+            res_text = str(res_text) + extra_context
+            if native_content is not None: native_content.append({"type":"text","text":extra_context})
     receipt = {"type": "tool_result", "tool_use_id": tool_id, "content": native_content if native_content is not None else res_text,
                "is_error": status == "error", **({"_input_error": True} if input_error else {})}
     from xuloom.context.tool_media import archive_images, artifact_owner

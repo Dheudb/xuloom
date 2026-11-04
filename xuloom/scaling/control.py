@@ -41,7 +41,8 @@ def task_prompt(kind, goal, context, count=0):
         rule = ('Return JSON only: {"tasks":[{"label":"...","prompt":"..."}]}. '
                 'Create up to ' + str(count) + ' distinct, actionable independent assignments for this direction. '
                 'Vary hypotheses, evidence sources, solutions or checks. Each worker starts independently; include necessary context. '
-                'Do not repeat previous assignments. Do not merely ask many workers the identical question. ')
+                'Do not repeat previous assignments. Optional work_key identifies the same operation/input across groups; '
+                'purpose="verify" and variant identify deliberate independent checks. ')
     elif kind == "group":
         rule = ('Summarize this group\'s actual worker evidence, contradictions, failures and artifact locations. '
                 'Cite worker IDs. Distinguish observed evidence from suggestions. Missing/failed workers are not successes. ')
@@ -205,6 +206,13 @@ class Controller:
             return {**self.view(run), "health": self.store.list("health", run["id"], limit=1000)}
         if method == "tasks":
             return self.store.list("task", run["id"], offset=params.get("offset", 0), limit=params.get("limit", 100), brief=True)
+        if method == "shared":
+            from .shared import query
+            if params.get("entry"):
+                row=self.store.get("shared",identity(params["entry"]))
+                if row["run_id"]!=run["id"]:raise ValueError("Shared entry belongs to another run")
+                return row
+            return query(self.store,run["id"],kind=params.get("kind"),text=params.get("query",""),offset=params.get("offset",0))
         if method in {"result", "children", "child_result", "child_retry"}:
             task = self.store.get("task", identity(params.get("task")))
             if task["run_id"] != run["id"]: raise ValueError("Task belongs to another Scaling run")
@@ -273,7 +281,7 @@ class Controller:
     async def open_node(self, run, node):
         settings = {k: node[k] for k in ("max_agents", "automatic", "reserve_percent", "backend")}
         settings.update(permission=run["permission"], connection=node["check"]["binding"]["connection_id"],
-                        model=node["check"]["binding"]["model"])
+                        model=node["check"]["binding"]["model"],shared_run=run["id"],shared_node=node["id"])
         if node.get("profile", {}).get("cwd"):
             settings["reference_cwd"] = node["profile"]["cwd"]
         if node.get("model_file"): settings["requires_imported_models"] = True
@@ -291,10 +299,11 @@ class Controller:
     def coordinator_node(self, run, index):
         return None
 
-    def add_task(self, run, kind, text, *, node=None, group=None, label=None, count=0, db=None):
+    def add_task(self, run, kind, text, *, node=None, group=None, label=None, count=0, db=None, work=None):
         row = {"id": new_id("work"), "run_id": run["id"], "kind": kind, "text": text,
             "label": label or kind, "group": group, "node": node, "count": count,
-            "round": run["round"], "status": "queued", "handled": False}
+            "round": run["round"], "status": "queued", "handled": False,
+            "input_version":str(run.get("shared_version",run["round"])),**(work or {})}
         if db is not None:
             self.store.event_db(db, run["id"], {"type": "task_queued", "task_id": row["id"], "kind": kind, "group": group}, row["id"] + "_queued")
             return self.store.put_db(db, "task", row)
@@ -313,8 +322,9 @@ class Controller:
             row = json.loads(raw[0])
             status = result["status"] if result["status"] in TERMINAL else "running"
             row.update(status=status, remote_status=result["status"], receipt=result.get("receipt"), error=result.get("error"),
-                       session_id=result.get("session_id"), cwd=result.get("cwd"), activity=result.get("activity"))
+                       session_id=result.get("session_id"), cwd=result.get("cwd"), activity=result.get("activity"),shared_error=result.get("shared_error"))
             row.update({k: result[k] for k in ("child_run_id", "child_counts", "leader_status") if k in result})
+            if result.get("dedup_source"):row["dedup_source"]=result["dedup_source"]
             self.store.put_db(db, "task", row)
             self.store.event_db(db, row["run_id"], {"type": "task_state", "task_id": key, "node": row["node"],
                 "status": status, "execution_status": result["status"], "session_id": row["session_id"]}, key + "_" + result["status"])
@@ -383,6 +393,16 @@ class Controller:
     async def poll_node(self, run, node):
         try:
             await self.open_node(run, node)
+            if not run.get("parent_job"):
+                # One bounded exchange per host poll, never an SSH process per worker.
+                from .shared import changes,import_records
+                peer_id=run["id"]+"_"+node["id"]
+                try:peer=self.store.get("shared_peer",peer_id)
+                except ValueError:peer={"sent":0,"received":0}
+                outgoing=changes(self.store,run["id"],peer["sent"])
+                synced=await self.remote(node,"shared.sync",{**self.auth(run),"records":outgoing["records"],"after":peer["received"]})
+                import_records(self.store,run["id"],synced["records"],origin=node["id"])
+                self.store.put("shared_peer",{"id":peer_id,"run_id":run["id"],"sent":outgoing["cursor"],"received":synced["cursor"],"status":"synced"})
             current = self.store.get("run", run["id"])
             chatting = current.get("conversation_pending", False)
             action = "cancel" if current["status"] == "cancelling" else "pause" if (node["id"] != "primary" and chatting) or (current["status"] == "paused" and not (node["id"] == "primary" and chatting)) else "resume"
@@ -421,6 +441,18 @@ class Controller:
     async def requests(self, run, node, requests):
         for request in requests:
             key = request["id"]
+            if request["kind"]=="shared_artifact" and not run.get("parent_job"):
+                from .shared import identity as shared_identity
+                try:
+                    entry=self.store.get("shared",shared_identity(request["payload"]["entry"]))
+                    if entry["run_id"]!=run["id"]:raise ValueError("Foreign artifact")
+                    source=next(n for n in run["nodes"] if n["id"]==entry["node"])
+                    answer=await self.remote(source,"shared.artifact",{**self.auth(run),**request["payload"]})
+                except StopIteration:continue
+                except ValueError as error:answer={"error":str(error)}
+                except (ConnectionError,TimeoutError,OSError):continue
+                await self.remote(node,"answer",{**self.auth(run),"id":key,"answer":answer})
+                continue
             if request["kind"] == "evidence":
                 from .evidence import page
                 try: answer = page(self.store, run["id"], request["payload"])
@@ -522,7 +554,7 @@ class Controller:
                         value = json.loads(row["text"]); value["allocations"] = grants
                         row["text"] = json.dumps(value, ensure_ascii=False)
                         self.store.update("task", row["id"], lambda old: old.update(text=row["text"]))
-                    result = await self.remote(node, "submit", {**self.auth(run), "task": {k: row[k] for k in ("id", "kind", "text", "label", "group")}})
+                    result = await self.remote(node, "submit", {**self.auth(run), "task": {k: row[k] for k in ("id", "kind", "text", "label", "group", "input_version", "work_key", "purpose", "variant") if k in row}})
                     self.accept_task(row["id"], result)
                     loads[node["id"]] += 1
                 except ValueError as error:
@@ -584,7 +616,8 @@ class Controller:
                         mark = digest(worker["prompt"])
                         if mark in seen: raise ValueError("Duplicate worker assignment")
                         seen.add(mark)
-                        self.add_task(run, "explore", worker["prompt"], group=task["group"], label=worker["label"], db=db)
+                        self.add_task(run, "explore", worker["prompt"], group=task["group"], label=worker["label"], db=db,
+                            work={k:worker[k] for k in ("work_key","purpose","variant") if k in worker})
                     raw = db.execute("SELECT data FROM records WHERE kind='group' AND id=?", (task["group"],)).fetchone()
                     group = json.loads(raw[0]); group.update(remaining=max(0, group["remaining"] - len(workers)), status="exploring")
                     self.store.put_db(db, "group", group)
@@ -612,8 +645,9 @@ class Controller:
 
     @staticmethod
     def validate_assignment(row):
-        if not isinstance(row, dict) or set(row) != {"label", "prompt"} or not all(isinstance(row[k], str) and row[k].strip() for k in row):
+        if not isinstance(row, dict) or set(row)-{"label","prompt","work_key","purpose","variant"} or not all(isinstance(row.get(k), str) and row[k].strip() for k in ("label","prompt")):
             raise ValueError("Assignment must contain nonempty label and prompt")
+        if row.get("purpose","explore") not in {"explore","verify"} or any(not isinstance(row.get(k,""),str) or len(row.get(k,""))>maximum for k,maximum in (("work_key",500),("variant",300))):raise ValueError("Invalid shared work identity")
         if len(row["prompt"]) > 100000 or len(row["label"]) > 500:
             raise ValueError("Assignment exceeds text limits")
 

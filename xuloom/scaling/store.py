@@ -11,7 +11,7 @@ from pathlib import Path
 from xuloom.core.storage import data_directory
 
 IDENTITY = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
-TERMINAL = {"completed", "failed", "cancelled", "interrupted"}
+TERMINAL = {"completed", "failed", "cancelled", "interrupted", "deduplicated"}
 
 
 def identity(value):

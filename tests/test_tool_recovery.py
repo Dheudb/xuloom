@@ -132,9 +132,11 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
             self.events.append(event)
             self.recorder.accept(event)
         self.engine.tool_context["capability_event"] = capability
+        self.engine.tool_context["tool_result_context"] = lambda: "Shared reference: independently reported observation"
         self.fixture([("file_read_tool", json.dumps({"file_path": str(picture)})), "DONE"])
         self.assertEqual(await self.run_task(), "DONE")
         self.assertIn("image_url", json.dumps(self.requests[1]["messages"]))
+        self.assertIn("Shared reference: independently reported observation",json.dumps(self.requests[1]["messages"]))
         event = next(e for e in self.events if e["type"] == "tool_result")
         media = event["media"][0]
         self.assertEqual(media["width"], 600)

@@ -139,7 +139,7 @@ class LocalDaemonTests(unittest.IsolatedAsyncioTestCase):
             if "SCALING PLAN" in text:answer={"groups":[{"label":"Approach A","prompt":"First evidence"},{"label":"Approach B","prompt":"Independent alternative evidence"}]}
             elif "SCALING EXPAND" in text:
                 count=int(re.search(r"Create up to (\d+)",text)[1])
-                answer={"tasks":[{"label":str(i),"prompt":"Independent evidence branch "+str(i)} for i in range(count)]}
+                answer={"tasks":[{"label":str(i),"prompt":"Independent evidence branch "+str(i)+" partition "+str(__import__("hashlib").sha256(text.encode()).hexdigest()[:12])} for i in range(count)]}
             elif "SCALING SYNTHESIZE" in text or "SCALING REVIEW" in text:answer={"decision":"complete","report":"Evidence reviewed","groups":[]}
             else:
                 if text.startswith("Independent evidence branch"):
@@ -176,6 +176,7 @@ class LocalDaemonTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(all(len(ids)==1 for ids in histories))
                 self.assertTrue(histories[0].isdisjoint(histories[1]))
                 self.assertTrue(fixture.records)
+                self.assertTrue(any(t.get("function",{}).get("name")=="scaling_shared" for r in fixture.records for t in r["body"].get("tools",[])))
                 self.assertEqual(parallel,[True]*4,"Separate group allocations must permit all four workers before any reply")
                 self.assertTrue(all(r["headers"]["authorization"]=="Bearer local-fixture-key" for r in fixture.records))
         finally:

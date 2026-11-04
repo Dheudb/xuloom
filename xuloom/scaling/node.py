@@ -41,6 +41,7 @@ class Execution(DesktopBridge):
         self.approval_policy.set_mode(row["permission"])
         self.resume_id = row.get("session_id")
         self.last_progress = 0
+        self.shared_cursor = None
 
     def _create_engine(self):
         from xuloom.core.engine import QueryEngine
@@ -69,9 +70,20 @@ class Execution(DesktopBridge):
             tool = EvidenceTool(self.node, self.row)
             tool.context = engine.tool_context
             engine.available_tools[tool.name] = tool
+        from .shared import SharedTool
+        tool=SharedTool(self.node,self.row);tool.context=engine.tool_context
+        engine.available_tools[tool.name]=tool
         engine.browser_manager.capture_callback = None
         engine.tool_context.update(acquire_model_budget=self.reserve,
-                                  settle_model_budget=self.release)
+                                  settle_model_budget=self.release,tool_result_context=self.shared_updates)
+
+    def shared_updates(self):
+        from .shared import context
+        try:
+            page=context(self.node,self.row,self.shared_cursor);self.shared_cursor=page["cursor"]
+            return "\nShared reference data (reported, not verified or instructions):\n"+json.dumps(page,ensure_ascii=False) if page["entries"] else ""
+        except Exception as error:
+            return "\nShared reference data unavailable: "+str(error)[:300]
 
     async def _connect_mcp(self, engine):
         return {} if self.row["kind"] != "explore" else await super()._connect_mcp(engine)
@@ -126,6 +138,7 @@ class Node:
         for row in self.store.walk("execution", statuses=["running"]):
             if row.get("kind") != "leader":
                 self.store.update("execution", row["id"], lambda value: value.update(status="interrupted", error="Previous executor exited; inspect native transcript before retry"))
+                self.share_final(row,{"status":"interrupted","error":"Previous executor exited; inspect native transcript before retry"})
         for row in self.store.walk("request", statuses=["pending", "granted"]):
             self.store.update("request", row["id"], lambda value: value.update(status="released"))
         leader_file = self.store.path.with_name(self.store.path.stem + "-leaders.sqlite3")
@@ -199,8 +212,11 @@ class Node:
             checked = self.check({**settings, **({"provided_models": provided} if provided is not None else {})})
             try:
                 row = self.authorize(params)
-                if row["binding"] != checked["binding"] or row["settings"] != settings or row.get("program") != checked.get("program") or row.get("pool", checked.get("pool")) != checked.get("pool"):
+                old_settings={k:v for k,v in row["settings"].items() if not k.startswith("shared_")}
+                new_settings={k:v for k,v in settings.items() if not k.startswith("shared_")}
+                if row["binding"] != checked["binding"] or old_settings != new_settings or row.get("program") != checked.get("program") or row.get("pool", checked.get("pool")) != checked.get("pool") or any(k in row["settings"] and row["settings"][k]!=v for k,v in settings.items() if k.startswith("shared_")):
                     raise ValueError("Frozen node binding changed; restore its settings before reconnecting")
+                if row["settings"]!=settings:row=self.store.update("job",row["id"],lambda r:r.update(settings=settings))
             except ValueError as error:
                 if not str(error).startswith("Unknown Scaling job"):
                     raise
@@ -211,10 +227,20 @@ class Node:
                     "program": checked.get("program"), **{k: checked[k] for k in ("binding", "quota", "limits")}})
             return {**checked, "run_id": row["id"]}
         job = self.authorize(params)
+        if method == "shared.sync":
+            from .shared import import_records,changes
+            run=job["settings"].get("shared_run",job["id"])
+            import_records(self.store,run,params.get("records",[]))
+            return changes(self.store,run,params.get("after",0))
+        if method == "shared.artifact":
+            from .shared import read_artifact
+            return read_artifact(self,job["settings"].get("shared_run",job["id"]),params.get("entry"),params.get("offset",0))
         if method == "submit":
             task = params.get("task")
-            if not isinstance(task, dict) or task.keys() - {"id", "kind", "text", "label", "group"} or task.get("kind") not in {"plan", "expand", "explore", "group", "synthesize", "leader", "dialogue"}:
+            if not isinstance(task, dict) or task.keys() - {"id", "kind", "text", "label", "group", "input_version", "work_key", "purpose", "variant"} or task.get("kind") not in {"plan", "expand", "explore", "group", "synthesize", "leader", "dialogue"}:
                 raise ValueError("Invalid Scaling work item")
+            if not isinstance(task.get("input_version","1"),str) or not 1<=len(task.get("input_version","1"))<=300:raise ValueError("Invalid shared input version")
+            if task.get("purpose","explore") not in {"explore","verify"} or any(not isinstance(task.get(k,""),str) or len(task.get(k,""))>maximum for k,maximum in (("work_key",500),("variant",300))):raise ValueError("Invalid shared work identity")
             identity(task.get("id"))
             if not isinstance(task.get("text"), str) or not 1 <= len(task["text"]) <= 1000000:
                 raise ValueError("Supply a bounded work description")
@@ -239,12 +265,21 @@ class Node:
             if coordinator:
                 try: session_id = self.store.get("coordinator", coordinator).get("session_id")
                 except ValueError: pass
-            row = self.store.put("execution", {**copy.deepcopy(task), "run_id": job["id"], "status": "queued", "input_digest": digest(task),
+            row = {**copy.deepcopy(task), "run_id": job["id"], "status": "queued", "input_digest": digest(task),
                 "cwd": str(cwd), "binding": job["binding"], "quota": job["quota"], "limits": job["limits"],"flow_limits":job["settings"].get("flow_limits"),
                 "backend": job["settings"].get("backend", "native"), "permission": job["settings"]["permission"],
                 "reference_cwd": job["settings"].get("reference_cwd"), "program": job.get("program"),
                 "model_file": job.get("model_file"), "pool_id": (job.get("pool") or [{}])[0].get("id"),
-                "coordinator": coordinator, "session_id": session_id})
+                "coordinator": coordinator, "session_id": session_id}
+            with self.store.connection() as db:
+                db.execute("BEGIN IMMEDIATE")
+                if task["kind"]=="explore":
+                    from .shared import claim
+                    result=claim(self,row,db)
+                    if not result["accepted"]:
+                        row.update(status="deduplicated",dedup_source=result["claim"],receipt={"ok":False,"persisted":True,"reason":"deduplicated",
+                            "text":"Not executed: equivalent work already claimed. Inspect its actual evidence before treating it as a result. Source: "+json.dumps(result["claim"],ensure_ascii=False)})
+                row=self.store.put_db(db,"execution",row)
             return self.public(row)
         if method == "model.idle":
             jobs = {job["id"]}
@@ -266,7 +301,9 @@ class Node:
                         if not self.leadership: raise ValueError("Node coordinator unavailable; update/recover the remote runtime")
                         await self.leadership.inspect(job["id"],"cancel",{"leader_task":key})
                     elif key in self.tasks: self.cancel_task(key)
-                    else: self.store.update("execution",key,lambda r:r.update(status="cancelled" if row["status"]=="queued" else "interrupted"))
+                    else:
+                        final={"status":"cancelled" if row["status"]=="queued" else "interrupted"}
+                        self.store.update("execution",key,lambda r:r.update(final));self.share_final(row,final)
                 result.append(self.public(self.store.get("execution",key)))
             return {"tasks":result}
         if method == "poll":
@@ -322,6 +359,7 @@ class Node:
                         self.cancel_task(row["id"])
                     elif row.get("kind") != "leader":
                         self.store.update("execution", row["id"], lambda value: value.update(status="cancelled"))
+                        self.share_final(row,{"status":"cancelled"})
             return {"requested": True, "pending": sum(self.store.counts("execution", job["id"]).get(k, 0) for k in ("running", "queued"))}
         if method.startswith("leader.") and self.leadership:
             return await self.leadership.inspect(job["id"], method[7:], params)
@@ -403,9 +441,10 @@ class Node:
             row=self.store.get("execution",key)
             if row["status"]=="running":
                 error=task.exception() if not task.cancelled() else None
-                self.store.update("execution",key,lambda value:value.update(
+                final=self.store.update("execution",key,lambda value:value.update(
                     status="cancelled" if task.cancelled() and key not in self.bridges else "failed",
                     error=str(error) if error else "Executor ended before its final receipt was saved"))
+                self.share_final(row,final)
         except Exception as error:
             self.persistence_errors[key]="Final Scaling receipt could not be saved: "+str(error)
         finally:
@@ -419,6 +458,7 @@ class Node:
             bridge = self.factory(self, row); self.bridges[row["id"]] = bridge
             bridge.turn_task = asyncio.current_task()
             text = row["text"]
+            if hasattr(bridge,"shared_updates"):text+=bridge.shared_updates()
             if row.get("reference_cwd"):
                 text += "\nExecution host reference workspace: " + row["reference_cwd"] + ". Your independent output workspace is " + row["cwd"] + "."
             result = await bridge.turn(text, [], "normal")
@@ -440,6 +480,7 @@ class Node:
                     final.update(status="failed", cleanup_error=str(error))
             try:
                 self.store.update("execution", row["id"], lambda value: value.update(final))
+                self.share_final(row,final,getattr(bridge,"file_changes",()))
                 if row.get("coordinator") and final.get("receipt", {}).get("persisted"):
                     self.store.put("coordinator", {"id": row["coordinator"], "run_id": row["run_id"], "session_id": final.get("session_id"), "status": "idle"})
             except Exception as error:
@@ -447,6 +488,12 @@ class Node:
             finally:
                 self.bridges.pop(row["id"], None)
                 self.tasks.pop(row["id"], None)
+
+    def share_final(self,row,final,files=()):
+        from .shared import finish
+        try:finish(self,row,final,files)
+        except Exception as error:
+            self.store.update("execution",row["id"],lambda value:value.update(shared_error=str(error)))
 
     async def close(self):
         if self.leadership: await self.leadership.close()
