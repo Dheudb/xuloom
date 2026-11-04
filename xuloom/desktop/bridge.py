@@ -417,6 +417,9 @@ class DesktopBridge:
         return receipt or {"ok": False, "reason": "cancelled" if self.stop_requested else "error"}
 
     async def dispatch(self, method, params):
+        if method.startswith("scaling."):
+            from xuloom.scaling.control import invoke
+            return await invoke(method, params)
         if method in {"context.get", "context.compact"}:
             from xuloom.context.compaction import status
             if method == "context.compact": self.require_idle()

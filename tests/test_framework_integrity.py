@@ -94,10 +94,20 @@ class IntegrityTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "late.txt"
             tool = BashTool(); tool.context = {"session_cwd": directory}
-            work = asyncio.create_task(tool.execute(command=command("import time; from pathlib import Path; time.sleep(.8); Path('late.txt').write_text('bad')")))
-            await asyncio.sleep(.15)
-            work.cancel()
-            with self.assertRaises(asyncio.CancelledError): await work
+            # Gate the side effect so a busy event loop cannot let the old
+            # .8-second delay expire before the cancellation timer runs.
+            code = "import time; from pathlib import Path; Path('ready').write_text('ready'); exec(\"while not Path('release').exists(): time.sleep(.02)\"); Path('late.txt').write_text('bad')"
+            work = asyncio.create_task(tool.execute(command=command(code)))
+            async def ready():
+                while not (Path(directory) / "ready").exists(): await asyncio.sleep(.02)
+            try:
+                await asyncio.wait_for(ready(), 20)
+                work.cancel()
+                with self.assertRaises(asyncio.CancelledError): await work
+            finally:
+                (Path(directory) / "release").write_text("release")
+                if not work.done():
+                    work.cancel(); await asyncio.gather(work, return_exceptions=True)
             await asyncio.sleep(1)
             self.assertFalse(target.exists())
 

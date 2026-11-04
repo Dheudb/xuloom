@@ -23,8 +23,8 @@ def limits(value=None):
     if not isinstance(value, dict) or value.keys() - {"concurrency", "requests_per_minute"}:
         raise ValueError("Invalid model request limits")
     result = {"concurrency": value.get("concurrency", 4), "requests_per_minute": value.get("requests_per_minute")}
-    if type(result["concurrency"]) is not int or not 1 <= result["concurrency"] <= 1024:
-        raise ValueError("Model request concurrency must be 1–1024")
+    if type(result["concurrency"]) is not int or not 1 <= result["concurrency"] <= 2147483647:
+        raise ValueError("Model request concurrency must be a positive integer")
     rate = result["requests_per_minute"]
     if rate is not None and (type(rate) not in {int, float} or not math.isfinite(rate) or rate <= 0):
         raise ValueError("Model requests_per_minute must be positive")
@@ -61,6 +61,12 @@ class RequestFlow:
         self._settings = policy if callable(policy) else None
         self.policy = limits(policy() if self._settings else policy)
         self._checked_at = time.monotonic()
+
+    def use_limits(self, value):
+        """Freeze a delegated host's preallocated policy, without editing config."""
+        value = limits(value)
+        self._settings = lambda: copy.deepcopy(value)
+        self.current_policy(force=True)
 
     def current_policy(self, force=False):
         if self._settings and (force or time.monotonic() - self._checked_at >= .25):
@@ -244,6 +250,7 @@ def http_client_type(base, flow, owner):
                 await asyncio.shield(self.permit.release())
 
     class Client(base):
+        xuloom_request_flow = flow
         async def send(self, *args, **kwargs):
             permit = await flow.acquire(owner() if callable(owner) else owner)
             try:

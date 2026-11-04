@@ -1,5 +1,7 @@
 # Xuloom
 
+**Scaling swarm workbench — experimental / development preview:** an opt-in, high-usage workspace for optional local execution and SSH nodes with per-host capacity, adaptive admission, model-planned exploration, durable task identities, evidence aggregation and explicit recovery. Workers are balanced into groups of at most 50 by default (51 becomes 25 + 26), each with an independent Xuloom coordinator session. Chat with the primary during a run; requested changes of direction wait for old work to stop, retaining history and artifacts. Desktop and `xuloom scaling` share the same controller. It does not change Solo/Auto/Ultra. See [configuration and validation boundaries](docs/scaling.md).
+
 A local, general-purpose agent workbench with a desktop app and CLI sharing one Python engine. Connect your own model; use Skills for reusable workflows, Subagents for delegation, and MCP for external tools.
 
 [中文](README.md) · [Windows downloads](https://github.com/Dheudb/xuloom/releases) · [Documentation](docs/README.md)

@@ -59,6 +59,7 @@ jobs:
       - run: npm run test:composer
       - run: npm run test:message-actions
       - run: npm run test:collaboration
+      - run: npm run test:scaling
       - run: npm run test:activity
       - run: npm run test:scroll-layout
       - run: npm run test:tool-recovery

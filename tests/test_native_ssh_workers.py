@@ -221,7 +221,9 @@ class NativeSSHTests(unittest.IsolatedAsyncioTestCase):
     async def test_cancel_confirms_the_owned_host_and_releases_native_capacity(self):
         started = self.fixture.hold_model(); answer = await self.spawn(run_in_background=True)
         identity = answer["agents"][0]["agent_id"]
-        self.assertTrue(await asyncio.to_thread(started.wait, 10))
+        # Cold Python/SDK startup is governed by the SSH runtime-info window.
+        # Cancellation assertions below remain unchanged and independently bounded.
+        self.assertTrue(await asyncio.to_thread(started.wait, 30))
         cancelled = json.loads(await self.tool.execute(action="cancel", agent_id=identity))
         self.assertEqual(cancelled["status"], "cancelled", self.tool._worker(identity))
         self.assertFalse(self.tool._worker(identity).get("outcome_unknown"))

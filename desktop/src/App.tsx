@@ -47,6 +47,7 @@ import GoalStrip from "./GoalStrip";
 import GitStatus from "./GitStatus";
 import SessionSummary from "./SessionSummary";
 import RemoteReferences from "./RemoteReferences";
+import ScalingWorkbench from "./ScalingWorkbench";
 import McpDialog from "./McpDialog";
 import SessionSidebar from "./SessionSidebar";
 import { CatalogPreferences } from "./catalog-preferences";
@@ -69,6 +70,7 @@ export default function App() {
   const preferences = useRef(new CatalogPreferences(catalog));
   const [defaultDirectory, setDefaultDirectory] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [scalingOpen, setScalingOpen] = useState(false);
   const [navigationRepair, setNavigationRepair] = useState(false);
   const [globalModel, setGlobalModel] = useState<ModelConfig>();
   const [modelChanging, setModelChanging] = useState(false);
@@ -222,7 +224,7 @@ export default function App() {
     const handler = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "n") {
         event.preventDefault();
-        if (!opening && !settingsOpen && !mcpOpen && !createProjectOpen) openSession();
+        if (!opening && !settingsOpen && !mcpOpen && !createProjectOpen && !scalingOpen) openSession();
       }
     };
     window.addEventListener("keydown", handler);
@@ -555,6 +557,7 @@ export default function App() {
         <SessionSidebar catalog={catalog} activeId={activeId} live={sessions} opening={opening}
           action={workspaceAction} openProject={openProject} onError={onError} />
         <div className="sidebar-bottom">
+          <button className="sidebar-action" aria-label="Scaling 蜂群" onClick={() => setScalingOpen(true)}><Workflow size={16} />Scaling 蜂群 <span className="scaling-beta">实验阶段</span></button>
           <button
             className="sidebar-action"
             disabled={!active}
@@ -1005,6 +1008,7 @@ export default function App() {
         />
       )}
       {attachmentPreview && <AttachmentPreview image={attachmentPreview} close={() => setAttachmentPreview(undefined)} />}
+      {scalingOpen && <ScalingWorkbench close={() => setScalingOpen(false)} />}
       {mcpOpen && active && (
         <McpDialog
           key={active.id}

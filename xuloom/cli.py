@@ -23,6 +23,8 @@ EXIT_CODES = {"completed": 0, "cancelled": 130, "session_busy": 4, "session_conf
 def parser():
     p = argparse.ArgumentParser(prog="xuloom", description="Non-interactive tasks, persisted goals and timed messages")
     sub = p.add_subparsers(dest="command", required=True)
+    from xuloom.scaling.cli import add_parser as add_scaling_parser
+    add_scaling_parser(sub)
     context = sub.add_parser("context", help="Inspect context or explicitly compact an existing session")
     context.add_argument("action", choices=("status", "compact"), nargs="?", default="status")
     context.add_argument("--session", required=True)
@@ -184,6 +186,9 @@ async def open_engine(args, emit, *, read_only=False):
 
 
 async def dispatch(args, emit):
+    if args.command == "scaling":
+        from xuloom.scaling.cli import dispatch as scaling_dispatch
+        return await scaling_dispatch(args, emit)
     if args.command == "context":
         from xuloom.context.compaction import status
         engine = await open_engine(args, emit, read_only=args.action == "status")

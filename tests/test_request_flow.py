@@ -24,6 +24,14 @@ class RequestFlowTests(unittest.IsolatedAsyncioTestCase):
     def flow(self, key="fixture", **policy):
         return RequestFlow(connection_id("http://127.0.0.1/v1", key), {"concurrency": 1, **policy}, self.root)
 
+    async def test_delegated_capacity_is_frozen_without_mutating_the_config_policy(self):
+        configured = {"concurrency": 10000, "requests_per_minute": 1000}
+        flow = RequestFlow(connection_id("http://127.0.0.1/v1", "delegated"), lambda: configured, self.root)
+        flow.use_limits({"concurrency": 20, "requests_per_minute": 2})
+        configured["concurrency"] = 9999
+        self.assertEqual(flow.current_policy(force=True), {"concurrency":20,"requests_per_minute":2})
+        self.assertEqual(configured["concurrency"], 9999)
+
     async def test_shared_capacity_fairness_cancellation_and_no_credentials_on_disk(self):
         first = await self.flow().acquire("session-a")
         a = asyncio.create_task(self.flow().acquire("session-a"))

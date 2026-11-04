@@ -90,9 +90,19 @@ class ParityTests(unittest.IsolatedAsyncioTestCase):
     async def test_repl_cancellation_stops_owned_code(self):
         with tempfile.TemporaryDirectory() as directory:
             tool = ReplTool(); tool.context = {"session_cwd": directory}
-            work = asyncio.create_task(tool.execute(language="python", code="import time; from pathlib import Path; time.sleep(.8); Path('late').write_text('bad')"))
-            await asyncio.sleep(.15); work.cancel()
-            with self.assertRaises(asyncio.CancelledError): await work
+            # Test a pending side effect, independently of machine load.
+            code = "import time; from pathlib import Path; Path('ready').write_text('ready'); exec(\"while not Path('release').exists(): time.sleep(.02)\"); Path('late').write_text('bad')"
+            work = asyncio.create_task(tool.execute(language="python", code=code))
+            async def ready():
+                while not (Path(directory) / "ready").exists(): await asyncio.sleep(.02)
+            try:
+                await asyncio.wait_for(ready(), 20)
+                work.cancel()
+                with self.assertRaises(asyncio.CancelledError): await work
+            finally:
+                (Path(directory) / "release").write_text("release")
+                if not work.done():
+                    work.cancel(); await asyncio.gather(work, return_exceptions=True)
             await asyncio.sleep(1)
             self.assertFalse((Path(directory) / "late").exists())
 

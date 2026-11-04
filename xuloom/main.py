@@ -957,7 +957,7 @@ def main():
     # The bundled isolated interpreter ignores PYTHONIOENCODING/PYTHONUTF8.
     for stream in (sys.stdin, sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"): stream.reconfigure(encoding="utf-8")
-    if len(sys.argv) > 1 and sys.argv[1] in {"exec", "goal", "schedule", "pipeline", "git-status", "chat-link", "summary", "transcript", "media", "remote", "sandbox-cleanup", "credentials", "mcp", "search-config", "context"}:
+    if len(sys.argv) > 1 and sys.argv[1] in {"exec", "goal", "schedule", "pipeline", "git-status", "chat-link", "summary", "transcript", "media", "remote", "sandbox-cleanup", "credentials", "mcp", "search-config", "context", "scaling"}:
         from xuloom.cli import main as noninteractive
         raise SystemExit(noninteractive(sys.argv[1:]))
     import argparse

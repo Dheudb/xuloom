@@ -659,6 +659,11 @@ async function invoke(method, params) {
     htmlPreviews.revoke(params.token, params.session);
     return true;
   }
+  if (method.startsWith("scaling.")) {
+    const allowed = new Set(["config", "save", "check", "create", "list", "status", "tasks", "result", "children", "child_result", "child_retry", "message", "messages", "events", "questions", "answer", "pause", "resume", "cancel", "retry"]);
+    if (!allowed.has(method.slice(8))) throw new Error("不支持的 Scaling 操作");
+    return globalConfig().request(method, params);
+  }
   const source = sessions.get(params.session);
   if (!source) throw new Error("请先打开项目");
   if (source.moving) throw new Error("会话正在移动，请稍候");
