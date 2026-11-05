@@ -11,6 +11,17 @@ from xuloom.agents.external.program import supports
 
 
 class ToolCatalogTests(fixtures.ExternalFixture):
+    async def test_exact_lookup_and_activation_deliver_existing_tool_contract(self):
+        engine = self.engine()
+        search = engine.available_tools["tool_search_tool"]
+        output = await search.execute(query="command_tool")
+        self.assertIn(engine.available_tools["command_tool"].prompt(), output["content"])
+        tool = engine.latent_tools["task_list_tool"]
+        output = await search.execute(query="tasks", activate=["task_list_tool"])
+        self.assertIn("task_list_tool", engine.available_tools)
+        if tool.prompt(): self.assertIn(tool.prompt(), output["content"])
+        self.assertFalse(self.records)
+
     async def test_loading_a_different_session_clears_previous_discovery(self):
         engine = self.engine(); engine.require_writer()
         engine.messages.append(create_user_message("A")); self.assertTrue(engine.persist_session_state())

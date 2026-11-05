@@ -25,8 +25,8 @@ export function ReasoningControls({ profile, disabled, change }: {
   </>;
 }
 
-export function ReasoningSettings({ provider, profile, change }: {
-  provider: string; profile?: ReasoningProfile; change: (profile?: ReasoningProfile) => void;
+export function ReasoningSettings({ provider, profile, allowedEfforts, change }: {
+  provider: string; profile?: ReasoningProfile; allowedEfforts?: string[]; change: (profile?: ReasoningProfile) => void;
 }) {
   function choose(adapter: ReasoningProfile["adapter"]) {
     change({ adapter, efforts: adapter === "openai" || adapter === "anthropic" ? ["low", "medium", "high"] : adapter === "deepseek" ? ["low", "high", "max"] : [],
@@ -42,7 +42,7 @@ export function ReasoningSettings({ provider, profile, change }: {
         onChange={event => change({ ...profile, canDisable: event.target.checked, thinking: !event.target.checked && profile.thinking === "disabled" ? "enabled" : profile.thinking })} />支持关闭思考</label>}
       {profile.adapter !== "anthropic-budget" && <div role="group" aria-label="模型支持的推理强度" className="reasoning-efforts">
         <span>可用档位</span>
-        <div className="reasoning-effort-options">{[...(profile.adapter === "openai" ? ["none"] : []), "minimal", "low", "medium", "high", "xhigh", "max"].map(value => <label key={value}><input type="checkbox" checked={profile.efforts.includes(value)}
+        <div className="reasoning-effort-options">{(allowedEfforts || [...(profile.adapter === "openai" ? ["none"] : []), "minimal", "low", "medium", "high", "xhigh", "max"]).map(value => <label key={value}><input type="checkbox" checked={profile.efforts.includes(value)}
           onChange={event => { const efforts = event.target.checked ? [...profile.efforts, value] : profile.efforts.filter(item => item !== value); change({ ...profile, efforts, effort: efforts.includes(profile.effort) ? profile.effort : "default" }); }} />{labels[value]}</label>)}
         </div>
       </div>}

@@ -24,7 +24,6 @@ import {
   Paperclip,
   Activity,
   FolderTree,
-  CircleCheck,
   Target,
   Lightbulb,
 } from "lucide-react";
@@ -365,7 +364,7 @@ export default function App() {
       update({ busy: true, error: "" }, id);
       let created = false;
       try {
-        const goal = await window.xuloom.invoke("goal.create", { session: id, objective, criteria: [objective], skills: active.selected });
+        const goal = await window.xuloom.invoke("goal.create", { session: id, objective, criteria: [objective], skills: active.selected, limits: active.goalLimits });
         created = true;
         update({ goal, goalMode: false, mode: "normal", draft: "" }, id);
         conversationScroll.followLatest();
@@ -670,34 +669,27 @@ export default function App() {
                   <div className="starter-grid">
                     {[
                       {
+                        icon: Paperclip,
+                        title: "阅读与总结资料",
+                        text: "提炼要点，保留来源和未读内容。",
+                        prompt: "请帮我总结资料，区分原文事实与推测，标明来源和无法读取的内容。先确认要处理的文件或链接。",
+                      },
+                      {
                         icon: Workflow,
-                        title: active.scope === "standalone" ? "梳理一个任务" : "理解这个项目",
-                        text: active.scope === "standalone" ? "明确目标，拆解步骤。" : "了解资料、文件与已有成果。",
-                        prompt:
-                          active.scope === "standalone" ? "请帮我梳理要完成的任务，先确认我的目标和需求。" : "请概述这个项目的资料、文件和已有成果，说明它们的用途及尚待确认的问题。",
+                        title: "分析表格与数据",
+                        text: "核对数据口径，生成可复现结果。",
+                        prompt: "请帮我分析数据。先确认数据来源和分析问题，检查格式、字段及本机工具支持，保留原始数据，并验证关键计算。",
                       },
                       {
-                        icon: Puzzle,
-                        title: "使用你的 Skills",
-                        text: "挂载技能，复用自己的工作流。",
-                        action: () => {
-                          setPanelOpen(true);
-                          setPanelTab("skills");
-                        },
+                        icon: Pencil,
+                        title: "撰写或修改文档",
+                        text: "围绕读者、用途与已有材料写作。",
+                        prompt: "请帮我撰写或修改文档。先确认读者、用途、材料和输出格式；需要保存时明确产物位置，不编造事实和引用。",
                       },
-                      {
-                        icon: Bot,
-                        title: "把任务交给子代理",
-                        text: "独立探索、规划与验证。",
-                        prompt:
-                          "请使用 explore 子代理调查当前任务的相关资料，列出有依据的发现和待确认的问题。",
-                      },
-                    ].map(({ icon: Icon, title, text, prompt, action }) => (
+                    ].map(({ icon: Icon, title, text, prompt }) => (
                       <button
                         key={title}
-                        onClick={() =>
-                          action ? action() : update({ draft: prompt })
-                        }
+                        onClick={() => update({ draft: prompt })}
                       >
                         <Icon size={19} />
                         <strong>{title}</strong>
@@ -824,6 +816,15 @@ export default function App() {
           {!!runningCommands && !active?.busy && <button className="worker-strip" onClick={() => invoke("stop").catch(onError)}><Square size={13} />{runningCommands} 个后台命令正在运行 · 停止所有后台任务</button>}
           {active?.goal && <GoalStrip key={active.id} goal={active.goal} busy={active.busy} invoke={invoke} onError={onError} details={() => setGoalDialog("goal")} />}
           {active?.controlledExecution && <p className="fine-print" role="status">此子代理由原主会话控制。可以查看历史和文件，或从消息创建独立分支；继续执行请返回主会话。</p>}
+          {active?.goalMode && <details className="goal-limits"><summary>可选运行上限 · 留空则持续运行</summary>
+            <div>{([
+              ["seconds", "累计执行秒数", 604800], ["output_tokens", "累计输出 tokens", 10000000], ["rounds", "最多执行轮数", 10000],
+            ] as const).map(([key, label, max]) => <label key={key}>{label}<input aria-label={label} type="number" min={1} max={max} step={1} disabled={active.busy}
+              value={active.goalLimits?.[key] ?? ""} placeholder="不限" onChange={e => {
+                const limits = { ...active.goalLimits }; if (e.target.value === "") delete limits[key]; else limits[key] = Number(e.target.value);
+                update({ goalLimits: limits });
+              }} /></label>)}</div><p className="fine-print">主任务、子代理及摘要共用输出预算；这是运行限制，不是供应商账单金额保证。</p>
+          </details>}
           <div className={"composer " + (!active ? "disabled" : "")} onPaste={(event) => { if (event.clipboardData.files.length) { event.preventDefault(); void importFiles(Array.from(event.clipboardData.files)); } }}>
             {active?.editingId && <div className="editing-prompt"><span>编辑上一条提示词 · 发送后重新执行，已修改的文件保留</span>
               <button aria-label="取消编辑提示词" disabled={active.busy} onClick={() => update({ editingId: undefined, draft: active.draftBeforeEdit || "", draftBeforeEdit: undefined, attachments: active.attachmentsBeforeEdit || [], attachmentsBeforeEdit: undefined })}><X size={13} /></button></div>}

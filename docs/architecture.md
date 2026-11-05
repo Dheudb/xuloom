@@ -11,7 +11,7 @@ xuloom/
   skills/             Skill 发现、校验、资源访问和加载
   agents/             子代理定义、执行、后台任务与团队协调
   protocols/          MCP 配置/市场/连接，以及 LSP 管理
-  security/           权限、风险分类与工作区隔离（不是操作系统沙箱）
+  security/           审批、工作区路由、Windows LPAC 系统隔离与凭据保护
   features/           浏览器、规划及可选的领域能力与兼容状态
   utils/              Shell 任务、VCR 和结果压缩等辅助代码
 desktop/

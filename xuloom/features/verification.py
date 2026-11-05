@@ -11,8 +11,6 @@ from xuloom.agents.builtin_agents import VERIFICATION_SYSTEM_PROMPT, VERIFICATIO
 
 
 VERIFICATION_THRESHOLD = 3
-VERIFIER_MAX_TURNS = 15
-VERIFIER_OUTPUT_BUDGET = 50000
 
 _SKIP_PATTERNS = (
     ".xuloom", ".xuloom", ".git", "__pycache__", "node_modules",

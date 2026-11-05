@@ -1,6 +1,5 @@
 """Tool confinement policy, separate from approvals and workspace copies."""
 import asyncio
-import copy
 import ctypes
 import json
 import os

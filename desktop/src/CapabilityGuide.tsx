@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import type { SessionView } from "./types";
+import { useDialogFocus } from './useDialogFocus';
 
 export default function CapabilityGuide({ kind, session, invoke, update, close }: {
   kind: "skills" | "agents"; session: SessionView;
@@ -8,6 +9,7 @@ export default function CapabilityGuide({ kind, session, invoke, update, close }
   update: (patch: Partial<SessionView>) => void; close: () => void;
 }) {
   const [error, setError] = useState("");
+  const dialog=useDialogFocus();
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const settings = session.capabilities.settings;
@@ -21,7 +23,7 @@ export default function CapabilityGuide({ kind, session, invoke, update, close }
     catch (e) { setError(String(e)); } finally { setBusy(false); }
   }
   return <div className="overlay" onClick={close}>
-    <section className="dialog capability-guide" role="dialog" aria-modal="true" aria-label="能力配置说明" onClick={(e) => e.stopPropagation()}>
+    <section ref={dialog} className="dialog capability-guide" role="dialog" aria-modal="true" aria-label="能力配置说明" onClick={(e) => e.stopPropagation()} onKeyDown={e=>{if(e.key==='Escape'){e.stopPropagation();close();}}}>
       <header><h2>{kind === "skills" ? "配置 Skill" : "配置 Subagent"}</h2><button className="icon-button" aria-label="关闭配置说明" onClick={close}><X size={18} /></button></header>
       <p>{kind === "skills" ? "每个技能使用一个目录，目录里的 SKILL.md 定义名称、使用时机和执行步骤。" : "每个子代理使用一个 Markdown 文件，定义职责、工具、模型和需要加载的 Skills。"}</p>
       <p>当前项目：<code>{projectRoot}</code><br />所有项目共用：<code>{globalRoot}</code></p>

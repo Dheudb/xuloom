@@ -6,7 +6,6 @@ The coordinator/lead can send follow-up instructions to running workers,
 broadcast to all, or send structured control messages (shutdown, etc.).
 """
 
-from typing import Optional
 from pydantic import BaseModel, Field
 from xuloom.tools.base import BaseAgenticTool
 

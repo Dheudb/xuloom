@@ -1,6 +1,5 @@
 import os
-import asyncio
-from typing import Dict, Any, Optional
+from typing import Dict, Optional
 
 from xuloom.protocols.lsp_client import LSPBridge
 

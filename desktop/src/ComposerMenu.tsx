@@ -39,7 +39,7 @@ export default function ComposerMenu({ sessionId, disabled, plan, action }: {
       aria-haspopup="menu" aria-expanded={open} disabled={disabled} onClick={() => setOpen(!open)}><Plus size={21} /></button>
     {open && <div className="composer-add-menu" role="menu" aria-label="添加工具与模式">
       <div className="composer-menu-heading">添加</div>
-      {options.map(({ name, label, description, icon: Icon }, index) => <button type="button" role="menuitem" key={name}
+      {options.map(({ name, label, description, icon: Icon }) => <button type="button" role="menuitem" key={name}
         className={name === "skills" ? "composer-menu-divider" : ""} onClick={() => { setOpen(false); trigger.current?.focus(); action(name); }}>
         <Icon size={17} /><span>{label}</span><small>{description}</small>{name === "plan" && plan && <Check size={14} />}
       </button>)}

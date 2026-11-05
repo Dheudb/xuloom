@@ -53,6 +53,9 @@ def configured_profile(provider, model, base_url):
     selected = next((item for item in matches if item["id"] == active["id"]), None)
     selected = selected or (matches[0] if len(matches) == 1 else None)
     value = (selected or {}).get("model_reasoning", {}).get(model)
+    if value is None:
+        from xuloom.core.model_specs import with_defaults
+        value = with_defaults({'provider': provider, 'models': [model], 'base_url': base_url}).get('model_reasoning', {}).get(model)
     return normalize_profile(value, provider) if value is not None else None
 
 

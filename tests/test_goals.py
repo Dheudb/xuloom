@@ -10,6 +10,23 @@ from xuloom.core.run_result import PersistenceError
 
 
 class GoalTests(unittest.IsolatedAsyncioTestCase):
+    async def test_continuous_goal_enforces_optional_limits_and_preserves_them_on_edit(self):
+        goal = self.create(continuous=True, limits={"rounds": 1, "output_tokens": 500})
+        goal_id = goal["id"]
+        self.assertEqual(goals.available_output(self.engine.goal), 500)
+        updated = goals.update_objective(self.engine, "Adjusted objective")
+        self.assertEqual(updated["budget"], {"rounds": 1, "seconds": None, "output_tokens": 500})
+        self.fixture(["More work remains"])
+        result = await goals.run(self.engine, self.emit)
+        self.assertEqual(result["id"], goal_id)
+        self.assertEqual(result["status"], "budget_exhausted")
+        self.assertEqual(result["rounds"], 1)
+
+    async def test_invalid_optional_limits_never_create_a_goal(self):
+        for value in ({"output_tokens": True}, {"seconds": -1}, {"money": 10}, {"rounds": 1.5}):
+            with self.assertRaises(ValueError): self.create(continuous=True, limits=value)
+            self.assertIsNone(self.engine.goal)
+
     async def test_continuous_goal_ignores_round_time_output_and_tool_stall_limits(self):
         self.create(continuous=True)
         self.engine.goal.update(rounds=25, elapsed_seconds=7200, output_used=2000000)
@@ -139,11 +156,19 @@ class GoalTests(unittest.IsolatedAsyncioTestCase):
             from types import SimpleNamespace as NS
             return NS(usage=NS(output_tokens=7)), [], False
         with patch.object(self.engine, "_receive_model_response", side_effect=receive):
-            first = asyncio.create_task(self.engine._stream_model_response(max_tokens=200))
-            await entered.wait()
-            with self.assertRaisesRegex(RuntimeError, "budget"):
-                await self.engine._stream_model_response(max_tokens=200)
-            release.set(); await first
+            kwargs = dict(max_tokens=200, model_name=self.engine.primary_model)
+            first = asyncio.create_task(self.engine._stream_model_response(**kwargs))
+            ready = asyncio.create_task(entered.wait())
+            try:
+                done, _ = await asyncio.wait({first, ready}, timeout=10, return_when=asyncio.FIRST_COMPLETED)
+                if first in done: await first  # Surface an early failure instead of waiting forever.
+                self.assertTrue(entered.is_set(), "Model reservation did not enter the fixture")
+                with self.assertRaisesRegex(RuntimeError, "budget"):
+                    await self.engine._stream_model_response(**kwargs)
+            finally:
+                release.set(); ready.cancel()
+                await asyncio.gather(ready, return_exceptions=True)
+                await asyncio.wait_for(first, 10)
         self.assertEqual(self.engine.goal["output_used"], 7)
         self.assertEqual(goals.available_output(self.engine.goal), 13)
 

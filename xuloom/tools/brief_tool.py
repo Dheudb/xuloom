@@ -8,7 +8,7 @@ channel the user sees; text outside this tool is treated as detail-view content.
 
 import os
 import time
-from typing import List, Optional
+from typing import List
 from pydantic import BaseModel, Field
 from xuloom.tools.base import BaseAgenticTool
 

@@ -58,6 +58,7 @@ const attachments = new Attachments(catalog, nativeImage);
 let workspaceQueue = Promise.resolve();
 let catalogRevision = 0;
 const engineMethods = new Set([
+  "task.readiness",
   "context.get", "context.compact",
   "remote.profiles", "remote.models",
   "collaboration.get", "collaboration.set", "agents.resume_queue", "execution.get", "execution.set", "execution.cleanup",
@@ -499,6 +500,7 @@ async function invoke(method, params) {
     return true;
   }
   if (method === "config.get") return globalConfig().request("config.get");
+  if (method === "task.readiness" && !params.session) return globalConfig().request(method, params);
   if (["media.connections", "media.save", "media.remove", "media.models", "media.saveModel", "media.removeModel"].includes(method) && !params.session) {
     if (!["media.connections", "media.models"].includes(method) && [...sessions.values()].some(running)) throw new Error("请先停止运行中的任务，再修改生成模型");
     return globalConfig().request(method, params);

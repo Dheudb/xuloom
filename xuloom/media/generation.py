@@ -5,10 +5,9 @@ import hashlib
 import json
 import re
 import time
-from pathlib import Path
 
 from xuloom.core.storage import atomic_bytes
-from xuloom.media import adapters, files, jobs, queue
+from xuloom.media import adapters, files, jobs
 
 
 def persist_response(tool, record, body, mime):

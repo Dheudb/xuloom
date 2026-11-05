@@ -21,6 +21,8 @@ def add_parser(sub):
     p.add_argument("--goal")
     p.add_argument("--text", help="Message to the running swarm primary; --request-id makes delivery idempotent")
     p.add_argument("--target", type=int)
+    p.add_argument('--output-budget',type=int,help='Run-wide admitted output-token cap, including offline node allocations; native executors only')
+    p.add_argument('--admission-seconds',type=int,help='Stop new model admission after this duration; does not undo existing side effects')
     p.add_argument("--request-id", help="Stable start identity; lost replies never create a second swarm")
     p.add_argument("--task", help="Task ID for result/retry")
     p.add_argument("--child", help="Nested task ID for child_result/child_retry; --task selects its node primary")
@@ -57,6 +59,8 @@ async def dispatch(args, emit):
     elif action == "start":
         params = {"goal": args.goal or "", "nodes": args.node, "permission": args.permission, "accept_high_usage": args.accept_high_usage}
         if args.target is not None: params["target"] = args.target
+        limits={k:v for k,v in {'output_tokens':getattr(args,'output_budget',None),'seconds':getattr(args,'admission_seconds',None)}.items() if v is not None}
+        if limits: params['budget']=limits
         if args.request_id: params["request_id"] = args.request_id
         value = await invoke("create", params)
     elif action == "list": value = await invoke("list")

@@ -14,10 +14,25 @@ ROOT = Path(__file__).resolve().parents[2]
 DESKTOP = ROOT / "desktop"
 
 
+def source_hashes():
+    files = set()
+    for name in ("xuloom", "tests", "desktop/src", "desktop/electron", "desktop/tests", "desktop/scripts"):
+        files.update(p for p in (ROOT/name).rglob("*") if p.is_file() and p.suffix in {".py", ".md", ".tsx", ".ts", ".css", ".cjs", ".ps1"} and "__pycache__" not in p.parts)
+    files.update(ROOT/name for name in ("setup.py", "desktop/package.json", "desktop/package-lock.json"))
+    return {p.relative_to(ROOT).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(files)}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--package-directory", type=Path, default=DESKTOP / "release/Xuloom-win32-x64")
+    parser.add_argument("--validation-receipt", type=Path)
     args = parser.parse_args()
+    sources = source_hashes()
+    validation = None
+    if args.validation_receipt:
+        validation = json.loads(args.validation_receipt.read_text(encoding="utf-8"))
+        if validation.get("passed") is not True or validation.get("sources") != sources:
+            raise SystemExit("Validation receipt does not certify the current source")
     package = args.package_directory.resolve()
     executable = package / "Xuloom.exe"
     if not executable.is_file() or not (package / "resources/python/python.exe").is_file():
@@ -28,7 +43,13 @@ def main():
     stage = DESKTOP / "build" / ("pending-update-general-" + build_id + "-" + uuid.uuid4().hex[:6])
     stage.mkdir(parents=True)
     dependencies = stage / "dependencies"
-    subprocess.run([sys.executable, "-m", "pip", "install", "--no-deps", "--target", str(dependencies), "prompt_toolkit>=3.0,<4"], check=True)
+    subprocess.run([sys.executable, "-m", "pip", "install", "--no-deps", "--no-compile", "--target", str(dependencies), "prompt_toolkit>=3.0,<4"], check=True)
+    # setuptools copies incrementally; retired modules must not survive in wheels.
+    cached = ROOT / "build/lib/xuloom"
+    if cached.exists():
+        if cached.resolve() != ROOT.resolve() / "build/lib/xuloom" or cached.is_symlink():
+            raise SystemExit("Refusing a linked package build cache")
+        shutil.rmtree(cached)
     wheels = stage / "wheels"; wheels.mkdir()
     subprocess.run([sys.executable, "-m", "pip", "wheel", "--no-index", "--no-deps", "--no-build-isolation",
         "--wheel-dir", str(wheels), str(ROOT)], cwd=ROOT, check=True)
@@ -67,6 +88,14 @@ def main():
         str(stage), version], cwd=stage, check=True)
     manifest = {"metadataDirectory": metadata, "buildId": build_id, "pythonPackages": [p.name for p in dependencies.iterdir() if p.name != "__pycache__"],
         "originalExeSha256": hashlib.sha256(executable.read_bytes()).hexdigest(), "bundledSkills": skills}
+    if source_hashes() != sources: raise SystemExit("Source changed while staging")
+    provenance = dict(sourceCommit=subprocess.check_output(["git", "rev-parse", "HEAD"],cwd=ROOT,text=True).strip(),
+        sourceHashes=sources, sourceTreeSha256=hashlib.sha256(json.dumps(sources,sort_keys=True).encode()).hexdigest(),
+        dirty=bool(subprocess.check_output(["git","status","--porcelain"],cwd=ROOT)),
+        validationReceiptSha256=hashlib.sha256(args.validation_receipt.read_bytes()).hexdigest() if validation else None)
+    (app/"build-provenance.json").write_text(json.dumps(provenance,indent=2),encoding="utf-8")
+    manifest.update(**provenance, resourceHashes={p.relative_to(stage).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for directory in ("xuloom", "app", "metadata", "dependencies") for p in sorted((stage/directory).rglob("*")) if p.is_file() and "__pycache__" not in p.parts})
+    if validation: shutil.copyfile(args.validation_receipt,stage/"validation-receipt.json")
     (stage / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     if list(stage.rglob("*.exe")): raise SystemExit("Resource updates must not contain another executable")
     print(json.dumps({"stage": str(stage), "target": str(package), **manifest}))

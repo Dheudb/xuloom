@@ -103,25 +103,28 @@ class CollaborationTests(unittest.IsolatedAsyncioTestCase):
     async def test_output_reservations_cover_parallel_children_aux_calls_and_cancellation(self):
         self.engine.set_collaboration_mode("ultra", persist=False)
         run = self.engine.tool_context["collaboration_run"]
-        entered, release = [], asyncio.Event()
+        entered, release, ready = [], asyncio.Event(), asyncio.Event()
         async def model(child, user_input, sys_print_callback):
             self.assertIs(DELEGATION_BUDGET.get(), run)
             async def receive(**kwargs):
                 entered.append(kwargs["max_tokens"])
+                if len(entered) == 8: ready.set()
                 await release.wait()
                 return NS(usage=NS(output_tokens=5, input_tokens=1)), [], False
             with patch.object(child, "_receive_model_response", receive):
-                await child._stream_model_response(max_tokens=100000)
+                await child._stream_model_response(max_tokens=100000, model_name=child.primary_model)
             client = NS(chat=NS(completions=NS(create=AsyncMock(return_value=NS(usage=NS(completion_tokens=2), choices=[NS(message=NS(content="aux"))])))))
             await safe_llm_call(client, "fixture", "openai", [], 5)
             return RunResult("done", "completed", True)
         with patch.object(QueryEngine, "run", model):
             await self.tool.execute(prompt="work", count=8, run_in_background=True)
-            await asyncio.sleep(0)
-            self.assertEqual(entered, [64000] * 8)
-            self.assertEqual(run["output_reserved"], 512000)
-            release.set()
-            await self.tool.execute(action="wait")
+            try:
+                await asyncio.wait_for(ready.wait(), 10)
+                self.assertEqual(entered, [64000] * 8)
+                self.assertEqual(run["output_reserved"], 512000)
+            finally:
+                release.set()
+                await asyncio.wait_for(self.tool.execute(action="wait"), 10)
         self.assertEqual((run["output_reserved"], run["output_used"]), (0, 56))
         self.assertIsNone(DELEGATION_BUDGET.get())
         token = DELEGATION_BUDGET.set(run)
@@ -129,7 +132,7 @@ class CollaborationTests(unittest.IsolatedAsyncioTestCase):
             async def hang(**kw): raise asyncio.CancelledError()
             with patch.object(self.engine, "_receive_model_response", hang):
                 with self.assertRaises(asyncio.CancelledError):
-                    await self.engine._stream_model_response(max_tokens=10)
+                    await self.engine._stream_model_response(max_tokens=10, model_name=self.engine.primary_model)
         finally: DELEGATION_BUDGET.reset(token)
         self.assertEqual((run["output_reserved"], run["output_used"]), (0, 66))
 

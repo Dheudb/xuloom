@@ -4,7 +4,7 @@ import time
 import hashlib
 from pathlib import Path
 from xuloom.core.storage import session_directory, data_directory, IOPath
-from xuloom.core.session_lock import SessionLock, SessionBusyError, SessionConflictError, session_identity
+from xuloom.core.session_lock import SessionLock, SessionConflictError, session_identity
 
 class SessionManager:
     """

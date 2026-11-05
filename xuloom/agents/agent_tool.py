@@ -10,7 +10,7 @@ from xuloom.tools.base import BaseAgenticTool
 from xuloom.agents.registry import AgentRegistry
 from xuloom.agents.tasks import SubagentTasks
 from xuloom.agents.lifecycle import AgentLifecycle, concurrency_limit
-from xuloom.agents.role_runtime import ALL_AGENT_DISALLOWED_TOOLS, configure_role, filter_tools
+from xuloom.agents.role_runtime import configure_role
 from xuloom.skills.registry import SkillRegistry
 from xuloom.agents.pipeline import PipelineItem, PipelineStage
 
@@ -173,13 +173,6 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
 
         return filtered
     
-    def _filter_tools(
-        self,
-        parent_tools,
-        allowed_tools: List[str],
-        disallowed_tools: set = None,
-    ):
-        return filter_tools(parent_tools, allowed_tools, disallowed_tools)
 
     def _share_runtime_managers(self, sub_engine):
         shared_manager_fields = [

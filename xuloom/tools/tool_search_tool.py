@@ -107,6 +107,11 @@ class ToolSearchTool(BaseAgenticTool):
             lines.append("Activated tools:")
             for name in activated:
                 lines.append(f"- {name}")
+        # Return the existing contract on explicit activation or exact lookup.
+        # Do not permanently inject every tool manual into every model request.
+        for name in dict.fromkeys(activated + ([query] if query in catalog else [])):
+            if catalog[name]["prompt"]:
+                lines.append(f"\nUsage contract for {name}:\n{catalog[name]['prompt']}")
         if any(not item["active"] for item in matches):
             lines.append("To activate a latent tool, call tool_search_tool again with activate=[the exact tool name].")
 

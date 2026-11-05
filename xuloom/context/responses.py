@@ -126,7 +126,7 @@ async def receive(engine, *, system_prompt, api_messages, tools_schema, turn_cou
     if model_name != engine.primary_model: raise ContextLimitError("Native Responses routing cannot silently switch models")
     from xuloom.core.model_inputs import validate_media
     validate_media(api_messages, engine._input_contract(model_name))
-    tools = [{"type": "function", **tool.get("function", tool)} for tool in tools_schema]
+    tools = [{"type": "function", "strict": False, **tool.get("function", tool)} for tool in tools_schema]
     options = dict(model=model_name, instructions=system_prompt, input=inputs(engine, engine._get_messages_after_compact_boundary()), tools=tools,
         stream=True, store=False, max_output_tokens=max_tokens, include=["reasoning.encrypted_content"])
     if engine.reasoning_profile:

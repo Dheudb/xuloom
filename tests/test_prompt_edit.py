@@ -41,7 +41,7 @@ class PromptEditTests(unittest.TestCase):
 
     def test_model_configuration_is_not_injected_into_identity_prompt(self):
         builder = ContextBuilder()
-        with patch.object(builder, "_load_project_instructions", return_value=""), patch.object(builder, "get_git_state", return_value={}):
+        with patch.object(builder, "_load_project_instructions", return_value=""):
             for model in ("gateway-model-alias", "deepseek-v4.1-flash", "claude-sonnet-4-6", ""):
                 with self.subTest(model=model):
                     prompt = builder.generate_system_prompt(model_name=model)

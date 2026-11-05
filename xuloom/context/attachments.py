@@ -15,11 +15,7 @@ Attachment types:
 
 import os
 import time
-from typing import Any, Dict, List, Optional
-try:
-    import git as gitmodule
-except ImportError:
-    gitmodule = None
+from typing import Dict, List, Optional
 
 
 SYSTEM_REMINDER_OPEN = "<system-reminder>"
@@ -386,26 +382,7 @@ class AttachmentCollector:
         if len(self._recent_tool_names) > 50:
             self._recent_tool_names = self._recent_tool_names[-30:]
 
-    def snapshot_file(self, path: str, content: str):
-        """Record a file snapshot for change tracking."""
-        self._last_file_snapshots[path] = content
 
-    def get_changed_files_from_git(self, cwd: str) -> List[str]:
-        """Get list of changed files from git status."""
-        if gitmodule is None:
-            return []
-        try:
-            repo = gitmodule.Repo(cwd, search_parent_directories=True)
-            changed = []
-            for item in repo.index.diff(None):
-                changed.append(item.a_path)
-            for item in repo.index.diff("HEAD"):
-                changed.append(item.a_path)
-            for upath in repo.untracked_files[:10]:
-                changed.append(upath)
-            return list(set(changed))[:15]
-        except Exception:
-            return []
 
     def export_state(self) -> dict:
         return {

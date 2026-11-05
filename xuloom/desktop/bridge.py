@@ -417,6 +417,9 @@ class DesktopBridge:
         return receipt or {"ok": False, "reason": "cancelled" if self.stop_requested else "error"}
 
     async def dispatch(self, method, params):
+        if method == 'task.readiness':
+            from .readiness import inspect
+            return await asyncio.to_thread(inspect,self.config(),self.execution_mode)
         if method.startswith("scaling."):
             from xuloom.scaling.control import invoke
             return await invoke(method, params)
@@ -530,7 +533,7 @@ class DesktopBridge:
             if method == "goal.create":
                 result = goals.create(engine, params["objective"], params["criteria"], checks=params.get("checks"),
                     rounds=params.get("rounds", 20), seconds=params.get("seconds", 1800),
-                    output_tokens=params.get("output_tokens", 50000), skills=params.get("skills"), continuous=True)
+                    output_tokens=params.get("output_tokens", 50000), skills=params.get("skills"), continuous=True, limits=params.get("limits"))
                 engine.set_mode("normal")
                 if not engine.persist_session_state():
                     raise OSError("目标已创建，但执行模式保存失败；请重新打开会话检查目标状态")
@@ -538,8 +541,7 @@ class DesktopBridge:
                 return result
             if method == "goal.run":
                 if engine.goal and not engine.goal.get("continuous"):
-                    engine.goal.update(continuous=True, budget=dict(rounds=None, seconds=None, output_tokens=None))
-                    if engine.goal["status"] == "budget_exhausted": engine.goal["status"] = "paused"
+                    engine.goal.update(continuous=True)
                     goals.save(engine)
                 self.stop_requested = False
                 self.turn_task = asyncio.create_task(self.goal_turn(engine))

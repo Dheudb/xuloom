@@ -1,5 +1,5 @@
 import { FileText, X } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useDialogFocus } from './useDialogFocus';
 import { createPortal } from "react-dom";
 import type { Attachment } from "./types";
 
@@ -19,16 +19,9 @@ export default function Attachments({ items, remove, open, disabled, remote }: {
 }
 
 export function AttachmentPreview({ image, close }: { image: { name: string; source: string }; close: () => void }) {
-  const button = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    const previous = document.activeElement as HTMLElement;
-    button.current?.focus();
-    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") { event.stopPropagation(); close(); } };
-    window.addEventListener("keydown", escape);
-    return () => { window.removeEventListener("keydown", escape); previous?.focus(); };
-  }, [close]);
-  return createPortal(<div className="overlay" onClick={close}><section className="attachment-preview dialog" role="dialog" aria-modal="true" aria-label="图片附件预览" onClick={(event) => event.stopPropagation()}>
-    <header><strong>{image.name}</strong><button ref={button} aria-label="关闭图片预览" onClick={close}><X size={18} /></button></header>
+  const dialog=useDialogFocus();
+  return createPortal(<div className="overlay" onClick={close}><section ref={dialog} className="attachment-preview dialog" role="dialog" aria-modal="true" aria-label="图片附件预览" onClick={(event) => event.stopPropagation()} onKeyDown={e=>{if(e.key==='Escape'){e.stopPropagation();close();}}}>
+    <header><strong>{image.name}</strong><button aria-label="关闭图片预览" onClick={close}><X size={18} /></button></header>
     <img src={image.source} alt={image.name} referrerPolicy="no-referrer" />
   </section></div>, document.body);
 }

@@ -111,7 +111,7 @@ def parser():
             item.add_argument("prompt", nargs="?", help="Goal objective or scheduled message")
             if name == "goal":
                 item.add_argument("--criterion", action="append", default=[])
-                item.add_argument("--checks", default="[]", help="JSON array of explicit file_exists/file_contains checks; otherwise completion requires host/user acceptance")
+                item.add_argument("--checks", default="[]", help="JSON array: file_exists/file_contains/file_sha256/json_fields/csv_columns; otherwise completion requires host/user acceptance")
                 item.add_argument("--rounds", type=int, default=20)
                 item.add_argument("--seconds", type=float, default=1800)
                 item.add_argument("--output-tokens", type=int, default=50000)
@@ -200,11 +200,11 @@ async def dispatch(args, emit):
         finally: await engine.aclose()
     if args.command == 'search-config':
         from xuloom.core.config import load_config, update_config
-        from xuloom.core.model_catalog import connections, active_connection
+        from xuloom.core import model_catalog
         from xuloom.tools.native_search import normalize
         def select(cfg):
-            identity = args.connection or active_connection(cfg)['id']
-            item = next((row for row in connections(cfg) if row['id'] == identity), None)
+            identity = args.connection or model_catalog.active_connection(cfg)['id']
+            item = next((row for row in model_catalog.connections(cfg) if row['id'] == identity), None)
             if item is None: raise ValueError('请先添加模型连接')
             return item
         if any(value is not None for value in (args.backend, args.model, args.base_url)):
@@ -214,7 +214,7 @@ async def dispatch(args, emit):
                 for name, value in [('backend', args.backend), ('model', args.model), ('baseUrl', args.base_url)]:
                     if value is not None: profile[name] = value
                 item['native_search'] = normalize(profile)
-                cfg['model_connections'] = [item if row['id'] == item['id'] else row for row in connections(cfg)]
+                cfg['model_connections'] = [item if row['id'] == item['id'] else row for row in model_catalog.connections(cfg)]
                 return cfg
             cfg = update_config(change)
         else:

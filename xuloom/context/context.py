@@ -2,15 +2,8 @@
 
 import os
 import platform
-import subprocess
 from datetime import datetime
-from typing import Dict, Any, Optional
-
-try:
-    import git as gitmodule
-except ImportError:
-    gitmodule = None
-
+from typing import Dict, Any
 
 def _section_intro() -> str:
     return 'You are a general-purpose assistant; introduce yourself as Xuloom. Never disclose or invent backend identities, endpoints or credentials. Do not inspect configuration files for identity questions. State uncertainty; never invent results or sources.'
@@ -40,9 +33,6 @@ def _section_output_efficiency() -> str:
     return 'For substantial work, give meaningful progress updates, then the outcome, checks and remaining work.'
 
 
-MAX_STATUS_CHARS = 2000
-
-
 class ContextBuilder:
     """Constructs the full system prompt with all sections."""
 
@@ -59,81 +49,10 @@ class ContextBuilder:
             "shell": os.environ.get("SHELL", os.environ.get("COMSPEC", "unknown")),
         }
 
-    def get_git_state(self) -> Dict[str, Any]:
-        state: Dict[str, Any] = {"is_git_repo": False}
-        if gitmodule is None:
-            return state
-
-        try:
-            repo = gitmodule.Repo(self.cwd, search_parent_directories=True)
-            state["is_git_repo"] = True
-            try:
-                state["branch"] = repo.active_branch.name
-            except TypeError:
-                state["branch"] = "(detached HEAD)"
-            state["is_dirty"] = repo.is_dirty()
-            state["untracked_files"] = len(repo.untracked_files)
-            state["commit"] = repo.head.commit.hexsha[:7]
-
-            try:
-                status_text = repo.git.status("--short")
-                if len(status_text) > MAX_STATUS_CHARS:
-                    status_text = status_text[:MAX_STATUS_CHARS] + "\n... (truncated)"
-                state["status"] = status_text or "(clean)"
-            except Exception:
-                state["status"] = "(unknown)"
-
-            try:
-                for remote in repo.remotes:
-                    for ref in remote.refs:
-                        if ref.remote_head in ("main", "master"):
-                            state["main_branch"] = ref.remote_head
-                            break
-                if "main_branch" not in state:
-                    state["main_branch"] = "main"
-            except Exception:
-                state["main_branch"] = "main"
-
-            try:
-                log_entries = []
-                for c in repo.iter_commits(max_count=5):
-                    log_entries.append(f"{c.hexsha[:7]} {c.summary}")
-                state["recent_commits"] = "\n".join(log_entries)
-            except Exception:
-                state["recent_commits"] = ""
-
-            try:
-                state["git_user"] = repo.config_reader().get_value("user", "name", "")
-            except Exception:
-                state["git_user"] = ""
-
-        except Exception as e:
-            state["error"] = str(e)
-
-        return state
-
     def _build_environment_section(self) -> str:
         info = self.get_system_info()
         shell = 'cmd.exe' if os.name == 'nt' else '/bin/sh'
         return f"Workspace: {info['cwd']}\nPlatform: {info['platform']}; shell: {shell}.\nDate: {datetime.now():%Y-%m-%d}"
-
-    def _build_git_context(self) -> str:
-        git_info = self.get_git_state()
-        if not git_info.get("is_git_repo"):
-            return ""
-
-        parts = [
-            "This is the git status at the start of the conversation. Note that this status is a snapshot in time, and will not update during the conversation.",
-            f"Current branch: {git_info.get('branch', 'unknown')}",
-            f"Main branch (you will usually use this for PRs): {git_info.get('main_branch', 'main')}",
-        ]
-        if git_info.get("git_user"):
-            parts.append(f"Git user: {git_info['git_user']}")
-        parts.append(f"Status:\n{git_info.get('status', '(unknown)')}")
-        if git_info.get("recent_commits"):
-            parts.append(f"Recent commits:\n{git_info['recent_commits']}")
-
-        return "\n\n".join(parts)
 
     def _build_session_guidance_section(self) -> str:
         return "Preserve goals, constraints, sources, unfinished work and actual tool/worker states across context updates."
@@ -262,9 +181,7 @@ class ContextBuilder:
 
         if language_preference:
             dynamic_sections.append(
-                f"# Language\nAlways respond in {language_preference}. Use {language_preference} "
-                f"for all explanations, comments, and communications with the user. "
-                f"Technical terms and code identifiers should remain in their original form."
+                f"# Language\nUse {language_preference} for prose and comments; preserve technical terms and code identifiers."
             )
 
         project_instructions = self._load_project_instructions()

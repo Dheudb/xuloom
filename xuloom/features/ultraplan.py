@@ -9,7 +9,7 @@ back into the PlanManager for the main agent to execute.
 import asyncio
 import uuid
 import time
-from typing import Optional, Callable, Awaitable
+from typing import Optional, Callable
 
 
 ULTRAPLAN_TIMEOUT_S = 30 * 60  # 30 minutes

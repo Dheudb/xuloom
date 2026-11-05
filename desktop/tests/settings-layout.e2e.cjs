@@ -39,9 +39,11 @@ async function layout() {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}/v1`;
   const profile = { adapter: 'openai', efforts: ['low', 'high'], canDisable: false, thinking: 'default', effort: 'high', budgetTokens: 2048 };
+  const officialModels = ['gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-6-astra'];
   fs.writeFileSync(path.join(config, 'config.json'), JSON.stringify({ model_provider: 'openai', active_model_connection: 'fixture', model_connections: [
     { id: 'fixture', name: '我的研究连接', provider: 'openai', model: 'research-model', models: ['research-model', 'another-model'], base_url: base, api_key: 'owned-fixture-key',
       model_inputs: { 'research-model': ['text', 'image'] }, model_reasoning: { 'research-model': profile }, native_search: { backend: 'deepseek', model: '', baseUrl: '' } }
+    , { id: 'official-fixture', name: 'Official fixture', provider: 'openai', base_url: 'https://api.openai.com/v1', api_key: 'owned-invalid-fixture', model: 'gpt-6.1-sol', models: officialModels }
   ] }));
   try {
     const env = { ...process.env, XULOOM_TEST_HEADLESS: '1', XULOOM_USER_DATA: data, XULOOM_DATA_DIR: data, XULOOM_CONFIG_DIR: config, HOME: home, USERPROFILE: home, XULOOM_SKILLS_PATHS: '' };
@@ -81,6 +83,33 @@ async function layout() {
     assert.deepEqual(saved.model_reasoning['research-model'], profile);
     assert.deepEqual(saved.model_inputs['research-model'], ['text', 'image']);
     assert.deepEqual(saved.native_search, { backend: 'deepseek', model: '', baseUrl: '' });
+    await page.getByRole('button', { name: '设置与模型', exact: true }).click();
+    await page.getByLabel('API 连接', { exact: true }).selectOption('official-fixture');
+    assert.equal(await page.getByLabel('模型 ID', { exact: true }).getAttribute('list'), null, 'No browser datalist/filter arrow beside model management');
+    await page.getByRole('button', { name: '管理模型', exact: true }).click();
+    const choices = page.getByRole('group', { name: '已配置模型', exact: true });
+    assert.equal(await choices.getByRole('button').count(), 5, 'Every configured model stays visible, independent of current input');
+    await page.locator('.model-options > summary').click();
+    for (const name of officialModels) {
+      await choices.getByRole('button', { name, exact: true }).click();
+      assert.equal(await page.getByLabel('模型 ID', { exact: true }).inputValue(), name);
+      assert.equal(await page.getByLabel('模型上下文窗口', { exact: true }).inputValue(), '1050000');
+      assert.equal(await page.getByLabel('推理参数格式', { exact: true }).inputValue(), 'openai');
+      const effortOptions = page.getByRole('group', { name: '模型支持的推理强度', exact: true });
+      const labels = await effortOptions.locator('label').allTextContents();
+      assert.deepEqual(labels, name === 'gpt-6.1-sol' || name === 'gpt-6-astra' ? ['低', '中', '高', '极高', '最高'] : ['不推理', '低', '中', '高', '极高', '最高']);
+      assert(await page.locator('.model-spec').isVisible());
+    }
+    await choices.getByRole('button', { name: 'gpt-6.1-sol', exact: true }).click();
+    await page.locator('.reasoning-defaults').getByLabel('推理强度', { exact: true }).selectOption('max');
+    await capture('model-settings-official-specs');
+    await page.getByRole('button', { name: '保存配置', exact: true }).click();
+    await page.getByRole('dialog', { name: '工作台设置' }).waitFor({ state: 'hidden' });
+    const official = await page.evaluate(() => window.xuloom.invoke('config.get'));
+    assert.equal(official.model, 'gpt-6.1-sol');
+    assert.equal(official.modelReasoning['gpt-6.1-sol'].effort, 'max');
+    assert.equal(official.modelReasoning['gpt-6-astra'].effort, 'medium');
+    assert.equal(official.modelContext['gpt-6-sol'].window, 1050000);
     assert.deepEqual(requests, [], 'Layout and saving must not call a model or provider');
     assert.deepEqual(errors, []);
     console.log('PASS: compact model settings, aligned controls at four sizes, persistent footer, hidden options preserve models/reasoning/search and save without API calls');

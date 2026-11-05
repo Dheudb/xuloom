@@ -12,8 +12,7 @@ from mcp.client.auth.utils import issuers_match, validate_metadata_issuer
 from mcp.shared.auth import OAuthClientInformationFull, OAuthClientMetadata, OAuthMetadata, OAuthToken, ProtectedResourceMetadata
 from mcp.shared._httpx_utils import next_request_within_origin, stream_within_origin
 
-from xuloom.protocols.oauth_callback import OAuthCallback
-from xuloom.protocols.oauth_store import OAuthFailure, OAuthRequired, OAuthStore, lease
+from xuloom.protocols.oauth_store import OAuthFailure, OAuthRequired, lease
 
 
 _sensitive=ContextVar("xuloom_mcp_oauth_diagnostic",default=False)

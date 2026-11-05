@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { X, LoaderCircle } from "lucide-react";
+import { useDialogFocus } from "./useDialogFocus";
 type Snapshot = { estimatedTokens: number; window: number; reserve: number; source: string; estimator: string;
   components: { system: number; tools: number; conversation: number; memoryCharacters: number };
   last?: { before: number; after: number; elapsedSeconds: number; backend: string };
@@ -9,13 +10,14 @@ export default function ContextDialog({ invoke, busy, close }: { invoke: (method
   const [focus, setFocus] = useState("");
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
+  const dialogRef = useDialogFocus('[aria-label="添加工具与模式"]');
   useEffect(() => { let live = true; invoke("context.get").then(value => { if (live) setSnapshot(value); }).catch(e => { if (live) setError(String(e)); }); return () => { live = false; }; }, []);
   async function compact() {
     setWorking(true); setError("");
     try { setSnapshot(await invoke("context.compact", { focus })); } catch (e) { setError(String(e)); } finally { setWorking(false); }
   }
   return <div className="overlay" onMouseDown={e => { if (e.target === e.currentTarget && !working) close(); }}>
-    <section className="dialog context-dialog" role="dialog" aria-modal="true" aria-label="上下文用量" onKeyDown={e => { if (e.key === "Escape" && !working) close(); }}>
+    <section ref={dialogRef} className="dialog context-dialog" role="dialog" aria-modal="true" aria-label="上下文用量" onKeyDown={e => { if (e.key === "Escape" && !working) close(); }}>
       <header><h2>上下文</h2><button aria-label="关闭上下文" disabled={working} onClick={close}><X size={18} /></button></header>
       {snapshot ? <>
         <p className="context-total">约 {snapshot.estimatedTokens.toLocaleString()} <span>/ {snapshot.window.toLocaleString()} tokens</span></p>

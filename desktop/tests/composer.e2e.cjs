@@ -37,7 +37,8 @@ const add = () => page.getByRole("button", {name:"添加工具与模式",exact:t
   const composerBox=await page.locator('.composer').boundingBox(), sendBox=await page.getByRole('button',{name:'发送任务',exact:true}).boundingBox();
   assert(composerBox.x+composerBox.width-sendBox.x-sendBox.width<25,"Send button stays at the right edge");
   await add().click(); const menu = page.getByRole("menu", {name:"添加工具与模式",exact:true});
-  assert.equal(await menu.getByRole("menuitem").count(),8);
+  assert.equal(await menu.getByRole("menuitem").count(),9);
+  await menu.getByRole("menuitem",{name:/^上下文 /}).waitFor();
   await page.keyboard.press("ArrowDown"); await page.keyboard.press("Escape"); assert.equal(await menu.count(),0);
   assert.equal(await add().evaluate(el=>el===document.activeElement),true);
   await add().click(); await menu.getByRole("menuitem",{name:/计划模式/}).click();

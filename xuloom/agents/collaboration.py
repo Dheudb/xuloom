@@ -64,5 +64,5 @@ def instructions(profile):
         "ultra": "Proactively delegate independent research, alternatives or checks early; no extra request is needed. Keep the critical path and synthesis yourself and work alongside agents. Answer simple tasks directly.",
     }[mode]
     return (f"# Collaboration: {mode}\n{principle}\n"
-            "Discover agent tools when needed. Give self-contained assignments, avoid duplicate work and wait for results. "
+            "Give self-contained assignments and avoid duplicate work. "
             "Runtime queues workers FIFO; no manual concurrency batching. Auto/Ultra change initiative, not quantities or permissions.")

@@ -1,4 +1,5 @@
 import json
+import hashlib
 import os
 from pathlib import Path
 import subprocess
@@ -22,7 +23,8 @@ class UpdateMetadataTests(unittest.TestCase):
                     (stage / folder / "fixture").write_text("new")
                 (package / "resources/app").mkdir()
                 lock = package / "resources/app/locked.txt"; lock.write_text("old")
-                (stage / "manifest.json").write_text(json.dumps({"metadataDirectory": "xuloom-0.1.1.dist-info", "pythonPackages": []}))
+                (stage / "manifest.json").write_text(json.dumps({"metadataDirectory": "xuloom-0.1.1.dist-info", "pythonPackages": [],
+                    "originalExeSha256":hashlib.sha256((package/"Xuloom.exe").read_bytes()).hexdigest()}))
                 handle = lock.open("rb") if fail else None
                 try:
                     result = subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script),

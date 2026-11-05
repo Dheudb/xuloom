@@ -113,6 +113,23 @@ class HierarchyTests(unittest.IsolatedAsyncioTestCase):
         grants = [r for r in self.controller.store.walk("permit", run["id"], statuses=["granted"]) if r.get("allocation")]
         self.assertEqual(sum(r["units"] for r in grants), 3)
 
+    async def test_run_budget_remains_bounded_when_node_runs_offline(self):
+        from xuloom.scaling import budget
+        run=await self.controller.dispatch('create',{'goal':'Bounded evidence','nodes':['lab'],
+            'target':6,'accept_high_usage':True,'budget':{'output_tokens':2000000}})
+        leader=await self.accepted_leader(run)
+        self.disconnected=True
+        result=await self.wait(lambda: (r if r['status'] in {'completed','failed'} else None)
+            if (r:=self.host.store.get('execution',leader['id'])) else None)
+        self.assertEqual(result['status'],'completed',result)
+        child=self.host.leadership.store.get('run',result['child_run_id'])
+        parent_usage=budget.view(self.controller.store,run)
+        child_usage=budget.view(self.host.leadership.store,child)
+        self.assertLessEqual(parent_usage['committed_output_tokens'],2000000)
+        self.assertLessEqual(child_usage['committed_output_tokens'],child['budget']['output_tokens'])
+        self.assertGreater(parent_usage['offline_reserved_output'],0)
+        self.assertGreater(child_usage['unknown_usage_requests'],0)
+
     async def test_fifty_is_a_governance_width_and_group_primary_keeps_its_session(self):
         config = json.loads(self.config.read_text()); config["scaling_nodes"][0]["max_agents"] = 51
         self.config.write_text(json.dumps(config), encoding="utf-8")

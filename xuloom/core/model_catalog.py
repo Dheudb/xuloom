@@ -22,14 +22,15 @@ def model_ids(values):
     return result
 
 
-def connections(cfg):
+def connections(cfg, *, defaults=True):
     saved = cfg.get("model_connections") or []
     if not isinstance(saved, list):
         raise ValueError("model_connections 必须是数组")
     result = [dict(item, models=model_ids(item.get("models", []))) for item in saved
               if isinstance(item, dict) and isinstance(item.get("id"), str) and item.get("provider") in {"openai", "anthropic"}]
     if result or "model_connections" in cfg:
-        return result
+        from xuloom.core.model_specs import with_defaults
+        return [with_defaults(item) for item in result] if defaults else result
     active = cfg.get("model_provider") or os.environ.get("XULOOM_MODEL_PROVIDER", "anthropic")
     for provider in ("openai", "anthropic"):
         model = cfg.get(provider + "_model") or os.environ.get(provider.upper() + "_MODEL", "")
@@ -40,7 +41,8 @@ def connections(cfg):
                            "provider": provider, "base_url": base, "api_key": key, "model": model,
                            "models": model_ids(cfg.get(provider + "_models", [model] if model else [])),
                            "network_mode": cfg.get("network_mode", "direct")})
-    return result
+    from xuloom.core.model_specs import with_defaults
+    return [with_defaults(item) for item in result] if defaults else result
 
 
 def active_connection(cfg):
@@ -54,12 +56,15 @@ def active_connection(cfg):
 
 def public_connection(item):
     from xuloom.security.credentials import is_protected
+    from xuloom.core.model_specs import official
     return {"connectionId": item["id"], "connectionName": item.get("name", item["id"]), "provider": item["provider"],
             "model": item.get("model", ""), "models": item.get("models", []), "baseUrl": item.get("base_url", ""),
             "hasKey": bool(item.get("api_key")) and not is_protected(item.get("api_key")),
             "credentialUnavailable": is_protected(item.get("api_key")), "networkMode": item.get("network_mode", "direct"),
             "modelInputs": item.get("model_inputs", {}), "modelReasoning": item.get("model_reasoning", {}),
             "modelContext": item.get("model_context", {}),
+            "modelSpecs": {name: spec for name in item.get('models', [])
+                           if (spec := official(item['provider'], name, item.get('base_url', ''))) is not None},
             "nativeSearch": item.get("native_search", {"backend": "builtin", "model": "", "baseUrl": ""})}
 
 

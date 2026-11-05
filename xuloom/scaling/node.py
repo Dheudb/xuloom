@@ -96,7 +96,7 @@ class Execution(DesktopBridge):
             "quota": self.row["quota"], "limits": self.row["limits"]})
         if not isinstance(reply, dict) or reply.get("ok") is not True:
             raise ValueError("Scaling model admission unavailable; no request was started")
-        return {"id": reply["id"], "maximum": maximum}
+        return {"id": reply["id"], "maximum": reply.get('maximum',maximum)}
 
     def release(self, lease, reported):
         self.node.store.update("request", lease["id"], lambda row: row.update(status="released", reported=reported))
@@ -171,7 +171,7 @@ class Node:
         if backend != "native":
             from xuloom.agents.external.program import resolve
             program = resolve(None, backend=backend, workspace=os.getcwd())
-        return {"protocol": PROTOCOL,"capabilities":{"group_leaders":True}, "hostname": socket.gethostname(), "pool": models.public(pool),
+        return {"protocol": PROTOCOL,"capabilities":{"group_leaders":True,"output_budget":True}, "hostname": socket.gethostname(), "pool": models.public(pool),
             "machine": digest([socket.gethostname(), str(data_directory().resolve())]),
             "resources": self.resources(params.get("reserve_percent", 25)), "binding": binding,
             "quota": connection_id(binding["api_base_url"] or ("https://api.openai.com/v1" if binding["provider"] == "openai" else "https://api.anthropic.com"), options["api_key"]),
@@ -237,7 +237,7 @@ class Node:
             return read_artifact(self,job["settings"].get("shared_run",job["id"]),params.get("entry"),params.get("offset",0))
         if method == "submit":
             task = params.get("task")
-            if not isinstance(task, dict) or task.keys() - {"id", "kind", "text", "label", "group", "input_version", "work_key", "purpose", "variant"} or task.get("kind") not in {"plan", "expand", "explore", "group", "synthesize", "leader", "dialogue"}:
+            if not isinstance(task, dict) or task.keys() - {"id", "kind", "text", "label", "group", "input_version", "work_key", "purpose", "variant", "retry_of"} or task.get("kind") not in {"plan", "expand", "explore", "group", "synthesize", "leader", "dialogue"}:
                 raise ValueError("Invalid Scaling work item")
             if not isinstance(task.get("input_version","1"),str) or not 1<=len(task.get("input_version","1"))<=300:raise ValueError("Invalid shared input version")
             if task.get("purpose","explore") not in {"explore","verify"} or any(not isinstance(task.get(k,""),str) or len(task.get(k,""))>maximum for k,maximum in (("work_key",500),("variant",300))):raise ValueError("Invalid shared work identity")
@@ -273,6 +273,9 @@ class Node:
                 "coordinator": coordinator, "session_id": session_id}
             with self.store.connection() as db:
                 db.execute("BEGIN IMMEDIATE")
+                if task.get("retry_of"):
+                    from .shared import release_failed_retry
+                    release_failed_retry(self, row, db)
                 if task["kind"]=="explore":
                     from .shared import claim
                     result=claim(self,row,db)
@@ -493,7 +496,7 @@ class Node:
         from .shared import finish
         try:finish(self,row,final,files)
         except Exception as error:
-            self.store.update("execution",row["id"],lambda value:value.update(shared_error=str(error)))
+            self.store.update("execution",row["id"],lambda value,message=str(error):value.update(shared_error=message))
 
     async def close(self):
         if self.leadership: await self.leadership.close()

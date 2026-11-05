@@ -172,7 +172,7 @@ Plan mode note: In plan mode, use this tool to clarify requirements or choose be
                 desc = opt.get("description", "")
                 desc_str = f" — {desc}" if desc else ""
                 prompt_text += f"    [{j+1}] {label}{desc_str}\n"
-            prompt_text += f"    [0] Other (type custom answer)\n"
+            prompt_text += "    [0] Other (type custom answer)\n"
 
             if multi:
                 raw = input(prompt_text + "  Select one or more (comma-separated numbers): ").strip()

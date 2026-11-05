@@ -28,6 +28,14 @@ $changes = [System.Collections.Generic.List[object]]::new()
 try {
     if (-not (Test-Path -LiteralPath (Join-Path $packageRoot 'Xuloom.exe') -PathType Leaf)) { throw 'The original Xuloom.exe is missing.' }
     $manifest = Get-Content -LiteralPath (Join-Path $stageRoot 'manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ((Get-FileHash -LiteralPath (Join-Path $packageRoot 'Xuloom.exe') -Algorithm SHA256).Hash -ne $manifest.originalExeSha256) { throw 'The installation executable changed since staging.' }
+    if ($manifest.resourceHashes) {
+        foreach ($resource in $manifest.resourceHashes.PSObject.Properties) {
+            $resourcePath = Join-Path $stageRoot $resource.Name
+            Assert-Child $resourcePath $stageRoot
+            if ((Get-FileHash -LiteralPath $resourcePath -Algorithm SHA256).Hash -ne $resource.Value) { throw 'Staged resource does not match its build manifest.' }
+        }
+    }
     if ($manifest.metadataDirectory -notmatch '^xuloom-[0-9A-Za-z_.-]+\.dist-info$') { throw 'Invalid Python package metadata directory.' }
     $entries = @(
         @{ Source = (Join-Path $stageRoot 'app'); Target = (Join-Path $packageRoot 'resources\app'); Backup = (Join-Path $stageRoot 'backup\app') },
@@ -48,6 +56,10 @@ try {
         $hashes = @{}
         foreach ($file in Get-ChildItem -LiteralPath $entry.Source -File -Recurse) {
             Assert-Child $file.FullName $stageRoot
+            if ($manifest.resourceHashes) {
+                $resourceName = $file.FullName.Substring($stageRoot.Length + 1).Replace('\', '/')
+                if (-not $manifest.resourceHashes.PSObject.Properties[$resourceName]) { throw 'Unexpected resource outside the build manifest.' }
+            }
             $hashes[$file.FullName.Substring($entry.Source.Length + 1)] = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
         }
         $entry.Hashes = $hashes

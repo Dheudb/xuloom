@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useDialogFocus } from './useDialogFocus';
 import {
   X,
   Search,
@@ -118,6 +119,7 @@ export default function McpDialog({
   const [authorization, setAuthorization] = useState<{name: string; url: string; callback: string} | null>(null);
   const [callbackUrl, setCallbackUrl] = useState("");
   const signingIn = useRef("");
+  const dialog=useDialogFocus();
   const locked = busy || !!working;
 
   useEffect(() => {
@@ -297,6 +299,8 @@ export default function McpDialog({
   return (
     <div className="overlay" onClick={() => !working && close()}>
       <section
+        ref={dialog}
+        onKeyDown={e=>{if(e.key==='Escape' && !working){e.stopPropagation();close();}}}
         role="dialog"
         aria-modal="true"
         aria-label="MCP 市场"

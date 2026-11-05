@@ -38,11 +38,18 @@ async function main() {
     await page.getByRole('textbox',{name:'任务输入'}).fill('GOAL_OBJECTIVE_PROOF');
     await page.getByRole('button',{name:'添加工具与模式',exact:true}).click();
     await page.getByRole('menuitem',{name:/^目标 /}).click();
+    const limited = process.env.XULOOM_TEST_GOAL_LIMITS === '1';
+    if (limited) {
+      await page.locator('.goal-limits summary').click();
+      await page.getByLabel('累计输出 tokens',{exact:true}).fill('12000');
+      await page.getByLabel('最多执行轮数',{exact:true}).fill('3');
+    }
     await page.getByRole('button',{name:'发送任务',exact:true}).click();
     await page.waitForFunction(()=>!document.querySelector('.send-button.stop'));
     for(let i=0;i<100 && JSON.parse(fs.readFileSync(checkpoint)).metadata.goal?.status!=='completed';i++) await page.waitForTimeout(100);
     assert.equal(JSON.parse(fs.readFileSync(checkpoint)).metadata.goal.status,'completed');
-    assert.equal(JSON.parse(fs.readFileSync(checkpoint)).metadata.goal.budget.output_tokens,null);
+    assert.equal(JSON.parse(fs.readFileSync(checkpoint)).metadata.goal.budget.output_tokens,limited ? 12000 : null);
+    if (limited) assert.equal(JSON.parse(fs.readFileSync(checkpoint)).metadata.goal.budget.rounds,3);
     assert.equal(JSON.parse(fs.readFileSync(checkpoint)).metadata.goal.accepted_by,'model_report');
     const completed=page.getByRole('button',{name:'查看目标完成依据',exact:true});
     await completed.waitFor(); assert((await completed.innerText()).includes('模型报告完成'));

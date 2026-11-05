@@ -40,7 +40,7 @@ def configured(engine, model=None):
     from xuloom.core.model_catalog import connections, active_connection
     cfg = load_config()
     active = active_connection(cfg)
-    matches = [item for item in connections(cfg) if item["provider"] == engine.model_provider
+    matches = [item for item in connections(cfg, defaults=False) if item["provider"] == engine.model_provider
         and normalize_api_base_url(engine.model_provider, item.get("base_url", "")) == normalize_api_base_url(engine.model_provider, engine.api_base_url)
         and model in item.get("models", [])]
     selected = next((item for item in matches if item["id"] == active["id"]), None)
@@ -53,13 +53,15 @@ def policy(engine, model=None):
     override = os.environ.get("XULOOM_CONTEXT_WINDOW", "")
     if override and (not override.isdigit() or int(override) < 4096):
         raise ValueError("XULOOM_CONTEXT_WINDOW must be a token count of at least 4096")
-    window = profile["window"] or (int(override) if override else 65536)
+    from xuloom.core.model_specs import official
+    spec = official(engine.model_provider, model or engine.primary_model, engine.api_base_url)
+    window = profile["window"] or (int(override) if override else spec['window'] if spec else 65536)
     reserve = profile["reserve"] or min(16384, max(1024, window // 8))
     if reserve >= window: raise ContextLimitError("Output reserve exceeds the configured model window")
     budget = window - reserve
     recent = min(profile["keepRecent"] or min(20000, window // 4), max(512, budget // 2))
     return dict(profile, window=window, reserve=reserve, keepRecent=recent, inputBudget=budget,
-        source="model" if profile["window"] else "environment" if override else "conservative_default")
+        source="model" if profile["window"] else "environment" if override else "official_spec" if spec else "conservative_default")
 
 
 def request_parts(engine):
@@ -211,6 +213,7 @@ def continuity(engine, messages):
 
 async def summarize(engine, messages, focus, input_budget):
     """Bound each summary request; carry forward prior summaries without raw replay."""
+    engine.compactor.budget_engine = engine
     points = set(boundaries(messages))
     previous, start, snapshot = "", 0, stable(engine)
     notes_path = IOPath(engine.session_memory_manager.memory_path)

@@ -7,6 +7,7 @@ on:
   workflow_dispatch:
 jobs:
   engine:
+    timeout-minutes: 45
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -27,6 +28,7 @@ jobs:
           node-version: '24'
       - run: python -m unittest discover -s tests -v
   desktop:
+    timeout-minutes: 60
     runs-on: windows-latest
     defaults:
       run:

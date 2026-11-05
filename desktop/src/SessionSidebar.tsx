@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useDialogFocus } from "./useDialogFocus";
 import { Archive, ChevronDown, ChevronRight, Copy, Folder, FolderOpen,
   LoaderCircle, MessageSquare, MoreHorizontal, Pencil, Pin, Plus, RefreshCw, Search,
   Trash2, X, CheckSquare, LogOut, FolderInput, Link2, Server } from "lucide-react";
@@ -28,6 +29,7 @@ export default function SessionSidebar({ catalog, activeId, live, opening, actio
   const [dragging, setDragging] = useState("");
   const [dropTarget, setDropTarget] = useState("");
   const [working, setWorking] = useState(false);
+  const dialogRef = useDialogFocus(undefined, !!(rename || remove || move));
   const [error, setError] = useState("");
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   const menuRef = useRef<HTMLDivElement>(null);
@@ -106,7 +108,6 @@ export default function SessionSidebar({ catalog, activeId, live, opening, actio
   function renderMenu(value: Menu) {
     if (!menu || menu.kind !== value.kind || (menu.kind === "session"
       ? menu.row.id !== (value.row as CatalogSession).id : menu.row.path !== (value.row as CatalogProject).path)) return null;
-    const row = value.row;
     return createPortal(<div role="menu" aria-label={value.kind === "session" ? "会话操作" : "项目操作"}
       className="sidebar-row-menu" style={{ position: "fixed", ...menuPosition }} ref={menuRef} onClick={(event) => event.stopPropagation()}
       onKeyDown={(event) => {
@@ -215,7 +216,7 @@ export default function SessionSidebar({ catalog, activeId, live, opening, actio
       })}
     </div>
     {(rename || remove || move) && <div className="overlay" onClick={() => { if (!working) { setRename(null); setRemove(null); setMove(null); } }}>
-      <section className="dialog" role="dialog" aria-modal="true" aria-label={move ? "移动会话" : rename ? "重命名" : "移除项目"} onClick={(e) => e.stopPropagation()}>
+      <section ref={dialogRef} className="dialog" role="dialog" aria-modal="true" aria-label={move ? "移动会话" : rename ? "重命名" : "移除项目"} onClick={(e) => e.stopPropagation()}>
         <header><h2>{move ? "移动会话" : rename ? "重命名" : remove?.deleteHistory ? "删除项目会话记录" : "从列表移除项目"}</h2></header>
         {move && <><p>{move.title}</p><label>目标项目<select aria-label="目标项目" value={destination} onChange={(event) => setDestination(event.target.value)}>
           {projects.filter((project) => !project.remote && (move.scope === "standalone" || project.path !== move.project)).map((project) => <option key={project.path} value={project.path}>{project.name}</option>)}

@@ -211,6 +211,13 @@ async def accept(host, parent, task):
         "permission": parent["settings"]["permission"], "token": secrets.token_hex(32), "round": 1, "group_width": width,
         "parent_job": parent["id"], "parent_task": task["id"], "completion_basis": None}
     run["shared_version"]=task.get("input_version","1")
+    if description.get('budget'):
+        from .budget import normalize
+        supplied=description['budget']
+        run['budget']=normalize({k:v for k,v in supplied.items() if k!='deadline'})
+        if 'deadline' in supplied:
+            if type(supplied['deadline']) not in (int,float) or not math.isfinite(supplied['deadline']): raise ValueError('Invalid admission deadline')
+            run['budget']['deadline']=supplied['deadline']
     if description.get("direct_group"):
         run.update(direct_group=True,partition=part,partitions=parts)
     controller.store.put("run", run)

@@ -194,6 +194,14 @@ async def _safe_llm_call(client, model, provider, messages, max_tokens, _retried
     """
     try:
         if provider == "openai":
+            from xuloom.core.model_specs import official
+            if official(provider, model, str(getattr(client, 'base_url', ''))):
+                resp = await client.responses.create(model=model, input=messages, max_output_tokens=max_tokens, store=False)
+                usage.append({'input_tokens': int(getattr(getattr(resp, 'usage', None), 'input_tokens', 0) or 0),
+                              'output_tokens': int(getattr(getattr(resp, 'usage', None), 'output_tokens', 0) or 0)})
+                if resp.status != 'completed':
+                    raise ValueError('Responses summary did not complete; original history retained')
+                return resp.output_text
             resp = await client.chat.completions.create(
                 model=model, messages=messages, max_tokens=max_tokens,
             )

@@ -13,7 +13,7 @@ import time
 from xuloom.core.storage import data_directory
 from xuloom.remote.config import resolve
 from xuloom.remote.ssh import SSHClient
-from . import config, models
+from . import config, models, budget
 from .node import Node, digest
 from .store import Store, identity, new_id, TERMINAL
 
@@ -109,6 +109,7 @@ class Controller:
         value = {k: copy.deepcopy(v) for k, v in run.items() if k not in {"token", "nodes"}}
         value["nodes"] = [{k: v for k, v in n.items() if k not in {"profile", "quota", "model_file"}} for n in run["nodes"]]
         value["counts"] = self.store.counts("task", run["id"])
+        value["budget_usage"] = budget.view(self.store, run)
         value["groups"] = [{k: row.get(k) for k in ("id", "label", "status", "round")} for row in self.store.walk("group", run["id"], brief=True)]
         return value
 
@@ -138,6 +139,7 @@ class Controller:
         if method == "create":
             if params.get("accept_high_usage") is not True:
                 raise ValueError("Explicitly acknowledge Scaling's high model/API usage")
+            limits = budget.normalize(params.get('budget'))
             goal = params.get("goal", "").strip()
             if not 1 <= len(goal) <= 100000:
                 raise ValueError("Supply a Scaling goal (1–100000 characters)")
@@ -163,6 +165,9 @@ class Controller:
                 node = {**saved[key], "profile":resolve(saved[key]["ssh"]) if saved[key].get("location")!="local" else {}}
                 pool = models.export(node) if self.hierarchical else None
                 checked = await self.remote(node, "check", {**node, **({"provided_models": pool} if pool is not None else {})})
+                if limits and (not checked.get('capabilities', {}).get('output_budget') or
+                               node['backend'] != 'native' or any(p['backend'] != 'native' for p in checked.get('pool', []))):
+                    raise ValueError('Budgeted Scaling requires updated native executors on every host')
                 if self.hierarchical and not checked.get("capabilities",{}).get("group_leaders"):
                     raise ValueError("Update execution host Xuloom to v0.1.30 or a compatible grouped-worker runtime")
                 if pool is not None: private_pools[key] = pool
@@ -180,6 +185,9 @@ class Controller:
             run = {"id": run_id, "request_digest": request_digest, "status": "starting", "goal": goal, "token": secrets.token_hex(32),
                 "nodes": [primary] + nodes, "target": target, "permission": params.get("permission", "ask"),
                 "created": time.time(), "round": 1, "completion_basis": None,"grouped_leaders":self.hierarchical}
+            if limits:
+                run['budget'] = {k:v for k,v in limits.items() if k != 'seconds'}
+                if limits.get('seconds'): run['budget']['deadline'] = time.time() + limits['seconds']
             self.store.put("run", run)
             if private_pools:
                 for node in run["nodes"][1:]:
@@ -252,7 +260,8 @@ class Controller:
                 envelope["goal"] += note
                 text = json.dumps(envelope, ensure_ascii=False)
             fresh = self.add_task(run, task["kind"], text,
-                group=task.get("group"), label=task["label"], count=task["count"], node=task.get("node"))
+                group=task.get("group"), label=task["label"], count=task["count"], node=task.get("node"),
+                work={**{k: task[k] for k in ("work_key", "purpose", "variant", "input_version") if k in task}, "retry_of": task["id"]})
             self.store.update("task", task["id"], lambda row: row.update(superseded=fresh["id"], handled=True))
             if task["kind"] == "group":
                 self.store.update("group", task["group"], lambda row: row.update(summary=fresh["id"], status="summarizing"))
@@ -266,6 +275,8 @@ class Controller:
         if method in {"pause", "resume", "cancel"}:
             if run["status"] in {"completed", "cancelled"}:
                 raise ValueError("This Scaling run has ended")
+            if method == 'resume' and run.get('budget_stopped'):
+                raise ValueError('Budget admission stopped this run; inspect the preserved results or cancel it')
             action_status = {"pause": "paused", "resume": "running", "cancel": "cancelling"}[method]
             run = self.store.update("run", run["id"], lambda row: row.update(status=action_status, error=None, control_epoch=row.get("control_epoch", 0) + 1))
             if method == "cancel":
@@ -480,7 +491,7 @@ class Controller:
             if quota != node["check"]["quota"]:
                 raise ValueError("Node changed provider admission identity")
             if request["status"] == "released":
-                self.store.put("permit", {"id": key, "run_id": run["id"], "status": "released", "quota": quota})
+                budget.settle(self.store, run, request, quota)
                 await self.remote(node, "ack", {**self.auth(run), "id": key})
                 continue
             try: dialogue = self.store.get("task", request["task_id"])["kind"] == "dialogue"
@@ -520,13 +531,18 @@ class Controller:
                     head = (others or queued)[0]
                     if head["id"] != key: continue
                     if sum(p.get("units", 1) for p in active) >= cap or time.time() < saved["next_at"]: continue
+                    maximum = budget.grant(db, run, request['payload'].get('maximum', 1))
                     permit = self.store.put_db(db, "permit", {"id": key, "run_id": run["id"], "quota": quota,
-                        "limits": policy, "status": "granted", "node": node["id"], "task_id": request["task_id"], "dialogue":dialogue})
+                        "limits": policy, "status": "granted" if maximum else "denied", "node": node["id"], "task_id": request["task_id"], "dialogue":dialogue,
+                        "output_reserved": maximum})
                     rates = [p["limits"]["requests_per_minute"] for p in active + queued if p["limits"]["requests_per_minute"] is not None]
                     rate = min(rates) if rates else None
                     self.store.put_db(db, "quota", {"id": quota_key, "next_at": time.time() + 60 / rate if rate else 0, "last_owner": owner(permit)})
             if permit["status"] == "granted":
-                await self.remote(node, "answer", {**self.auth(run), "id": key, "answer": {"ok": True, "id": key}})
+                await self.remote(node, "answer", {**self.auth(run), "id": key, "answer": {"ok": True, "id": key, "maximum":permit.get('output_reserved',request['payload'].get('maximum',1))}})
+            elif permit['status'] == 'denied':
+                await self.remote(node, 'answer', {**self.auth(run), 'id': key, 'answer': {'ok':False, 'error':'Scaling output budget or admission deadline exhausted'}})
+                self.store.update('run',run['id'],lambda r:r.update(status='paused',budget_stopped=True,error='Scaling output budget or admission deadline exhausted; existing work is preserved'))
 
     async def dispatch_queued(self, run, dialogue_only=False):
         queued = list(self.store.walk("task", run["id"], statuses=["queued", "dispatching"], brief=True))
@@ -552,15 +568,19 @@ class Controller:
                         grants = allocate(self, run, node, row)
                         if not grants: break
                         value = json.loads(row["text"]); value["allocations"] = grants
+                        if run.get('budget'): value['budget'] = budget.allocate_child(self,run,row)
                         row["text"] = json.dumps(value, ensure_ascii=False)
                         self.store.update("task", row["id"], lambda old: old.update(text=row["text"]))
-                    result = await self.remote(node, "submit", {**self.auth(run), "task": {k: row[k] for k in ("id", "kind", "text", "label", "group", "input_version", "work_key", "purpose", "variant") if k in row}})
+                    result = await self.remote(node, "submit", {**self.auth(run), "task": {k: row[k] for k in ("id", "kind", "text", "label", "group", "input_version", "work_key", "purpose", "variant", "retry_of") if k in row}})
                     self.accept_task(row["id"], result)
                     loads[node["id"]] += 1
                 except ValueError as error:
                     # A negative application receipt is confirmed rejection,
                     # unlike a transport timeout. Do not spin forever on a
                     # schema/configuration failure that cannot be accepted.
+                    if isinstance(error, budget.Exhausted):
+                        self.store.update('run',run['id'],lambda r,message=str(error):r.update(status='paused',budget_stopped=True,error=message))
+                        return
                     if row["kind"] == "leader":
                         self.store.update("task", row["id"], lambda value, error=str(error): value.update(error=error))
                     else: self.store.update("task", row["id"], lambda value, error=str(error): value.update(status="failed", error=error))

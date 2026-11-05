@@ -44,7 +44,7 @@ class ModelNetworkTests(unittest.IsolatedAsyncioTestCase):
         from anthropic import AsyncAnthropic, DefaultAsyncHttpxClient as AnthropicHttp
         from openai import AsyncOpenAI, DefaultAsyncHttpxClient as OpenAIHttp
         for sdk, factory in [(AsyncAnthropic, AnthropicHttp), (AsyncOpenAI, OpenAIHttp)]:
-            async with sdk(api_key="fixture", http_client=model_http_client(factory)) as client:
+            async with sdk(api_key="fixture", http_client=model_http_client(factory, network_mode='direct')) as client:
                 self.assertFalse(client._client.trust_env)
 
     async def test_direct_mode_ignores_implicit_windows_proxy(self):

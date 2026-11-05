@@ -9,6 +9,7 @@ import MediaSettings from "./MediaSettings";
 import type { Capabilities } from "./types";
 import { ReasoningSettings } from "./ReasoningControls";
 import { ContextSettings } from "./ContextSettings";
+import TaskReadiness from './TaskReadiness';
 
 export function SettingsDialog({
   config,
@@ -131,11 +132,12 @@ export function SettingsDialog({
               const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
               buttons[event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (index + (event.key === "ArrowUp" ? -1 : 1) + buttons.length) % buttons.length]?.click();
             }}>
-            {[{ id: "model", label: "模型连接", icon: KeyRound }, { id: "media", label: "生成模型", icon: ImagePlus }, { id: "skills", label: "Skills", icon: Puzzle }, { id: "agents", label: "Subagents", icon: Bot }, { id: "mcp", label: "MCP 服务", icon: Plug }, { id: "remote", label: "SSH 远程", icon: Server }, { id: "workspace", label: "工作区", icon: FolderOpen }, { id: "archives", label: "已归档会话", icon: Archive }].map(({ id, label, icon: Icon }) =>
+            {[{ id: "readiness", label: "任务准备", icon: Check }, { id: "model", label: "模型连接", icon: KeyRound }, { id: "media", label: "生成模型", icon: ImagePlus }, { id: "skills", label: "Skills", icon: Puzzle }, { id: "agents", label: "Subagents", icon: Bot }, { id: "mcp", label: "MCP 服务", icon: Plug }, { id: "remote", label: "SSH 远程", icon: Server }, { id: "workspace", label: "工作区", icon: FolderOpen }, { id: "archives", label: "已归档会话", icon: Archive }].map(({ id, label, icon: Icon }) =>
               <button key={id} role="tab" id={"settings-tab-" + id} aria-selected={tab === id} aria-controls={"settings-panel-" + id} tabIndex={tab === id ? 0 : -1}
                 onClick={(event) => { setTab(id); setError(""); event.currentTarget.focus(); }}><Icon size={16} />{label}</button>)}
           </nav>
           <div className={"settings-content" + (tab === "model" ? " model-settings-content" : "")}>
+        {tab === 'readiness' && <div role="tabpanel" id="settings-panel-readiness" aria-labelledby="settings-tab-readiness"><TaskReadiness invoke={extensions?.invoke || ((method,params)=>window.xuloom.invoke(method,params))} /></div>}
         {tab === "media" && <div role="tabpanel" id="settings-panel-media" aria-labelledby="settings-tab-media"><MediaSettings invoke={extensions?.invoke || ((method, params) => window.xuloom.invoke(method, params))} busy={extensions?.busy} hasSession={!!extensions} control={mediaControl} /></div>}
         {tab === "remote" && <div role="tabpanel" id="settings-panel-remote" aria-labelledby="settings-tab-remote"><RemoteSettings navigationAction={workspaceAction} open={async (id, sessionId) => { await workspaceAction("remote.open", { id, sessionId }); close(); }} /></div>}
         {["skills", "agents", "mcp"].includes(tab) && <div role="tabpanel" id={"settings-panel-" + tab} aria-labelledby={"settings-tab-" + tab}>
@@ -229,15 +231,15 @@ export function SettingsDialog({
             模型
             <input
               aria-label="模型 ID"
-              list="configured-model-names"
-              placeholder="输入或选择模型名称"
+              placeholder="输入模型名称；在管理模型中切换"
               value={form.model}
               onChange={(e) => setForm({ ...form, model: e.target.value })}
             />
           </label>
 <button className="manage-models-toggle" aria-label="管理模型" aria-expanded={managingModels} aria-controls="connection-model-list" onClick={() => setManagingModels(!managingModels)}>管理模型 <span>{modelNames.length}</span><ChevronDown size={14} /></button></div>
-          <datalist id="configured-model-names">{modelNames.map(name => <option value={name} key={name} />)}</datalist>
-          {managingModels && <div id="connection-model-list" className="connection-model-list">          <label>模型列表（每行一个）
+          {managingModels && <div id="connection-model-list" className="connection-model-list">
+          <div role="group" aria-label="已配置模型" className="configured-models">{modelNames.map(name => <button key={name} aria-pressed={form.model === name} onClick={() => setForm({ ...form, model: name })}>{name}{form.model === name && <Check size={14} />}</button>)}</div>
+          <label>模型列表（每行一个）
             <textarea aria-label="可选模型列表" rows={3} value={modelsText} placeholder="model-a\nmodel-b\nmodel-c" onChange={(event) => setModelsText(event.target.value)} />
           </label>
           <div className="model-discovery-actions"><button disabled={discovering || saving} onClick={async () => {
@@ -256,7 +258,7 @@ export function SettingsDialog({
           {discoveryStatus && !managingModels && <p role="status" className="model-status">{discoveryStatus}</p>}
           </div>
           <details className="model-options"><summary><span>更多设置</span><small>思考、上下文、搜索与代理</small><ChevronDown size={15} /></summary><div className="model-options-body">
-            <ContextSettings provider={form.provider} value={form.modelContext[form.model]} change={value => setForm({ ...form, modelContext: { ...form.modelContext, [form.model]: value } })} />
+            <ContextSettings provider={form.provider} value={form.modelContext[form.model]} spec={savedConnection?.baseUrl === form.baseUrl && savedConnection?.provider === form.provider ? savedConnection.modelSpecs?.[form.model] : undefined} change={value => setForm({ ...form, modelContext: { ...form.modelContext, [form.model]: value } })} />
             <section className="model-option-section"><h4>连接选项</h4><div className="model-options-grid">          <label>连接名称<input aria-label="连接名称" value={form.connectionName} onChange={(event) => setForm({ ...form, connectionName: event.target.value })} /></label>
           <label>
             连接方式
@@ -280,7 +282,7 @@ export function SettingsDialog({
               <option value="image">文本与图片</option>{form.provider === "anthropic" && <option value="document">文本、图片与原生文档</option>}
             </select>
           </label>
-          {!!form.model.trim() && <ReasoningSettings provider={form.provider} profile={form.modelReasoning[form.model]} change={profile => {
+          {!!form.model.trim() && <ReasoningSettings provider={form.provider} profile={form.modelReasoning[form.model]} allowedEfforts={savedConnection?.baseUrl === form.baseUrl && savedConnection?.provider === form.provider ? savedConnection.modelSpecs?.[form.model]?.efforts : undefined} change={profile => {
             const modelReasoning = { ...form.modelReasoning };
             if (profile) modelReasoning[form.model] = profile; else delete modelReasoning[form.model];
             setForm({ ...form, modelReasoning });

@@ -32,7 +32,7 @@ def settle(budgets, amount, reported):
 
 
 @asynccontextmanager
-async def model_reservation(engine, maximum):
+async def model_reservation(engine, maximum, *, include_local=True):
     """One request, including a remote owner's existing grant when applicable."""
     acquire = engine.tool_context.get("acquire_model_budget")
     lease = None
@@ -41,7 +41,7 @@ async def model_reservation(engine, maximum):
         if not isinstance(lease, dict) or type(lease.get("maximum")) is not int or not 0 < lease["maximum"] <= maximum or not isinstance(lease.get("id"), str):
             raise ValueError("Delegating model budget did not return a valid reservation")
         maximum = lease["maximum"]
-    budgets = active_budgets(engine.tool_context.get("goal_budget"))
+    budgets = active_budgets(engine.tool_context.get("goal_budget")) if include_local else []
     reserved = None
     grant = {"maximum": maximum, "reported": 0}
     try:

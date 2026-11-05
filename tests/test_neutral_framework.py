@@ -17,7 +17,7 @@ class NeutralFrameworkTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_default_prompt_has_no_repository_probe_or_coding_policy(self):
         builder = ContextBuilder(str(self.root))
-        with patch.object(builder, "get_git_state", side_effect=AssertionError("No default Git probe")):
+        with patch("git.Repo", side_effect=AssertionError("No default Git probe")):
             prompt = builder.generate_system_prompt()
         for old in ("primarily request", "3+ file", "helping the user with programming", "independent adversarial verification", "Explore the codebase"):
             self.assertNotIn(old, prompt)
@@ -43,9 +43,8 @@ class NeutralFrameworkTests(unittest.IsolatedAsyncioTestCase):
         for text in ("你好", "解释一下什么是光合作用", "把这句话写得更简洁"):
             self.fixture(["DIRECT_ANSWER"])
             self.requests.clear()
-            with patch.object(self.engine.attachment_collector, "get_changed_files_from_git") as probe:
-                result = await self.engine.run(text, sys_print_callback=lambda _: None)
-                probe.assert_not_called()
+            self.assertFalse(hasattr(self.engine.attachment_collector, "get_changed_files_from_git"))
+            result = await self.engine.run(text, sys_print_callback=lambda _: None)
             self.assertTrue(result.ok)
             self.assertEqual(result.text, "DIRECT_ANSWER")
             self.assertEqual(len(self.requests), 1)

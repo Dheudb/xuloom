@@ -1527,6 +1527,9 @@ body.panel-resizing iframe { pointer-events: none; }
 .manage-models-toggle[aria-expanded=true] > svg { transform: rotate(180deg); }
 .connection-model-list { padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }
 .connection-model-list textarea { min-height: 78px; background: white; }
+.configured-models { display: grid; gap: 4px; margin-bottom: 14px; max-height: 220px; overflow: auto; }
+.configured-models button { display: flex; align-items: center; justify-content: space-between; gap: 10px; text-align: left; overflow-wrap: anywhere; min-width: 0; background: transparent; border-color: transparent; }
+.configured-models button[aria-pressed=true] { color: var(--accent); background: var(--surface-selected, #eaf2ff); }
 .connection-model-list .model-discovery-actions { margin: 9px 0 0; }
 .connection-model-list .fine-print { font-size: 11px; margin-top: 8px; }
 .model-status { font-size: 12px; color: var(--success); }
@@ -2078,3 +2081,21 @@ body.panel-resizing iframe { pointer-events: none; }
 .reference-icon { display: inline-block; vertical-align: -.12em; margin-right: .28em; flex-shrink: 0; }
 .source-line.source-selected { background: var(--action-soft); box-shadow: inset 3px 0 var(--accent); }
 .file-preview > .workspace-tree { flex: 1; min-height: 0; overflow: auto; }
+/* Optional limits reuse the existing goal budget, not a separate scheduler. */
+.goal-limits { margin: 6px 24px; font-size: 13px; }
+.goal-limits summary { cursor: pointer; }
+.goal-limits > div { display: flex; flex-wrap: wrap; gap: 12px; padding-top: 8px; }
+.goal-limits label { display: grid; gap: 4px; flex: 1 1 140px; }
+.goal-limits input { width: 100%; min-width: 0; padding: 6px; }
+.readiness-row { border-bottom: 1px solid var(--border); padding: 12px 0; }
+.readiness-row p { margin: 6px 0; }
+.task-readiness { color: var(--text-secondary); font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+.task-readiness h3 { color: var(--text); font-size: 16px; margin: 0 0 8px; }
+.task-readiness h4 { color: var(--text); font-size: 14px; margin: 22px 0 8px; }
+.task-readiness strong { color: var(--text); }
+.task-readiness p { margin: 7px 0; }
+.task-readiness button { background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 9px; padding: 8px 14px; margin: 8px 0; font: inherit; cursor: pointer; }
+.task-readiness button:disabled { opacity: .6; cursor: wait; }
+.task-readiness summary { cursor: pointer; margin: 12px 0; }
+.scaling-budget { margin: 12px 0; }
+.scaling-budget label { display: block; margin: 8px 0; }

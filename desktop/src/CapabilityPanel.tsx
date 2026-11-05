@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useDialogFocus } from "./useDialogFocus";
 import { skillScope } from "./skill-mention";
 import {
   Plus,
@@ -50,6 +51,7 @@ export default function CapabilityPanel({
     null,
   );
   const [guide, setGuide] = useState<"skills" | "agents" | null>(null);
+  const previewRef = useDialogFocus(undefined, !!preview);
   const [historyWorker, setHistoryWorker] = useState<{ id: string; name: string; remoteUrl?: string } | null>(null);
   useEffect(() => setHistoryWorker(null), [session?.id]);
   async function importDirectory(kind: string) {
@@ -369,7 +371,10 @@ export default function CapabilityPanel({
         <div className="overlay" onClick={() => setPreview(null)}>
           <section
             className="dialog skill-preview"
+            ref={previewRef}
             role="dialog"
+            aria-modal="true"
+            onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); setPreview(null); } }}
             aria-label={preview.kind === "agent" ? "代理定义" : "技能指令"}
             onClick={(e) => e.stopPropagation()}
           >

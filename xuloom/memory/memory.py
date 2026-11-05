@@ -1,5 +1,4 @@
 import copy
-import asyncio
 import hashlib
 import json
 import os
@@ -332,39 +331,6 @@ class MemoryCompactor:
         )
         return should_compact, estimated_tokens
 
-    async def should_compact_precise(
-        self,
-        messages: list,
-        *,
-        model: str,
-        system: str = "",
-        tools: list = None,
-        thinking: dict = None,
-        token_budget: int = 60000,
-        reserve_tokens: int = 12000,
-        hard_message_count: int = 30,
-        cache_read_input_tokens: int = 0,
-        cache_creation_input_tokens: int = 0,
-        max_cache_penalty_tokens: int = 12000,
-    ) -> tuple[bool, int, str]:
-        estimated_tokens, source = await self.estimate_tokens_precise(
-            messages,
-            model=model,
-            system=system,
-            tools=tools,
-            thinking=thinking,
-        )
-        cache_pressure_tokens = max(
-            0,
-            int(cache_creation_input_tokens or 0) - int(cache_read_input_tokens or 0),
-        )
-        cache_penalty = min(max_cache_penalty_tokens, cache_pressure_tokens // 2)
-        budget_threshold = max(0, token_budget - reserve_tokens - cache_penalty)
-        should_compact = (
-            len(messages) > hard_message_count
-            or estimated_tokens >= budget_threshold
-        )
-        return should_compact, estimated_tokens, source
 
     def _is_compaction_boundary(self, message: dict) -> bool:
         if not isinstance(message, dict):
@@ -386,284 +352,11 @@ class MemoryCompactor:
         "web_search_tool", "web_fetch_tool", "file_edit_tool", "file_write_tool",
     }
 
-    def micro_compact_tool_results(
-        self,
-        messages: list,
-        preserve_last_messages: int = 12,
-        max_tool_result_chars: int = 1200,
-        preview_chars: int = 300,
-    ) -> tuple[list, int]:
-        if not messages:
-            return messages, 0
 
-        # Build tool_use_id -> tool_name map from assistant messages
-        compactable_ids = set()
-        for msg in messages:
-            if msg.get("role") != "assistant":
-                continue
-            content = msg.get("content")
-            if not isinstance(content, list):
-                continue
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "tool_use":
-                    if block.get("name", "") in self.COMPACTABLE_TOOLS:
-                        compactable_ids.add(block.get("id", ""))
 
-        cloned = copy.deepcopy(messages)
-        compacted_count = 0
-        cutoff = max(0, len(cloned) - preserve_last_messages)
 
-        for msg in cloned[:cutoff]:
-            content = msg.get("content")
-            if not isinstance(content, list):
-                continue
 
-            for block in content:
-                if not isinstance(block, dict) or block.get("type") != "tool_result":
-                    continue
 
-                # Only compact results from whitelisted tools
-                tool_use_id = block.get("tool_use_id", "")
-                if tool_use_id and tool_use_id not in compactable_ids:
-                    continue
-
-                block_content = block.get("content")
-                if not isinstance(block_content, str):
-                    continue
-                if len(block_content) <= max_tool_result_chars:
-                    continue
-
-                compacted_count += 1
-                prefix = block_content[:preview_chars]
-                suffix = block_content[-preview_chars:] if len(block_content) > preview_chars else ""
-                block["content"] = (
-                    prefix
-                    + f"\n...[micro-compacted historical tool result: {len(block_content) - len(prefix) - len(suffix)} chars omitted]...\n"
-                    + suffix
-                )
-
-        return cloned, compacted_count
-
-    def snip_old_compaction_boundaries(
-        self,
-        messages: list,
-        preserve_last_messages: int = 12,
-        keep_recent_boundaries: int = 1,
-    ) -> tuple[list, int]:
-        if not messages:
-            return messages, 0
-
-        cutoff = max(0, len(messages) - preserve_last_messages)
-        boundary_indices = [
-            index
-            for index, message in enumerate(messages[:cutoff])
-            if self._is_compaction_boundary(message)
-        ]
-        if len(boundary_indices) <= keep_recent_boundaries:
-            return copy.deepcopy(messages), 0
-
-        keep_indices = set(boundary_indices[-keep_recent_boundaries:])
-        snipped = []
-        removed_count = 0
-        for index, message in enumerate(messages):
-            if index in boundary_indices and index not in keep_indices:
-                removed_count += 1
-                continue
-            snipped.append(copy.deepcopy(message))
-
-        return snipped, removed_count
-
-    def prune_large_tool_results(
-        self,
-        messages: list,
-        preserve_last_messages: int = 12,
-        max_tool_result_chars: int = 1200,
-    ) -> tuple[list, int]:
-        """
-        Trim oversized historical tool results while preserving the most recent
-        message window intact. Only targets COMPACTABLE_TOOLS.
-        """
-        if not messages:
-            return messages, 0
-
-        # Build compactable tool_use_ids from assistant messages
-        compactable_ids = set()
-        for msg in messages:
-            if msg.get("role") != "assistant":
-                continue
-            content = msg.get("content")
-            if not isinstance(content, list):
-                continue
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "tool_use":
-                    if block.get("name", "") in self.COMPACTABLE_TOOLS:
-                        compactable_ids.add(block.get("id", ""))
-
-        cloned = copy.deepcopy(messages)
-        trimmed_count = 0
-        cutoff = max(0, len(cloned) - preserve_last_messages)
-
-        for msg in cloned[:cutoff]:
-            content = msg.get("content")
-            if not isinstance(content, list):
-                continue
-
-            for block in content:
-                if not isinstance(block, dict):
-                    continue
-                if block.get("type") != "tool_result":
-                    continue
-
-                # Only prune results from whitelisted tools
-                tool_use_id = block.get("tool_use_id", "")
-                if tool_use_id and tool_use_id not in compactable_ids:
-                    continue
-
-                block_content = block.get("content")
-                if isinstance(block_content, str) and len(block_content) > max_tool_result_chars:
-                    trimmed_count += 1
-                    preserved_prefix = block_content[:700]
-                    preserved_suffix = block_content[-300:]
-                    block["content"] = (
-                        preserved_prefix
-                        + f"\n\n...[historical tool result truncated: {len(block_content) - 1000} chars removed]...\n\n"
-                        + preserved_suffix
-                    )
-
-        return cloned, trimmed_count
-
-    def _project_message_for_collapse(
-        self,
-        message: dict,
-        *,
-        text_chars: int = 180,
-    ) -> str:
-        role = str(message.get("role", "unknown")).upper()
-        content = message.get("content", "")
-
-        if isinstance(content, str):
-            collapsed = " ".join(content.split())
-            return f"{role}: {collapsed[:text_chars]}"
-
-        if not isinstance(content, list):
-            collapsed = " ".join(str(content).split())
-            return f"{role}: {collapsed[:text_chars]}"
-
-        parts = []
-        for block in content:
-            if not isinstance(block, dict):
-                continue
-            block_type = block.get("type")
-            if block_type == "text":
-                text = " ".join(str(block.get("text", "")).split())
-                if text:
-                    parts.append(text[:text_chars])
-            elif block_type == "tool_use":
-                parts.append(
-                    f"[tool_use:{block.get('name', 'unknown')}]"
-                )
-            elif block_type == "tool_result":
-                text = " ".join(str(block.get("content", "")).split())
-                parts.append(f"[tool_result:{text[:100]}]")
-            elif block_type in {"image", "document"}:
-                parts.append(f"[{block_type}]")
-        rendered = " ".join(parts).strip()
-        return f"{role}: {rendered[:text_chars]}"
-
-    def context_collapse(
-        self,
-        messages: list,
-        *,
-        preserve_first_messages: int = 1,
-        preserve_last_messages: int = 8,
-        max_projection_items: int = 10,
-        text_chars: int = 180,
-    ) -> tuple[list, dict]:
-        if len(messages) <= preserve_first_messages + preserve_last_messages + 1:
-            return copy.deepcopy(messages), {"collapsed": False}
-
-        head, middle, tail = self.split_for_layered_compaction(
-            messages,
-            preserve_first_messages=preserve_first_messages,
-            preserve_last_messages=preserve_last_messages,
-        )
-        if not middle:
-            return copy.deepcopy(messages), {"collapsed": False}
-
-        selected_messages = []
-        if len(middle) <= max_projection_items:
-            selected_messages = middle
-        else:
-            stride = max(1, len(middle) // max_projection_items)
-            selected_messages = middle[::stride][:max_projection_items - 1]
-            selected_messages.append(middle[-1])
-
-        tool_names = []
-        user_count = 0
-        assistant_count = 0
-        tool_result_count = 0
-        for message in middle:
-            role = message.get("role")
-            if role == "user":
-                user_count += 1
-            elif role == "assistant":
-                assistant_count += 1
-
-            content = message.get("content", [])
-            if not isinstance(content, list):
-                continue
-            for block in content:
-                if not isinstance(block, dict):
-                    continue
-                if block.get("type") == "tool_use":
-                    tool_names.append(str(block.get("name", "unknown")))
-                elif block.get("type") == "tool_result":
-                    tool_result_count += 1
-
-        tool_summary = ", ".join(tool_names[:8]) if tool_names else "none"
-        projection_lines = [
-            "<system-reminder>",
-            "[CompactionBoundary:context_collapse]",
-            f"collapsed_messages: {len(middle)}",
-            f"preserved_first_messages: {preserve_first_messages}",
-            f"preserved_last_messages: {preserve_last_messages}",
-            f"user_messages: {user_count}",
-            f"assistant_messages: {assistant_count}",
-            f"tool_results: {tool_result_count}",
-            f"tool_trace: {tool_summary}",
-            "Context collapse projection:",
-        ]
-
-        for item in selected_messages:
-            projection_lines.append(
-                f"- {self._project_message_for_collapse(item, text_chars=text_chars)}"
-            )
-
-        projection_lines.append("</system-reminder>")
-        reminder = {
-            "role": "user",
-            "content": "\n".join(projection_lines),
-        }
-        return head + [reminder] + tail, {
-            "collapsed": True,
-            "collapsed_messages": len(middle),
-            "projection_items": len(selected_messages),
-            "tool_trace_count": len(tool_names),
-        }
-
-    def split_for_layered_compaction(
-        self,
-        messages: list,
-        preserve_first_messages: int = 1,
-        preserve_last_messages: int = 12,
-    ) -> tuple[list, list, list]:
-        if len(messages) <= preserve_first_messages + preserve_last_messages:
-            return messages[:preserve_first_messages], [], messages[preserve_first_messages:]
-
-        head = messages[:preserve_first_messages]
-        tail = messages[-preserve_last_messages:]
-        middle = messages[preserve_first_messages:-preserve_last_messages]
-        return head, middle, tail
         
     async def compact_history(self, old_messages: list, *, focus="") -> str:
         """
@@ -720,12 +413,21 @@ Conversation to summarize:
             maximum = min(COMPACT_MAX_OUTPUT_TOKENS, getattr(self, "summary_max_tokens", COMPACT_MAX_OUTPUT_TOKENS))
             if self.estimate_tokens([{"role": "user", "content": prompt}]) + maximum > getattr(self, "summary_window", 65536):
                 raise ValueError("Summary input and reserved output exceed the declared model window")
-            result = await safe_llm_call(
-                self.client, self.model, self.provider,
-                [{"role": "user", "content": prompt}],
-                maximum,
-                usage_callback=getattr(self, "usage_callback", None), purpose="compaction",
-            )
+            async def request(limit, grant=None):
+                def usage(purpose, values):
+                    if grant is not None: grant['reported'] = int(values.get('output_tokens',0) or 0)
+                    callback=getattr(self,'usage_callback',None)
+                    if callback: callback(purpose,values)
+                return await safe_llm_call(self.client,self.model,self.provider,
+                    [{"role":"user","content":prompt}],limit,usage_callback=usage,purpose='compaction')
+            owner=getattr(self,'budget_engine',None)
+            if owner is not None:
+                from xuloom.core.output_limits import model_reservation
+                # safe_llm_call already reserves the local goal/delegation budget.
+                async with model_reservation(owner,maximum,include_local=False) as grant:
+                    result=await request(grant['maximum'],grant)
+            else:
+                result=await request(maximum)
             if not result or not result.strip():
                 raise ValueError("Empty context summary")
             return result

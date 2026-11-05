@@ -3,8 +3,8 @@ import copy
 
 CORE_TOOLS = frozenset({"command_tool", "file_read_tool", "file_edit_tool", "file_write_tool", "tool_search_tool"})
 BRIEFS = {
-    "command_tool": "Start, poll or stop workspace commands; prefer argv for literal arguments.",
-    "file_read_tool": "Read files or images; page large text with offset and limit.",
+    "command_tool": "Start/poll workspace commands. Prefer argv/stdin; page stdout/stderr to eof and require completed + exit_code=0. Never parse partial JSON.",
+    "file_read_tool": "Read files/images. Text defaults to 2000 lines; follow next offset. force re-reads; pdf_mode=image reads figures/scans. Discover by exact tool name for usage.",
     "file_edit_tool": "Replace unique text in an already-read file.",
     "file_write_tool": "Create or overwrite a file; preserve existing work.",
     "tool_search_tool": "Find and activate tools for web search, skills, agents, plans, media or other tasks.",
@@ -56,6 +56,8 @@ def compact_definition(definition):
             "pages": "PDF page range, e.g. 1-5.", "limit": "Number of text lines.",
             "offset": "Byte cursor." if result["name"] == "command_tool" else "1-based line; negative counts from end.",
             "char_offset": "0-based char cursor; excludes offset/limit.",
+            "force": "Re-deliver already-read evidence, including after compaction.",
+            "pdf_mode": "auto: native PDF or text; text: extraction; image: selected page images (max 10).",
             "activate": "Tool names to activate, optionally with search."}
         for field, spec in result["input_schema"].get("properties", {}).items():
             if field in hints:

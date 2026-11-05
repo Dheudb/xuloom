@@ -4,7 +4,7 @@ import json
 import os
 import copy
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Optional
 from xuloom.branding import configuration_file
 

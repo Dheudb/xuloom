@@ -49,7 +49,7 @@ def save(engine):
         raise PersistenceError("Goal checkpoint could not be saved; execution stopped.")
 
 
-def create(engine, objective, criteria, *, checks=None, rounds=20, seconds=1800, output_tokens=50000, skills=None, continuous=False):
+def create(engine, objective, criteria, *, checks=None, rounds=20, seconds=1800, output_tokens=50000, skills=None, continuous=False, limits=None):
     engine.require_writer()
     if engine.goal and engine.goal["status"] not in TERMINAL:
         raise ValueError("Finish or cancel the existing goal first")
@@ -60,13 +60,18 @@ def create(engine, objective, criteria, *, checks=None, rounds=20, seconds=1800,
             raise ValueError("Goal budgets must be finite, positive and within supported limits")
     if type(rounds) is not int or type(output_tokens) is not int:
         raise ValueError("Round and output-token budgets must be integers")
+    if limits is not None:
+        ceilings = dict(rounds=10000, seconds=604800, output_tokens=10000000)
+        if not continuous or not isinstance(limits, dict) or limits.keys() - ceilings.keys():
+            raise ValueError("Optional limits require a continuous goal and known budget fields")
+        for key, value in limits.items():
+            if type(value) is not int or not 0 < value <= ceilings[key]:
+                raise ValueError("Optional goal limits must be positive whole numbers within supported bounds")
     checks = checks or []
+    from .acceptance import validate
     for check in checks:
-        if not isinstance(check, dict) or check.get("kind") not in {"file_exists", "file_contains"} or not isinstance(check.get("path"), str):
-            raise ValueError("Acceptance checks support file_exists and file_contains")
+        validate(check)
         check_path(engine, check["path"])
-        if check["kind"] == "file_contains" and (not isinstance(check.get("text"), str) or not check["text"]):
-            raise ValueError("file_contains requires nonempty text")
     for name in skills or []:
         engine.tool_context["skill_registry"].resolve(name)
     goal = dict(version=1, id=str(uuid.uuid4()), objective=objective.strip(), criteria=criteria,
@@ -74,7 +79,7 @@ def create(engine, objective, criteria, *, checks=None, rounds=20, seconds=1800,
         rounds=0, elapsed_seconds=0, output_used=0, output_reserved=0, stalls=0, status="paused", phase="ready",
         reason="Created; explicitly run or resume to start", report=None, last_progress=None, last_result=None, continuous=continuous)
     if continuous:
-        goal["budget"] = dict(rounds=None, seconds=None, output_tokens=None)
+        goal["budget"] = {**dict(rounds=None, seconds=None, output_tokens=None), **(limits or {})}
     previous, engine.goal = engine.goal, goal
     try: save(engine)
     except BaseException:
@@ -133,7 +138,7 @@ async def control(engine, action, reason=""):
 
 
 def available_output(goal):
-    if goal.get("continuous") or goal["budget"]["output_tokens"] is None: return float("inf")
+    if goal["budget"]["output_tokens"] is None: return float("inf")
     return max(0, goal["budget"]["output_tokens"] - goal["output_used"] - goal["output_reserved"])
 
 
@@ -144,7 +149,7 @@ def update_objective(engine, objective):
     if not engine.goal or engine.goal["status"] == "cancelled": raise ValueError("No editable goal")
     previous = copy.deepcopy(engine.goal)
     engine.goal.update(objective=objective.strip(), criteria=[objective.strip()], checks=[], continuous=True,
-        budget=dict(rounds=None, seconds=None, output_tokens=None), status="paused", phase="ready", report=None,
+        status="paused", phase="ready", report=None,
         previous_report=None, last_progress=None, stalls=0, reason="目标已修改，等待继续")
     engine.goal.pop("accepted_by", None)
     try: save(engine)
@@ -173,8 +178,8 @@ async def run(engine, emit, validator=None):
             if getattr(engine, "_noninteractive_approval_required", False) or getattr(engine, "_noninteractive_question_required", False):
                 goal["status"], goal["reason"] = "blocked", "User input or approval required; non-interactive execution cannot grant it"
                 break
-            remaining = float("inf") if goal.get("continuous") else goal["budget"]["seconds"] - goal["elapsed_seconds"]
-            if not goal.get("continuous") and (goal["rounds"] >= goal["budget"]["rounds"] or remaining <= 0 or available_output(goal) <= 0):
+            remaining = float("inf") if goal["budget"]["seconds"] is None else goal["budget"]["seconds"] - goal["elapsed_seconds"]
+            if (goal["budget"]["rounds"] is not None and goal["rounds"] >= goal["budget"]["rounds"]) or remaining <= 0 or available_output(goal) <= 0:
                 goal["status"], goal["reason"] = "budget_exhausted", "Goal round, active-time or output-token budget exhausted"
                 break
             goal["rounds"] += 1
@@ -186,7 +191,7 @@ async def run(engine, emit, validator=None):
                 + json.dumps({"objective": goal["objective"], "acceptance": goal["criteria"], "round": goal["rounds"],
                     "last_report": goal.get("previous_report"), "budget": goal["budget"]}, ensure_ascii=False)
                 + "\nUse goal_report_tool to report progress, evidence for each acceptance criterion, completion or a concrete blocker. A completion claim alone is not verified acceptance."
-                + (" Continue until the objective is fulfilled or a concrete blocker requires user input. No goal-level round, time or output limit is set. Report complete when done; this is a model report, not independent scientific validation." if goal.get("continuous") else ""))
+                + (" Continue until the objective is fulfilled, a declared budget is exhausted or a concrete blocker requires user input. Null budget fields mean no limit. Report complete when done; this is a model report, not independent scientific validation." if goal.get("continuous") else ""))
             result, started = None, time.monotonic()
             async def round_turn():
                 nonlocal result
@@ -239,11 +244,10 @@ async def run(engine, emit, validator=None):
             report = goal.get("report") or {}
             goal["previous_report"] = report
             checks = []
+            from .acceptance import evaluate
             for check in goal["checks"]:
                 path = check_path(engine, check["path"])
-                passed = path.is_file()
-                if passed and check["kind"] == "file_contains":
-                    passed = path.stat().st_size <= 10 * 1024 * 1024 and check["text"] in path.read_text(encoding="utf-8")
+                passed = evaluate(path,check)
                 checks.append({**check, "passed": passed})
             goal["check_results"] = checks
             if report.get("status") == "blocked":

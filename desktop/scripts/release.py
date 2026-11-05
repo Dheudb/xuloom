@@ -69,7 +69,8 @@ def main():
             replacements.append((Path("resources/python/Lib/site-packages") / dependency, stage / "dependencies" / dependency))
         if len({target for target, _ in replacements}) != len(replacements):
             raise SystemExit("Duplicate staged resource tree")
-        if {p.name for p in app.iterdir()} != {"dist", "electron", "package.json"}:
+        if ({p.name for p in app.iterdir()} - {"dist", "electron", "package.json", "build-provenance.json"}
+                or not {"dist", "electron", "package.json"} <= {p.name for p in app.iterdir()}):
             raise SystemExit("Unexpected staged application resource")
     metadata = json.loads((app / "package.json").read_text(encoding="utf-8"))
     if metadata["version"] != args.tag[1:]:
