@@ -80,7 +80,9 @@ async function stop() {
     await page.getByText("PARTIAL_PROGRESS", { exact: true }).last().waitFor();
     assert.equal(await page.locator(".message.user").count(), 1);
     fs.mkdirSync(path.join(root, "test-results"), { recursive: true });
-    await page.screenshot({ path: path.join(root, "test-results", "resume-stopped.png") });
+    const stoppedImage = await app.evaluate(async ({ BrowserWindow }) =>
+      (await BrowserWindow.getAllWindows()[0].webContents.capturePage(undefined, { stayHidden: true, stayAwake: true })).toPNG().toString("base64"));
+    fs.writeFileSync(path.join(root, "test-results", "resume-stopped.png"), Buffer.from(stoppedImage, "base64"));
     await input().fill("unsent draft");
     assert.equal(await page.getByRole("button", { name: "继续执行", exact: true }).count(), 0);
     assert(await page.getByRole("button", { name: "发送任务", exact: true }).isEnabled());
