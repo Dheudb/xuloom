@@ -2017,6 +2017,13 @@ body.panel-resizing iframe { pointer-events: none; }
 .turn-commentary { font-size: 14px; line-height: 1.75; }
 .turn-commentary > :first-child { margin-top: 0; }
 .turn-commentary > :last-child { margin-bottom: 0; }
+.turn-retry { color: var(--text-muted, var(--text-secondary)); font-size: 13px; min-width: 0; }
+.turn-retry > summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; padding: 4px 0; }
+.turn-retry > summary::-webkit-details-marker { display: none; }
+.turn-retry > summary > svg { flex-shrink: 0; }
+.turn-retry-detail { margin: 8px 0 0 23px; padding: 10px 12px; border-radius: 8px; background: var(--surface-soft); }
+.turn-retry-detail p { margin: 0; }
+.turn-retry-detail pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow-y: auto; }
 .turn-tool { color: var(--text-muted, var(--text-secondary)); min-width: 0; font-size: 13px; }
 .turn-tool > summary { display: flex; gap: 8px; align-items: center; cursor: pointer; list-style: none; padding: 4px 0; }
 .turn-tool-status { margin-left: auto; font-size: 12px; }

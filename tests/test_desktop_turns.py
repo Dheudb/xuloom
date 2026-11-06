@@ -4,6 +4,70 @@ from xuloom.desktop.turns import TurnRecorder, conversation_history
 
 
 class TurnTests(unittest.TestCase):
+    def test_ultra_decision_is_one_persisted_notice_without_raw_answer_text(self):
+        r = TurnRecorder()
+        r.accept({"type":"collaboration_decision", "id":"q", "status":"running"})
+        self.assertEqual(r.record["runtimeStatus"], "planning_collaboration")
+        self.assertEqual(r.record["steps"], [])
+        event = {"type":"collaboration_decision", "id":"q", "status":"completed", "decision":"delegate",
+            "worker_count":2, "reason":"Independent sources", "main_task":"Main synthesis"}
+        r.accept(event); r.accept(event)
+        self.assertEqual(len(r.record["steps"]), 1)
+        self.assertIn("计划派发 2", r.record["steps"][0]["notice"]["title"])
+        self.assertEqual(r.record["pendingText"], "")
+        simple = TurnRecorder()
+        simple.accept({**event, "decision":"answer"})
+        self.assertEqual(simple.record["steps"], [])
+
+    def test_retry_is_a_durable_notice_not_answer_or_commentary(self):
+        r = TurnRecorder()
+        r.accept({"type": "tool_protocol_error", "retrying": True, "message": "Repairing invalid arguments",
+            "attempt": 1, "limit": 2, "detail": "Unknown field"})
+        self.assertEqual(r.record["runtimeStatus"], "retrying")
+        r.accept({"type": "model_status", "status": "waiting"})
+        r.accept({"type": "stream_status", "turn": 2, "metrics": {"status": "connected"}})
+        self.assertEqual(r.record["runtimeStatus"], "retrying", "Headers are not proof of recovery")
+        self.assertFalse(r.accept({"type": "text_delta", "text": "Answer"}), "No duplicate text through trace + delta delivery")
+        self.assertEqual(r.record["runtimeStatus"], "receiving")
+        self.assertEqual(r.record["steps"][0]["notice"]["status"], "completed")
+        r.accept({"type": "final", "text": "Answer"}); r.accept({"type": "turn_finished"})
+        self.assertEqual(r.record["answer"], "Answer")
+        self.assertEqual([s["kind"] for s in r.record["steps"]], ["notice"])
+        self.assertNotIn("runtimeStatus", r.record)
+        r.record["userMessageId"] = "user"
+        restored = conversation_history([{"role":"user", "_uuid":"user", "content":"Task"}], [r.record])
+        self.assertEqual(restored[-1]["trace"]["steps"][0]["notice"]["detail"], "Unknown field")
+
+    def test_retry_cancellation_failure_and_child_events_keep_true_status(self):
+        for event, status in (("turn_cancelled", "cancelled"), ("turn_error", "interrupted")):
+            r = TurnRecorder()
+            r.accept({"type":"model_retry", "message":"Retrying"})
+            self.assertFalse(r.accept({"type":"model_status", "agent_id":"child", "status":"reasoning"}))
+            self.assertFalse(r.accept({"type":"stream_status", "agent_id":"child", "turn":1, "metrics":{"status":"receiving"}}))
+            self.assertEqual(r.record["runtimeStatus"], "retrying")
+            r.accept({"type":event})
+            self.assertEqual(r.record["steps"][0]["notice"]["status"], status)
+        r = TurnRecorder()
+        r.accept({"type":"tool_protocol_error", "message":"Retries exhausted", "retrying":False})
+        r.accept({"type":"turn_error"})
+        self.assertEqual(r.record["steps"][0]["notice"]["status"], "error")
+
+    def test_resume_does_not_restart_a_previous_retry_spinner(self):
+        r = TurnRecorder()
+        r.accept({"type":"model_retry", "message":"Retrying"})
+        resumed = TurnRecorder(r.record)
+        self.assertNotIn("runtimeStatus", resumed.record)
+        self.assertEqual(resumed.record["steps"][0]["notice"]["status"], "interrupted")
+        self.assertEqual(r.record["steps"][0]["notice"]["status"], "retrying")
+
+    def test_failed_or_cancelled_retry_stream_is_not_marked_as_recovered(self):
+        for state, terminal in (("error", "turn_error"), ("cancelled", "turn_cancelled")):
+            r = TurnRecorder()
+            r.accept({"type":"model_retry", "message":"Retrying"})
+            r.accept({"type":"stream_status", "turn":2, "metrics":{"status":state}})
+            r.accept({"type":terminal})
+            self.assertEqual(r.record["steps"][0]["notice"]["status"], state)
+
     def test_compaction_has_one_durable_step_without_duplicate_plain_log(self):
         recorder = TurnRecorder()
         recorder.record["userMessageId"] = "user"

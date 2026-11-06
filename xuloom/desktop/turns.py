@@ -29,6 +29,19 @@ class TurnRecorder:
                                resumedAt=int(time.time() * 1000), elapsedBeforeResumeMs=self.elapsed_before_resume)
             self.record.pop("finishedAt", None)
             self.record.pop("elapsedMs", None)
+            self.record.pop("runtimeStatus", None)
+            for step in self.record["steps"]:
+                if step.get("notice", {}).get("status") == "retrying":
+                    step["notice"]["status"] = "interrupted"
+
+    def progress(self, status):
+        """Presentation only: retire a retry when the next request makes progress."""
+        if self.record.get("runtimeStatus") == "retrying":
+            for step in self.record["steps"]:
+                notice = step.get("notice", {})
+                if notice.get("status") == "retrying":
+                    notice["status"] = status if status in {"error", "cancelled"} else "completed"
+        self.record["runtimeStatus"] = status
 
     def flush(self):
         if self.record["pendingText"].strip():
@@ -39,6 +52,17 @@ class TurnRecorder:
     def accept(self, event):
         kind = event.get("type")
         record = self.record
+        if kind == "collaboration_decision":
+            if event.get("agent_id"): return False
+            identity = "collaboration:" + event["id"]
+            record["runtimeStatus"] = "planning_collaboration" if event["status"] == "running" else "waiting"
+            if event["status"] == "running": return True
+            if event.get("decision") == "answer": return True
+            title = (f"协作决策 · 计划派发 {event['worker_count']} 项独立分工" if event.get("decision") == "delegate" else "协作决策 · 主代理独立处理")
+            notice = {"id": identity, "reason": kind, "status": "completed", "title": title,
+                "message": event.get("reason", ""), "detail": event.get("main_task", "")}
+            record["steps"] = [s for s in record["steps"] if s.get("notice", {}).get("id") != identity] + [{"kind": "notice", "notice": notice}]
+            return True
         if kind == "context_compaction":
             if event.get("agent_id"): return False
             self.flush()
@@ -49,6 +73,7 @@ class TurnRecorder:
             step["compaction"].update({key: event[key] for key in ("status", "before", "after", "elapsedMs") if key in event})
             return True
         if kind == "stream_status":
+            if event.get("agent_id"): return False
             streams = record.setdefault("modelStreams", [])
             turn = event["turn"] + self.stream_offset
             entry = next((item for item in streams if item.get("turn") == turn), None)
@@ -56,6 +81,19 @@ class TurnRecorder:
                 entry = {"turn": turn}
                 streams.append(entry)
             entry.update(event["metrics"])
+            status = event["metrics"].get("status")
+            if status in {"reasoning", "receiving", "finishing", "completed", "error", "cancelled"}:
+                self.progress(status)
+            elif record.get("runtimeStatus") != "retrying":
+                record["runtimeStatus"] = status
+            return True
+        if kind == "model_status":
+            if event.get("agent_id"): return False
+            status = event["status"]
+            if status in {"reasoning", "receiving"}:
+                self.progress(status)
+            elif record.get("runtimeStatus") != "retrying":
+                record["runtimeStatus"] = status
             return True
         if kind == "file_changed":
             change = event["change"]
@@ -68,8 +106,9 @@ class TurnRecorder:
             record["files"] = [item for item in record["files"] if os.path.normcase(item["path"]) != identity] + [change]
             return True
         if kind == "text_delta":
+            if event.get("text"): self.progress("receiving")
             record["pendingText"] += event.get("text", "")
-            return False
+            return False  # A trace containing this delta plus the delta event would duplicate text.
         if kind in {"message_start", "turn_started"}:
             if self.first_resumed_message:
                 if kind == "message_start": self.first_resumed_message = False
@@ -81,6 +120,7 @@ class TurnRecorder:
         elif kind in {"tool_scheduled", "tool_started", "tool_result"}:
             if event.get("agent_id"):
                 return False  # Child details belong to their own inspector cards.
+            if kind != "tool_result": self.progress("tools")
             self.flush()
             identity = "main:" + str(event.get("tool_use_id") or event.get("id"))
             step = next((s for s in record["steps"] if s.get("tool", {}).get("id") == identity), None)
@@ -107,10 +147,20 @@ class TurnRecorder:
                 return False
             self.flush()
             record["steps"].append({"kind": "text", "text": text.strip()})
-        elif kind == "tool_protocol_error":
+        elif kind in {"tool_protocol_error", "model_retry", "workflow_incomplete"}:
+            if event.get("agent_id"): return False
             self.flush()
-            record["steps"].append({"kind": "text", "text": event["message"],
-                "protocolError": {key: event.get(key) for key in ("retrying", "detail", "diagnostic")}})
+            retrying = event.get("retrying", kind == "model_retry")
+            record["steps"].append({"kind": "notice", "notice": {
+                "status": "retrying" if retrying else "error", "reason": kind,
+                **{key: event[key] for key in ("message", "attempt", "limit", "detail", "diagnostic") if key in event}}})
+            record["runtimeStatus"] = "retrying" if retrying else "error"
+        elif kind == "loop_transition" and event.get("reason") in {"model_fallback", "stop_hook_blocking"}:
+            if event.get("agent_id"): return False
+            labels = {"model_fallback": "模型请求失败，正在使用已配置的后备连接重试。",
+                "stop_hook_blocking": "结束检查未通过，正在请求模型继续。"}
+            return self.accept({"type": "model_retry", "message": labels[event["reason"]],
+                **({"attempt": event["retries"]} if "retries" in event else {})})
         elif kind == "loop_transition" and event.get("reason") in {"continuation_substitution", "continuation_deferred"}:
             self.flush()
             detail = event.get("detail", "")
@@ -120,7 +170,8 @@ class TurnRecorder:
             text = ("按已声明计划执行 · " + str(event.get("node_id", "")) + " · 未新增模型请求"
                 if event["reason"] == "continuation_substitution" else "交回模型处理 · " + reasons.get(detail, detail))
             record["steps"].append({"kind": "text", "text": text})
-        elif kind in {"subagents_waiting", "workflow_incomplete"}:
+        elif kind == "subagents_waiting":
+            record["runtimeStatus"] = "waiting_subagents" if event.get("count") else "waiting"
             self.flush()
             record["steps"].append({"kind": "text", "text": event["message"]})
         elif kind == "permission":
@@ -137,6 +188,7 @@ class TurnRecorder:
                 if tool.get("waitingRequestId") == event.get("requestId") and tool.get("status") == "waiting":
                     tool["status"] = "running"
         elif kind == "final":
+            self.progress("completed")
             record["answer"] = self.answer_prefix + event["text"] if event.get("text") else record["pendingText"]
             record["pendingText"] = ""
         elif kind in {"turn_finished", "turn_error", "turn_cancelled"}:
@@ -150,7 +202,11 @@ class TurnRecorder:
                 record["status"] = "completed"
             record["finishedAt"] = int(time.time() * 1000)
             record["elapsedMs"] = self.elapsed_before_resume + max(0, int((time.monotonic() - self.clock) * 1000))
+            record.pop("runtimeStatus", None)
             for step in record["steps"]:
+                notice = step.get("notice", {})
+                if notice.get("status") == "retrying":
+                    notice["status"] = "cancelled" if record["status"] == "cancelled" else "interrupted" if record["status"] != "completed" else "completed"
                 if step.get("kind") == "compaction" and step["compaction"].get("status") == "running":
                     step["compaction"]["status"] = "cancelled" if record["status"] == "cancelled" else "interrupted"
                 tool = step.get("tool", {})

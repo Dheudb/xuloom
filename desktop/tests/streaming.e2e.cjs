@@ -61,7 +61,7 @@ async function idle() { await page.waitForFunction(() => !document.querySelector
     assert(await page.getByRole("button", { name: "停止任务", exact: true }).isVisible(), "Text is visible while response is still streaming");
     releaseFinish(); await idle();
     assert.equal(await page.locator(".turn-process").last().getAttribute("data-turn-status"), "completed");
-    await send("STREAM_REASONING"); await page.getByText(/模型正在推理/).waitFor();
+    await send("STREAM_REASONING"); await page.locator('.turn-process').filter({ hasText: "模型正在思考" }).waitFor();
     await page.getByText("REASONING_DONE", { exact: true }).waitFor(); await idle();
     assert(!(await page.locator("body").innerText()).includes("PRIVATE_REASONING"));
     await send("STREAM_IDLE"); await page.getByText("RETAIN_THIS_PARTIAL", { exact: true }).waitFor();
@@ -70,9 +70,9 @@ async function idle() { await page.waitForFunction(() => !document.querySelector
     assert.equal(calls.STREAM_IDLE, 1, "Stalled requests must not silently replay");
     await send("STREAM_DROPPED"); await page.getByText(/收到结束标记前断开/).waitFor(); await idle();
     await page.getByText("DROPPED_PARTIAL", { exact: true }).waitFor();
-    await send("STREAM_HEADERS"); await page.getByText(/等待接口响应/).waitFor();
+    await send("STREAM_HEADERS"); await page.locator('.turn-process').filter({ hasText: "等待接口响应" }).waitFor();
     await page.getByText(/首个有效响应超过 1.5 秒/).waitFor(); await idle();
-    await send("STREAM_STOP"); await page.getByText(/等待接口响应/).last().waitFor();
+    await send("STREAM_STOP"); await page.locator('.turn-process').filter({ hasText: "等待接口响应" }).last().waitFor();
     const stop = page.getByRole("button", { name: "停止任务", exact: true });
     assert(await stop.isEnabled()); await stop.click({ force: true }); await idle();
     assert.equal(await page.locator(".turn-process").last().getAttribute("data-turn-status"), "cancelled");

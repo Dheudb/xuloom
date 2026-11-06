@@ -53,6 +53,7 @@ class AgentToolInput(BaseModel):
 class SpawnAgentInput(BaseModel):
     model_config = {"extra": "forbid"}
     prompt: str = Field(..., min_length=1, description="Self-contained assignment, constraints and desired output")
+    request_id: Optional[str] = Field(None, pattern=r"^[A-Za-z0-9_-]{1,128}$", description="Stable launch identity; repeated requests reuse the same workers")
     description: str = Field("", description="Short task label")
     subagent_type: Optional[str] = Field(None, description="Optional registered role; defaults to general-purpose")
     inherit_context: bool = Field(False, description="Include parent history as reference; otherwise provide needed context in prompt")
@@ -745,7 +746,7 @@ class SpawnAgentTool(AgentTool):
     def build_permission_summary(self, **kwargs):
         return super().build_permission_summary(run_in_background=True, **kwargs)
 
-    async def execute(self, prompt, description="", subagent_type=None, inherit_context=False, count=1):
+    async def execute(self, prompt, description="", subagent_type=None, inherit_context=False, count=1, request_id=None):
         return await super().execute(action="spawn", prompt=prompt, description=description,
             subagent_type=subagent_type, inherit_context=inherit_context, count=count,
-            run_in_background=True, response_format="json")
+            run_in_background=True, response_format="json", request_id=request_id)

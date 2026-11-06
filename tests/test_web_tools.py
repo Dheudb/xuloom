@@ -11,6 +11,26 @@ from xuloom.tools.tool_search_tool import ToolSearchTool
 
 
 class WebTests(unittest.IsolatedAsyncioTestCase):
+    async def test_web_fetch_alias_is_canonical_before_authorization_without_conflicts(self):
+        self.assertEqual(WebFetchInput(file_path="https://example.org/paper").model_dump(), {"url":"https://example.org/paper", "prompt":""})
+        self.assertNotIn("file_path", WebFetchInput.model_json_schema()["properties"])
+        for invalid in ({"file_path":"local.txt"}, {"url":"https://example.org/a", "file_path":"https://example.org/b"}):
+            with self.assertRaises(ValidationError): WebFetchInput(**invalid)
+        from xuloom.tools.file_read_tool import FileReadTool
+        from xuloom.protocols.dsml import ToolProtocolError
+        with self.assertRaisesRegex(ToolProtocolError, "web_fetch_tool"):
+            FileReadTool().prepare_input({"file_path":"https://example.org/paper"})
+
+    async def test_search_timeouts_and_access_denials_have_actionable_distinct_codes(self):
+        import httpx
+        from xuloom.tools.web_tool import network_error, SearchTimeout, SearchRateLimit
+        for error, code in ((SearchTimeout("timeout"), "timeout"), (SearchRateLimit("rate limit"), "rate_limited")):
+            result = network_error(error, {})
+            self.assertEqual(result["code"], code); self.assertTrue(result["retryable"])
+        response = httpx.Response(403, request=httpx.Request("GET", "https://example.org"))
+        result = network_error(httpx.HTTPStatusError("Forbidden", request=response.request, response=response), {})
+        self.assertEqual(result["code"], "access_denied"); self.assertFalse(result["retryable"])
+
     async def test_broad_search_requests_reach_provider_without_old_ten_result_cap(self):
         tool = WebSearchTool()
         tool.context = {}

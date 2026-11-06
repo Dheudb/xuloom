@@ -41,6 +41,7 @@ class ModelStream:
         openai_watch = None
 
         try:
+            await self._emit_stream_event(event_callback, {"type": "model_status", "status": "waiting", "turn": turn_count})
             if self.model_provider == "openai":
                 openai_messages = self._clean_roles_for_openai_api(
                     api_messages,
@@ -304,6 +305,8 @@ class ModelStream:
             try:
                 async with self.client.messages.stream(**stream_kwargs) as stream:
                     self.active_stream = stream
+                    anthropic_phase = "connected"
+                    await self._emit_stream_event(event_callback, {"type": "model_status", "status": "connected", "turn": turn_count})
                     while True:
                         next_event_task = asyncio.create_task(stream.__anext__())
                         abort_wait_task = asyncio.create_task(self.abort_event.wait())
@@ -333,7 +336,13 @@ class ModelStream:
                             })
                         elif event_type == "content_block_delta":
                             delta = getattr(event, "delta", None)
+                            if getattr(delta, "type", "") == "thinking_delta" and anthropic_phase != "reasoning":
+                                anthropic_phase = "reasoning"
+                                await self._emit_stream_event(event_callback, {"type": "model_status", "status": "reasoning", "turn": turn_count})
                             if getattr(delta, "type", "") == "text_delta":
+                                if anthropic_phase != "receiving":
+                                    await self._emit_stream_event(event_callback, {"type": "model_status", "status": "receiving", "turn": turn_count})
+                                anthropic_phase = "receiving"
                                 await self._emit_stream_event(event_callback, {
                                     "type": "text_delta",
                                     "turn": turn_count,
@@ -426,6 +435,7 @@ class ModelStream:
                     "[dim yellow]↳ Streaming request failed mid-stream; "
                     "retrying as non-streaming request.[/dim yellow]"
                 )
+                await self._emit_stream_event(event_callback, {"type": "model_retry", "message": "流式请求失败，正在重试非流式请求。", "turn": turn_count})
                 create_kwargs = {
                     k: v for k, v in stream_kwargs.items()
                 }

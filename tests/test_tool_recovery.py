@@ -116,7 +116,7 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         event = next(e for e in self.events if e["type"] == "tool_protocol_error")
         self.assertTrue(event["retrying"])
         self.assertEqual(json.loads(Path(event["diagnostic"]).read_text(encoding="utf-8"))["raw_completion"], "Continuing.\n" + dsml("unknown"))
-        self.assertTrue(any(step.get("protocolError") for step in self.recorder.record["steps"]))
+        self.assertTrue(any(step.get("notice", {}).get("reason") == "tool_protocol_error" for step in self.recorder.record["steps"]))
         self.assertEqual(self.engine.session_token_usage["output_tokens"], 20)
         self.assertNotIn("tool_protocol", str(conversation_history(self.engine.messages)))
 

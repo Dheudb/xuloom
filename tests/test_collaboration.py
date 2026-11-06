@@ -266,6 +266,7 @@ class ConversationPolicyTests(unittest.IsolatedAsyncioTestCase):
                 gate.set()
 
         self.fixture([
+            json.dumps({"decision":"sequential", "reason":"Follow the explicit launch requested next", "main_task":"Launch the user-specified workers"}),
             (launch_tool, json.dumps({"prompt": "Independently check the given evidence.", "count": 2})),
             ("record_tool", '{"value":"PARENT_EVIDENCE"}'),
             "PROVISIONAL",
@@ -281,7 +282,7 @@ class ConversationPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(row["status"] == "completed" for row in self.engine.subagent_registry))
         self.assertTrue(all(row["background"] for row in self.engine.subagent_registry))
         self.assertIn("WORKER_EVIDENCE", json.dumps(self.requests[-1]["messages"]))
-        self.assertEqual(len(self.requests), 4, "No hidden planning call or worker relaunch")
+        self.assertEqual(len(self.requests), 5, "One explicit Ultra decision; no worker relaunch")
 
     async def test_registered_role_enum_and_invalid_role_repair_precede_approval_or_execution(self):
         roles = self.root / ".xuloom/agents"
@@ -350,21 +351,20 @@ class ConversationPolicyTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_proactive_policy_and_nonblocking_guidance_reach_real_model_request(self):
         self.engine.set_collaboration_mode("ultra")
-        self.fixture(["A bounded research plan."])
-        result = await self.engine._run_loop("Compare independent mechanisms and propose distinct research directions.", sys_print_callback=lambda _: None)
+        self.fixture([json.dumps({"decision":"answer", "answer":"Hello."})])
+        result = await self.engine._run_loop("Say hello.", sys_print_callback=lambda _: None)
         self.assertTrue(result.ok)
         request = self.requests[0]
         system = "\n".join(message["content"] for message in request["messages"] if message["role"] == "system")
         self.assertIn("Proactively delegate independent", system)
         self.assertIn("work alongside agents", system)
         self.assertEqual(system.count("# Collaboration: ultra"), 1)
-        self.assertTrue(system.endswith(self.engine._collaboration_instructions()))
+        from xuloom.agents.ultra_decision import contract
+        self.assertTrue(system.endswith(contract(self.engine)))
         self.assertGreater(system.index("# Collaboration: ultra"), system.index("# Tool-Specific Rules"))
         self.assertNotIn("run_in_background=false when the current answer requires", system)
-        worker = next(tool["function"] for tool in request["tools"] if tool["function"]["name"] == "spawn_agent")
-        self.assertNotIn("complex, multi-step", worker["description"])
-        self.assertIn('background', worker['description'])
-        # Intent is not a quota or a hidden planner: a model answer never triggers automatic children/retries.
+        self.assertNotIn("tools", request, "The first Ultra request decides before any tool action")
+        self.assertEqual(self.engine.tool_context["collaboration_run"]["decision"]["decision"], "answer")
         self.assertEqual(len(self.requests), 1)
         self.assertEqual(self.engine.subagent_registry, [])
 
@@ -387,7 +387,7 @@ class ConversationPolicyTests(unittest.IsolatedAsyncioTestCase):
         for mode in ("solo", "auto", "ultra"):
             self.engine.set_collaboration_mode(mode)
             self.requests = []
-            self.fixture(["4"])
+            self.fixture([json.dumps({"decision":"answer", "answer":"4"}) if mode == "ultra" else "4"])
             prior = copy.deepcopy(self.engine.tool_context["collaboration_run"])
             result = await self.engine._run_loop("2+2?", sys_print_callback=lambda _: None)
             self.assertEqual(result.reason, "completed")

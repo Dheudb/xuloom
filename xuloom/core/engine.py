@@ -3366,6 +3366,14 @@ class QueryEngine(ModelStream):
         protocol_failures = 0
         protocol_retries = 0
         input_failures = 0
+        if resume:
+            from xuloom.agents.ultra_decision import recover
+            try:
+                await recover(self, user_msg, event_callback=event_callback, sys_print_callback=sys_print_callback)
+            except (ValueError, PersistenceError) as error:
+                return finish_run(self, str(error), 'delegation_recovery_error')
+            except AbortRequestedError:
+                return finish_run(self, "Ultra recovery cancelled; existing receipts were retained.", 'cancelled')
 
         while loop_state["turn_count"] < loop_state["max_turns"]:
             mailbox = self.tool_context.get("delegated_mailbox")
@@ -3442,6 +3450,13 @@ class QueryEngine(ModelStream):
                     mcp_instructions=self._build_mcp_instructions(),
                 )
                 system_prompt += self._get_coordinator_system_prompt_addon()
+                from xuloom.agents import ultra_decision
+                deciding = ultra_decision.pending(self)
+                decision_plan = None
+                if deciding:
+                    tools_schema = []
+                    system_prompt += ultra_decision.contract(self)
+                    await self._emit_stream_event(event_callback, {"type": "collaboration_decision", "id": get_msg_uuid(user_msg), "status": "running"})
                 await self._emit_stream_event(event_callback, {
                     "type": "memory_files",
                     "turn": turn_count,
@@ -3475,10 +3490,10 @@ class QueryEngine(ModelStream):
                     await self._replay_vcr_response_events(
                         response,
                         turn_count=turn_count,
-                        event_callback=event_callback,
+                        event_callback=ultra_decision.decision_callback(self, event_callback) if deciding else event_callback,
                     )
                 else:
-                    response, streaming_tool_entries, streaming_fallback = await self._stream_model_response(
+                    response, streaming_tool_entries, streaming_fallback = await ultra_decision.receive(self, deciding,
                         system_prompt=system_prompt,
                         api_messages=api_messages,
                         tools_schema=tools_schema,
@@ -3507,6 +3522,8 @@ class QueryEngine(ModelStream):
                     tools_schema=tools_schema,
                     thinking_config=effective_thinking_config,
                 )
+                if deciding:
+                    response, decision_plan = ultra_decision.convert(self, response, user_msg)
                 protocol_failures = 0
                 await self._emit_stream_event(event_callback, {
                     "type": "token_usage",
@@ -3532,10 +3549,20 @@ class QueryEngine(ModelStream):
                 )
                 if getattr(response, "responses_output", None):
                     assistant_message["_responses_output"] = response.responses_output
+                if decision_plan is not None and decision_plan.decision == "sequential":
+                    assistant_message["_is_meta"] = True
                 self.messages.append(assistant_message)
                 self._sync_message_context()
                 # Checkpointing memory auto-flush
-                self.persist_session_state()
+                checkpoint_saved = self.persist_session_state()
+                if decision_plan is not None and not checkpoint_saved:
+                    raise PersistenceError("Ultra decision could not be saved; no planned worker was launched")
+                if decision_plan is not None:
+                    await self._emit_stream_event(event_callback, {"type": "collaboration_decision", "id": get_msg_uuid(user_msg),
+                        "status": "completed", "decision": decision_plan.decision, "reason": decision_plan.reason,
+                        "main_task": decision_plan.main_task, "worker_count": len(decision_plan.workers)})
+                    sys_print_callback("Ultra 协作决策：" + {"answer": "直接回答", "delegate": "派发独立分工", "sequential": "主代理独立处理"}[decision_plan.decision])
+                    if decision_plan.decision == "sequential": continue
                 
                 if response.stop_reason == "tool_use":
                     loop_state["workflow_guard_stalls"] = 0
@@ -3561,6 +3588,7 @@ class QueryEngine(ModelStream):
                         source_assistant_uuid=get_msg_uuid(assistant_message),
                     )
                     self.messages.append(tool_result_msg)
+                    ultra_decision.receipts_saved(self, tool_results)
                     self._sync_message_context()
                     if any(item.get("_input_error") for item in tool_results):
                         input_failures += 1
@@ -3570,7 +3598,8 @@ class QueryEngine(ModelStream):
                         await self._record_loop_transition("tool_input_repair" if retrying else "tool_input_exhausted",
                             turn=turn_count, event_callback=event_callback, attempt=input_failures, retrying=retrying)
                         await self._emit_stream_event(event_callback, {"type": "tool_protocol_error", "message": message,
-                            "retrying": retrying, "detail": "Invalid tool input; see the rejected call's tool result."})
+                            "retrying": retrying, "attempt": input_failures, "limit": 2,
+                            "detail": "Invalid tool input; see the rejected call's tool result."})
                         sys_print_callback(message)
                         self.persist_session_state()
                         if not retrying:
@@ -3670,7 +3699,8 @@ class QueryEngine(ModelStream):
                         assistant_message["_stop_reason"] = "workflow_incomplete"
                         message = (f"技能流程尚未完成，正在请求模型继续执行（{stalls}/2）。" if retrying else
                                    "技能流程尚未完成，模型多次提前结束，任务已中断。已有结果保留，可继续当前会话。")
-                        await self._emit_stream_event(event_callback, {"type": "workflow_incomplete", "message": message, "retrying": retrying})
+                        await self._emit_stream_event(event_callback, {"type": "workflow_incomplete", "message": message,
+                            "retrying": retrying, "attempt": stalls, "limit": 2})
                         await self._record_loop_transition("workflow_completion_guard" if retrying else "workflow_completion_exhausted",
                             turn=turn_count, event_callback=event_callback, retrying=retrying, attempt=stalls)
                         if retrying:
@@ -3742,6 +3772,8 @@ class QueryEngine(ModelStream):
                         sys_print_callback(
                             "[dim yellow]↳ Structured output validation failed; retrying with feedback.[/dim yellow]"
                         )
+                        await self._emit_stream_event(event_callback, {"type": "model_retry",
+                            "message": "输出格式校验未通过，正在请求模型修正。", "attempt": loop_state["structured_output_retries"]})
                         continue
                     stop_hook_decision = await self.hook_manager.evaluate_stop_hooks_async({
                         "cwd": self.session_cwd,
@@ -3836,26 +3868,29 @@ class QueryEngine(ModelStream):
                         self._record_token_usage(SimpleNamespace(usage=e.usage, content=[self._make_text_block(e.raw_text)]), loop_state, turn_count,
                             system_prompt=system_prompt, api_messages=api_messages, tools_schema=tools_schema,
                             thinking_config=effective_thinking_config)
-                    message = (f"工具调用格式错误，正在请求模型修正（{protocol_failures}/2）。已完成的操作保留。" if retrying else
-                               "工具调用格式多次修正失败，任务已中断。已完成的操作和文件保留，可继续当前会话。")
+                    subject = "协作决策格式" if e.code == "invalid_collaboration_decision" else "工具调用格式"
+                    message = (f"{subject}错误，正在请求模型修正（{protocol_failures}/2）。已完成的操作保留。" if retrying else
+                               f"{subject}多次修正失败，任务已中断。已完成的操作和文件保留，可继续当前会话。")
                     await self._record_loop_transition("tool_protocol_repair" if retrying else "tool_protocol_exhausted",
                         turn=turn_count, event_callback=event_callback, code=e.code, detail=str(e),
                         retrying=retrying, attempt=protocol_failures, diagnostic=diagnostic)
                     await self._emit_stream_event(event_callback, {"type": "tool_protocol_error", "message": message,
-                        "retrying": retrying, "detail": str(e), "diagnostic": diagnostic})
+                        "retrying": retrying, "attempt": protocol_failures, "limit": 2,
+                        "detail": str(e), "diagnostic": diagnostic})
                     sys_print_callback(message)
                     if e.visible_text.strip():
                         partial = create_assistant_message(e.visible_text, model=loop_state["active_model"], stop_reason="protocol_error")
                         partial["_is_meta"] = True
                         self.messages.append(partial)
-                    self.messages.append(create_user_message(
+                    repair_feedback = ("[Ultra decision rejected before any tool execution]\n" + str(e) + ultra_decision.contract(self)
+                        if e.code == "invalid_collaboration_decision" else
                         "\n\n[Tool protocol error: current completion rejected before any of its calls executed]\n" + str(e) +
                         "\nCorrect the tool call using the currently declared tools schema. Prefer native function/tool_calls. "
                         "Arguments must be a JSON object; arrays must be actual arrays, not serialized strings. "
                         "If using DSML, use only declared parameter names, each exactly once, and close every tag. "
                         "Continue the user's selected skill/workflow from the last successful tool result. "
-                        "Do not repeat completed commands, submissions or agent launches. Do not substitute an ordinary answer for the requested workflow.",
-                        is_meta=True, origin="tool_protocol"))
+                        "Do not repeat completed commands, submissions or agent launches. Do not substitute an ordinary answer for the requested workflow.")
+                    self.messages.append(create_user_message(repair_feedback, is_meta=True, origin="tool_protocol"))
                     self._sync_message_context()
                     self.persist_session_state()
                     if retrying:

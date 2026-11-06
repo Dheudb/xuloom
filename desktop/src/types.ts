@@ -65,7 +65,9 @@ export type ModelConfig = {
 };
 export type ModelConnection = Omit<ModelConfig, "connections"> & { connectionId: string; connectionName: string; models: string[] };
 export type CompactionNotice = { id: string; status: "running" | "completed" | "failed" | "cancelled" | "interrupted"; before?: number; after?: number; elapsedMs?: number };
+export type RetryNotice = { status: string; reason?: string; title?: string; message: string; attempt?: number; limit?: number; detail?: string; diagnostic?: string };
 export type TurnTrace = {
+  runtimeStatus?: string;
   modelStreams?: { turn: number; status: string; elapsedMs?: number; connectedMs?: number; firstChunkMs?: number; firstTextMs?: number; lastProgressMs?: number; textChars?: number; reasoningChunks?: number; finishReason?: string; error?: string }[];
   userMessageId?: string;
   files?: FileChange[];
@@ -79,7 +81,7 @@ export type TurnTrace = {
   approximate?: boolean;
   answer?: string;
   pendingText?: string;
-  steps: ({ kind: "text"; text: string } | { kind: "tool"; tool: ToolActivity } | { kind: "compaction"; compaction: CompactionNotice })[];
+  steps: ({ kind: "text"; text: string; protocolError?: { retrying?: boolean; detail?: string; diagnostic?: string } } | { kind: "tool"; tool: ToolActivity } | { kind: "compaction"; compaction: CompactionNotice } | { kind: "notice"; notice: RetryNotice })[];
 };
 export type Attachment = { id: string; name: string; path: string; size: number; kind: "image" | "file"; preview?: string; available?: boolean; state?: string };
 export type HistoryItem = { id?: string; role: "user" | "assistant"; text: string; trace?: TurnTrace; attachments?: Attachment[] };

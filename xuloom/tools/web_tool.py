@@ -5,9 +5,11 @@ import httpx
 from bs4 import BeautifulSoup
 if sys.version_info >= (3, 10):
     from ddgs import DDGS
+    from ddgs.exceptions import TimeoutException as SearchTimeout, RatelimitException as SearchRateLimit
 else:
     from duckduckgo_search import DDGS
-from pydantic import BaseModel, Field
+    from duckduckgo_search.exceptions import TimeoutException as SearchTimeout, RatelimitException as SearchRateLimit
+from pydantic import BaseModel, Field, model_validator
 from xuloom.tools.base import BaseAgenticTool
 from xuloom.context.tool_results import build_tool_result
 
@@ -17,10 +19,10 @@ MAX_FETCH_BYTES = 5_000_000
 
 def network_error(error, metadata):
     status = error.response.status_code if isinstance(error, httpx.HTTPStatusError) else None
-    code = ("rate_limited" if status == 429 else "http_error" if status is not None else
-            "timeout" if isinstance(error, (TimeoutError, httpx.TimeoutException)) else
+    code = ("rate_limited" if status == 429 or isinstance(error, SearchRateLimit) else "access_denied" if status in {401, 403} else "http_error" if status is not None else
+            "timeout" if isinstance(error, (TimeoutError, httpx.TimeoutException, SearchTimeout)) else
             "connection_error" if isinstance(error, httpx.NetworkError) else "provider_error")
-    retryable = status in {408, 425, 429} or status is not None and status >= 500 or code in {"timeout", "connection_error"}
+    retryable = status in {408, 425, 429} or status is not None and status >= 500 or code in {"timeout", "connection_error", "rate_limited"}
     return {**metadata, "reason": type(error).__name__, "code": code,
             "http_status": status, "retryable": bool(retryable)}
 
@@ -93,6 +95,19 @@ class WebFetchInput(BaseModel):
     url: str = Field(..., description="The URL to fetch content from.")
     prompt: str = Field("", description="Optional description of what information to extract from the page.")
 
+    @model_validator(mode="before")
+    @classmethod
+    def canonical_url(cls, values):
+        # A tool-local alias; authorization still inspects the canonical URL.
+        if isinstance(values, dict) and "file_path" in values:
+            alias = values["file_path"]
+            if isinstance(alias, str) and alias.startswith(("https://", "http://")):
+                if "url" in values and values["url"] != alias:
+                    raise ValueError("Conflicting url and file_path; provide one URL")
+                values = {key: value for key, value in values.items() if key != "file_path"}
+                values["url"] = alias
+        return values
+
 class WebFetchTool(BaseAgenticTool):
     name = "web_fetch_tool"
     description = "Fetch content from a specified URL and return its contents in a readable format. Use a prompt to specify what information to extract."
@@ -142,4 +157,7 @@ Usage notes:
                 "sources_in_content": True, "sources": [{"url": str(resp.url), "title": title or str(resp.url), "kind": "page"}]})
 
         except Exception as e:
-            return build_tool_result(ok=False, is_error=True, content=f"Webpage request failed ({type(e).__name__}). Check the URL and network, or try another source.", metadata=network_error(e, {"url": url}))
+            metadata = network_error(e, {"url": url})
+            content = (f"Website refused access (HTTP {metadata['http_status']}); page content was not read. Use an accessible publisher abstract, repository or another source; repeating the same URL will not resolve an access denial."
+                if metadata["code"] == "access_denied" else f"Webpage request failed ({type(e).__name__}). Check the URL and network, or try another source.")
+            return build_tool_result(ok=False, is_error=True, content=content, metadata=metadata)

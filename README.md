@@ -49,7 +49,7 @@ SSH 会话的 HTML 可直接在文件面板预览，支持工作区内的相对 
 
 可选的 [Claude Code / Pi / Codex / DSH 后端](docs/external-agents.md) 可使用用户已安装 CLI，继续走 Xuloom 的原生队列、工具授权和中央历史。Claude 使用 Anthropic Messages；Pi／DSH 支持 Anthropic Messages 和 OpenAI Chat，Codex 使用 OpenAI Responses。Pi 主动停止在回执与历史确认后可通过同一 worker 明确续聊，未知结果不会自动重放，见 [停止与恢复边界](docs/external-agents.md#续聊停止与边界)。DSH 使用独立最小 headless 配置，见 [DSH 验证](docs/dsh-backend-validation-2026-11-02.md)。外部 CLI 经 SSH 的完整联动仍在 [持续目标](docs/product-roadmap.md) 中，不能把原生 SSH worker 当成所有后端已验收。
 
-默认首轮只向模型声明文件读写、命令和工具发现五个入口，其余工具按需加载；Ultra 额外直接提供后台派发入口。精简提示不会关闭权限、参数校验或恢复检查。用户指令、选中 Skill、已激活工具和历史会增加实际输入，详见 [首轮输入与原生搜索](docs/lean-context-search.md)。
+默认首轮只向模型声明文件读写、命令和工具发现五个入口，其余工具按需加载；Ultra 先做结构化协作决策，工作阶段直接提供后台派发入口。精简提示不会关闭权限、参数校验或恢复检查。用户指令、选中 Skill、已激活工具和历史会增加实际输入，详见 [首轮输入与原生搜索](docs/lean-context-search.md)。
 
 按需发现的工具会随会话保存，续聊时恢复当前角色仍允许使用的工具；晚注册的 MCP 工具也重新检查角色范围。外部 CLI 缓存工具定义不等于获得执行权限，模型请求和实际执行仍受原生可见性及授权约束。详见 [工具发现与恢复验证](docs/tool-discovery-validation-2026-11-02.md)。
 

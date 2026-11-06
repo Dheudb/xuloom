@@ -129,16 +129,11 @@ async function choose(mode) {
     assert(system.indexOf("# Collaboration: ultra") > system.indexOf("# Tool-Specific Rules"));
     assert(system.includes("work alongside agents"));
     assert(!JSON.stringify(requests[0].messages).includes("run_in_background=false when the current answer requires"));
-    assert(requests[0].tools.some((tool) => tool.function.name === 'tool_search_tool'));
-    assert(!requests[0].tools.some((tool) => tool.function.name === 'agent_tool'), 'Lifecycle details are loaded on demand');
-    assert(requests[0].tools.some((tool) => tool.function.name === 'spawn_agent' && tool.function.description.includes('background')));
-    assert(requests[0].tools.some((tool) => tool.function.name === "spawn_agent" && !tool.function.parameters.properties.action));
-    for (const name of ["spawn_agent"]) {
-      const schema = requests[0].tools.find(tool => tool.function.name === name).function.parameters;
-      const roles = schema.properties.subagent_type.anyOf.find(option => option.type === "string").enum;
-      for (const role of ["explore", "general-purpose", "plan", "verification", "software-engineer"]) assert(roles.includes(role));
-      assert(!roles.includes("research"));
-    }
+    assert.equal(requests[0].tools, undefined, 'Ultra decides before exposing executable tools');
+    assert(system.includes('# Ultra collaboration decision (this request only)'));
+    const roles = system.split('Roles (or omit subagent_type): ')[1].split(', ');
+    for (const role of ["explore", "general-purpose", "plan", "verification", "software-engineer"]) assert(roles.includes(role));
+    assert(!roles.includes("research"));
     assert.deepEqual(requests[0].thinking, { type: "disabled" });
     assert.equal(requests[0].reasoning_effort, undefined, "Disabled thinking must omit conflicting effort");
     await page.getByLabel("Thinking 模式", { exact: true }).selectOption("enabled");

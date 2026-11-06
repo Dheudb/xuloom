@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, LoaderCircle, ListCollapse } from "lucide-react";
-import type { TurnTrace, ToolActivity, CompactionNotice } from "./types";
+import { ChevronDown, LoaderCircle, ListCollapse, RotateCw, Workflow } from "lucide-react";
+import type { TurnTrace, ToolActivity, CompactionNotice, RetryNotice } from "./types";
+import { turnPhase } from "./turn-phase";
 import Markdown from "./Markdown";
 import { statusText } from "./ActivityPanel";
 import { toolPresentation } from "./tool-presentation";
@@ -17,7 +18,7 @@ function ProcessTool({ tool, sessionId }: { tool: ToolActivity; sessionId: strin
   const view = toolPresentation(tool), pending = ["running", "queued"].includes(tool.status);
   const elapsed = tool.startedAt && tool.finishedAt && tool.finishedAt - tool.startedAt >= 1000 ? durationText(tool.finishedAt - tool.startedAt) : "";
   return <div className="turn-tool-entry">
-    <details className={"turn-tool " + tool.status}>
+    <details className={"turn-tool " + (tool.status === "error" ? "failed" : tool.status)} data-tool-status={tool.status}>
       <summary title={view.brief}>
         <ToolIcon kind={view.kind} /><span className="turn-tool-title">{view.title}</span>
         <span className="turn-tool-brief">{view.brief}</span>
@@ -40,6 +41,19 @@ function CompactStatus({ notice, turnStatus }: { notice: CompactionNotice; turnS
   </div>;
 }
 
+function RetryStatus({ notice, turnStatus }: { notice: RetryNotice; turnStatus: string }) {
+  const status = notice.status === "retrying" && turnStatus !== "running" ? turnStatus === "completed" ? "completed" : turnStatus === "cancelled" ? "cancelled" : "interrupted" : notice.status;
+  const suffix = ({ retrying: "正在重试", completed: "已重试", error: "未能恢复", cancelled: "已停止", interrupted: "已中断" } as Record<string, string>)[status];
+  if (notice.reason === "collaboration_decision") return <details className="turn-retry turn-decision">
+    <summary><Workflow size={15} /><span>{notice.title}</span><ChevronDown size={12} /></summary>
+    <div className="turn-retry-detail"><p>{notice.message}</p>{notice.detail && <pre>{notice.detail}</pre>}</div>
+  </details>;
+  return <details className="turn-retry" data-retry-status={status}>
+    <summary><RotateCw size={15} className={status === "retrying" ? "spin" : ""} /><span>Retry{notice.attempt !== undefined ? ` ${Math.min(notice.attempt, notice.limit || notice.attempt)}${notice.limit ? `/${notice.limit}` : ""}` : ""}</span><span>{suffix}</span><ChevronDown size={12} /></summary>
+    <div className="turn-retry-detail"><p>{notice.message}</p>{notice.detail && <pre>{notice.detail}</pre>}{notice.diagnostic && <pre>{notice.diagnostic}</pre>}</div>
+  </details>;
+}
+
 export default function TurnProcess({ trace, sessionId }: { trace: TurnTrace; sessionId: string }) {
   const running = trace.status === "running";
   const [open, setOpen] = useState(running);
@@ -54,24 +68,28 @@ export default function TurnProcess({ trace, sessionId }: { trace: TurnTrace; se
     ? Math.max(0, (trace.finishedAt || now) - trace.startedAt) : undefined);
   const state = running ? "执行中" : trace.status === "cancelled" ? "已停止" : ["error", "interrupted"].includes(trace.status) ? "已中断" : "";
   const stream = trace.modelStreams?.at(-1);
+  const steps = trace.steps.filter(step => step.kind !== "text" || step.protocolError || step.text.trim());
   const notices = trace.steps.filter((step) => step.kind === "compaction");
-  const phase = running && notices.some(step => step.compaction.status === "running") ? "正在压缩上下文" : stream && running ? ({ waiting: "等待接口响应", connected: "等待模型输出", reasoning: "模型正在推理", finishing: "正在结束接收" } as Record<string, string>)[stream.status] : "";
+  const phase = turnPhase(trace);
   const timing = stream ? `本轮 ${trace.modelStreams?.length} 次模型请求；最近一次：${stream.firstTextMs !== undefined ? `首个文本 ${(stream.firstTextMs / 1000).toFixed(1)} 秒` : "尚未收到文本"}；已收到 ${stream.textChars || 0} 字符；推理数据 ${stream.reasoningChunks || 0} 段${stream.finishReason ? `；结束标记 ${stream.finishReason}` : ""}${stream.error ? `；${stream.error}` : ""}` : undefined;
   const label = <span title={timing}>{trace.status === "cancelled" && elapsed !== undefined
     ? `你在 ${durationText(elapsed)} 后停止了`
     : <>{state}{state && elapsed !== undefined ? " · " : ""}{elapsed !== undefined ? `${trace.approximate ? "约" : ""}用时 ${durationText(elapsed)}` : state ? "" : "执行过程"}{phase ? ` · ${phase}` : ""}</>}</span>;
-  if (!trace.steps.some((step) => step.kind === "tool")) {
+  if (!trace.steps.some((step) => step.kind === "tool" || step.kind === "notice" || step.kind === "text" && step.protocolError)) {
     return elapsed === undefined && !state && !notices.length ? null : <div className="turn-process turn-process-time" data-turn-status={trace.status}>{label}
       {notices.map(step => <CompactStatus key={step.compaction.id} notice={step.compaction} turnStatus={trace.status} />)}</div>;
   }
   return <><details className="turn-process" open={open} onToggle={(event) => setOpen(event.currentTarget.open)} data-turn-status={trace.status}>
     <summary aria-label="查看本轮执行过程">
       {label}
-      <ChevronDown size={14} /><span className="turn-step-count">{trace.steps.length ? `${trace.steps.length} 项过程` : ""}</span>
+      <ChevronDown size={14} /><span className="turn-step-count">{steps.length ? `${steps.length} 项过程` : ""}</span>
     </summary>
     <div className="turn-process-content">
-      {trace.steps.map((step, index) => step.kind === "text"
-        ? <div className="turn-commentary markdown" key={index}><Markdown text={step.text} sessionId={sessionId} /></div>
+      {steps.map((step, index) => step.kind === "notice"
+        ? <RetryStatus key={index} notice={step.notice} turnStatus={trace.status} />
+        : step.kind === "text"
+        ? step.protocolError ? <RetryStatus key={index} notice={{ status: "completed", message: step.text, ...step.protocolError }} turnStatus={trace.status} />
+          : <div className="turn-commentary markdown" key={index}><Markdown text={step.text} sessionId={sessionId} /></div>
         : step.kind === "compaction" ? <CompactStatus key={step.compaction.id} notice={step.compaction} turnStatus={trace.status} />
         : <ProcessTool tool={step.tool} sessionId={sessionId} key={step.tool.id || index} />)}
     </div>

@@ -108,23 +108,28 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .markdown th { background: var(--surface-soft); font-weight: 600; }
 .markdown th, .markdown td { padding: 10px 12px; }
 a, .markdown-link, .inline-file-link { color: var(--link); text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
-.turn-process { margin: 0 0 12px; }
-.turn-process-time { font-size: 12px; padding: 0 0 3px; color: var(--text-muted); }
-.turn-process > summary { font-size: 12px; color: var(--text-muted); border-bottom: 0; padding: 4px 0 8px; }
+.turn-process { --process-muted: #82868b; --process-warning: #a16d62; margin: 0 0 12px; color: var(--process-muted); }
+.turn-process-time { font-size: 13px; line-height: 22px; padding: 0 0 3px; color: var(--process-muted); }
+.turn-process > summary { font-size: 13px; line-height: 22px; color: var(--process-muted); border-bottom: 1px solid var(--line); padding: 4px 0 8px; }
 .turn-step-count { font-size: 11px; }
-.turn-process-content { padding: 10px 0 16px; gap: 12px; }
-.turn-commentary { font-size: 14px; }
+.turn-process-content { display: flex; flex-direction: column; align-items: stretch; padding: 10px 0 12px; gap: 0; }
+.turn-commentary { margin: 14px 0; font-size: 14px; line-height: 1.75; }
+.turn-commentary:first-child { margin-top: 0; }
+.turn-commentary:last-child { margin-bottom: 0; }
+.turn-commentary:empty, .turn-commentary:has(> p:only-child:empty) { display: none; }
+.turn-tool-entry { min-width: 0; margin: 0; padding: 0; }
+.turn-tool, .turn-retry { min-width: 0; margin: 0; padding: 0; font-size: 13px; line-height: 24px; color: var(--process-muted); }
 .turn-tool pre { background: var(--surface-soft); font-size: 12px; }
-.turn-process-content { gap: 6px; }
-.turn-tool > summary { gap: 7px; padding: 3px 0; font-size: 13px; line-height: 1.65; color: var(--text-muted); }
-.turn-tool > summary .tool-kind-icon { flex: 0 0 15px; }
+.turn-tool > summary, .turn-retry > summary { gap: 7px; min-height: 28px; padding: 2px 0; font-size: 13px; line-height: 24px; color: inherit; white-space: nowrap; }
+.turn-tool > summary .tool-kind-icon, .turn-retry > summary > svg:first-child { width: 15px; height: 15px; flex: 0 0 15px; }
+.turn-tool > summary::-webkit-details-marker { display: none; }
 .turn-tool-title { flex-shrink: 0; font-weight: 400; }
 .turn-tool-brief { flex: 0 1 auto; }
-.turn-tool-duration { flex-shrink: 0; font-size: 11px; color: var(--text-muted); }
+.turn-tool-duration { flex-shrink: 0; font-size: 11px; color: inherit; font-variant-numeric: tabular-nums; }
 .turn-tool-chevron { opacity: .6; }
 .turn-tool[open] > summary .turn-tool-chevron { transform: rotate(180deg); }
-.turn-tool.error > summary, .turn-tool.crashed > summary { color: var(--danger); }
-.turn-tool-detail { margin: 7px 0 8px 22px; color: var(--text-secondary); }
+.turn-tool[data-tool-status="error"] > summary .tool-kind-icon, .turn-tool.crashed > summary .tool-kind-icon { color: var(--process-warning); }
+.turn-tool-detail { margin: 6px 0 10px 22px; padding: 12px; border-radius: 10px; background: var(--surface-soft); color: var(--text-secondary); }
 .turn-tool-detail > small { font-size: 11px; color: var(--text-muted); }
 .turn-tool-detail pre { margin: 5px 0 9px; }
 .tool-images { display: flex; flex-wrap: wrap; gap: 8px; padding: 6px 0 4px 22px; }

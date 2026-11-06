@@ -34,6 +34,12 @@ class FileReadTool(BaseAgenticTool):
     is_read_only = True
     risk_level = "low"
 
+    def prepare_input(self, values):
+        if isinstance(values.get("file_path"), str) and values["file_path"].startswith(("http://", "https://")):
+            from xuloom.protocols.dsml import ToolProtocolError
+            raise ToolProtocolError('This is a webpage URL, not a local file. Use web_fetch_tool with {"url": "the URL"}; no file was read and no network request was made.')
+        return super().prepare_input(values)
+
     def prompt(self) -> str:
         return """Read authorized files; use command_tool to list directories.
 Text defaults to 2000 lines; negative offsets count from the end. Follow the next-line cursor, or use char_offset for long lines. force=true re-delivers evidence after compaction.
