@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import runpy
 from pathlib import Path
 import shutil
 import subprocess
@@ -23,7 +24,7 @@ def reset_generated(path):
 
 def verify(runtime):
     with tempfile.TemporaryDirectory(prefix="xuloom-runtime-check-") as directory:
-        subprocess.run([str(runtime / "python.exe"), "-I", "-c", "import sys,xuloom.core.engine; from PIL import Image; from xuloom.protocols.mcp_bridge import MCP_AVAILABLE; assert MCP_AVAILABLE; assert sys.version_info >= (3,12); print('Bundled Python, image support and MCP verified')"], cwd=directory, check=True)
+        subprocess.run([str(runtime / "python.exe"), "-I", "-B", "-c", "import sys,xuloom.core.engine; from PIL import Image; from xuloom.protocols.mcp_bridge import MCP_AVAILABLE; assert MCP_AVAILABLE; assert sys.version_info >= (3,12); print('Bundled Python, image support and MCP verified')"], cwd=directory, check=True)
 
 
 def main():
@@ -32,8 +33,7 @@ def main():
     base = Path(sys.base_prefix)
     if not (base / "python.exe").is_file() or not (base / "Lib" / "os.py").is_file():
         raise SystemExit("Use a standard Windows CPython installation to build the bundled runtime.")
-    inputs = [ROOT / "setup.py", ROOT / "pyproject.toml"] + sorted((ROOT / "xuloom").rglob("*.py"))
-    inputs += sorted((ROOT / "xuloom").rglob("*.py"))
+    inputs = [ROOT / "setup.py", ROOT / "pyproject.toml", Path(__file__), Path(__file__).with_name('package_content.py')] + sorted((ROOT / "xuloom").rglob("*.py"))
     inputs += sorted((ROOT / "xuloom" / "skills" / "builtin").rglob("*.md"))
     fingerprint = hashlib.sha256(sys.version.encode() + b"".join(path.relative_to(ROOT).as_posix().encode() + path.read_bytes() for path in inputs)).hexdigest()
     manifest = RUNTIME / "xuloom-runtime.json"
@@ -51,6 +51,7 @@ def main():
     shutil.copytree(base / "Lib", stage / "Lib", ignore=shutil.ignore_patterns("site-packages", "__pycache__", "*.pyc", "test", "tests", "idlelib", "tkinter", "turtledemo"))
     target = stage / "Lib" / "site-packages"
     subprocess.run([sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "--no-compile", "--target", str(target), str(ROOT) + "[mcp]"], cwd=ROOT, check=True)
+    runpy.run_path(str(Path(__file__).with_name('package_content.py')))['prune_generated_runtime'](stage)
     # A normal wheel installation, rather than a copied virtual environment,
     # keeps project and interpreter paths out of the distributed runtime.
     verify(stage)

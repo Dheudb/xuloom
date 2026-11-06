@@ -3,6 +3,7 @@ import argparse
 from datetime import datetime
 import hashlib
 import json
+import runpy
 from pathlib import Path
 import shutil
 import subprocess
@@ -93,6 +94,10 @@ def main():
         str(stage), version], cwd=stage, check=True)
     manifest = {"metadataDirectory": metadata, "buildId": build_id, "pythonPackages": [p.name for p in dependencies.iterdir() if p.name != "__pycache__"],
         "originalExeSha256": hashlib.sha256(executable.read_bytes()).hexdigest(), "bundledSkills": skills}
+    replacements = ['resources/app', 'resources/python/Lib/site-packages/xuloom']
+    replacements += ['resources/python/Lib/site-packages/' + name for name in manifest['pythonPackages']]
+    policy = runpy.run_path(str(DESKTOP / 'scripts/package_content.py'))
+    manifest['retiredFiles'] = policy['retirements'](package, replacements)
     if source_hashes() != sources: raise SystemExit("Source changed while staging")
     provenance = dict(sourceCommit=subprocess.check_output(["git", "rev-parse", "HEAD"],cwd=ROOT,text=True).strip(),
         sourceHashes=sources, sourceTreeSha256=hashlib.sha256(json.dumps(sources,sort_keys=True).encode()).hexdigest(),

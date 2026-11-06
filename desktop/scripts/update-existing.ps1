@@ -74,7 +74,32 @@ try {
         if ((Get-Date) -gt $deadline) { throw 'Xuloom is still open. The update payload is preserved for retry.' }
         Start-Sleep -Seconds 1
     } while ($true)
+    # Verify every removal before mutation; retire only hashed Python resources.
+    # Native libraries, launchers, localization and licenses are never candidates.
+    $retirements = @()
+    $retirementNames = @{}
+    foreach ($file in $manifest.retiredFiles) {
+        if ($file.path -notmatch '^resources/python/Lib/' -or $file.path -match '\\|(^|/)\.\.(/|$)' -or
+            $file.path -match '(?i)\.(dll|pyd|exe|so|dylib|pak|pem|crt|cer|der|pfx|p12|ttf|otf|woff|woff2)$|license|copying|copyright|notice' -or
+            $file.sha256 -notmatch '^[a-f0-9]{64}$' -or $retirementNames.ContainsKey($file.path)) { throw 'Invalid retired resource.' }
+        $retirementNames[$file.path] = $true
+        $target = Join-Path $packageRoot $file.path
+        $backup = Join-Path $stageRoot ('backup\retired-resources\' + $file.path)
+        Assert-Child $target $packageRoot
+        Assert-Child $backup $stageRoot
+        if ($entries | Where-Object { $target.StartsWith($_.Target + '\', [System.StringComparison]::OrdinalIgnoreCase) }) { throw 'Retirement overlaps a replacement.' }
+        if (-not (Test-Path -LiteralPath $target -PathType Leaf) -or (Test-Path -LiteralPath $backup) -or
+            (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -ne $file.sha256) { throw 'Retired resource changed since staging.' }
+        $retirements += @{ Target = $target; Backup = $backup }
+    }
     Write-Status 'applying'
+    foreach ($entry in $retirements) {
+        [void](New-Item -ItemType Directory -Path (Split-Path -Parent $entry.Backup) -Force)
+        $change = @{ Entry = $entry; BackupMoved = $false; Installed = $false }
+        $changes.Add($change)
+        Move-Item -LiteralPath $entry.Target -Destination $entry.Backup
+        $change.BackupMoved = $true
+    }
     # Retire old versions transactionally so importlib.metadata cannot report
     # an obsolete distribution after a successful resource-only upgrade.
     $siteRoot = Join-Path $packageRoot 'resources\python\Lib\site-packages'

@@ -6,10 +6,14 @@ import re
 import subprocess
 import zipfile
 import runpy
+import os
+import shutil
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DESKTOP = ROOT / "desktop"
+CONTENT = runpy.run_path(str(DESKTOP / 'scripts/package_content.py'))
 
 
 def git(*args):
@@ -51,10 +55,51 @@ def verify_provenance(app, revision, sources):
     return provenance
 
 
+def write_archive(output, files, record, zip_program=None):
+    """Standard Deflate ZIP in both paths; an optional compressor is build-only."""
+    prefix = 'Xuloom-win32-x64/'
+    names = [relative.as_posix().casefold() for relative, _ in files]
+    if (len(set(names)) != len(names) or 'release.json' in names
+            or any(relative.is_absolute() or '..' in relative.parts for relative, _ in files)):
+        raise ValueError('Invalid release-relative file')
+    if zip_program is None:
+        with zipfile.ZipFile(output, 'x', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+            for relative, path in files:
+                archive.write(path, prefix + relative.as_posix())
+            archive.writestr(prefix + 'RELEASE.json', json.dumps(record, indent=2) + '\n')
+        return
+    program = Path(zip_program).resolve(strict=True)
+    if output.exists():
+        raise ValueError('Refusing to replace an existing archive')
+    # This short-lived input tree contains only already-validated release files.
+    # Hard links avoid copying the entire runtime; no target file is modified.
+    with tempfile.TemporaryDirectory(prefix='xuloom-zip-input-') as temporary:
+        root = Path(temporary)
+        for relative, path in files:
+            target = root / prefix / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                os.link(path, target)
+            except OSError:
+                shutil.copyfile(path, target)
+        (root / prefix / 'RELEASE.json').write_text(json.dumps(record, indent=2) + '\n', encoding='utf-8')
+        compressed = root / 'archive.zip'
+        subprocess.run([str(program), 'a', '-tzip', '-mm=Deflate', '-mx=9', '-mfb=258', '-mpass=15', '-mmt=2', '-bd', '-bsp0',
+                        str(compressed), 'Xuloom-win32-x64'], cwd=root, check=True)
+        try:
+            os.link(compressed, output)
+        except FileExistsError:
+            raise
+        except OSError:
+            with compressed.open('rb') as source, output.open('xb') as target:
+                shutil.copyfileobj(source, target)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tag", required=True)
     parser.add_argument("--staged-resources", type=Path, help="Use a validated resource update without changing the running installation")
+    parser.add_argument('--zip-program', type=Path, help='Optional trusted build-time 7-Zip console executable; always writes standard Deflate ZIP')
     args = parser.parse_args()
     if not re.fullmatch(r"v\d+\.\d+\.\d+(?:-[a-z0-9.]+)?", args.tag):
         raise SystemExit("Use a version tag such as v0.1.0")
@@ -118,25 +163,31 @@ def main():
               "version": metadata["version"], "buildId": metadata.get("buildId"),
               "bundledSkills": ['code-development', 'code-review', 'data-analysis', 'debug-issue', 'document-summary', 'document-writing', 'experiment-design', 'skill-creator', 'web-research']}
     skipped = 0
-    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
-        for relative, path in archive_files(package, replacements):
-            if path.is_symlink() or getattr(path.lstat(), "st_file_attributes", 0) & 0x400:
-                raise SystemExit("Refusing a linked package path")
-            if not path.is_file():
-                continue
-            # pip's generated launcher embeds the build interpreter's absolute path.
-            local_launcher = relative.as_posix() == "resources/python/Lib/site-packages/bin/xuloom.exe"
-            if "__pycache__" in relative.parts or path.suffix in {".pyc", ".pyo"} or path.name == "direct_url.json" or local_launcher:
-                skipped += 1
-                continue
-            dependency_workspace = relative.as_posix().startswith("resources/python/Lib/site-packages/anthropic/")
-            forbidden = {".git", ".xuloom", ".env", "history"}
-            if not dependency_workspace:
-                forbidden.add("workspaces")
-            if any(part.lower() in forbidden for part in relative.parts):
-                raise SystemExit("Refusing user/private data in archive")
-            archive.write(path, "Xuloom-win32-x64/" + relative.as_posix())
-        archive.writestr("Xuloom-win32-x64/RELEASE.json", json.dumps(record, indent=2) + "\n")
+    files = []
+    omitted = {}
+    for relative, path in archive_files(package, replacements):
+        if path.is_symlink() or getattr(path.lstat(), "st_file_attributes", 0) & 0x400:
+            raise SystemExit("Refusing a linked package path")
+        if not path.is_file():
+            continue
+        # pip's generated launcher embeds the build interpreter's absolute path.
+        local_launcher = relative.as_posix() == "resources/python/Lib/site-packages/bin/xuloom.exe"
+        reason = CONTENT['omitted_reason'](relative.as_posix())
+        if reason or "__pycache__" in relative.parts or path.suffix in {".pyc", ".pyo"} or path.name == "direct_url.json" or local_launcher:
+            skipped += 1
+            category = reason or 'build cache and local metadata'
+            omitted[category] = omitted.get(category, 0) + path.stat().st_size
+            continue
+        dependency_workspace = relative.as_posix().startswith("resources/python/Lib/site-packages/anthropic/")
+        forbidden = {".git", ".xuloom", ".env", "history"}
+        if not dependency_workspace:
+            forbidden.add("workspaces")
+        if any(part.lower() in forbidden for part in relative.parts):
+            raise SystemExit("Refusing user/private data in archive")
+        files.append((relative, path))
+    record['compression'] = 'zip-deflate'
+    record['omittedBytesByReason'] = omitted
+    write_archive(output, files, record, args.zip_program)
     with zipfile.ZipFile(output) as archive:
         bad = archive.testzip()
         if bad:

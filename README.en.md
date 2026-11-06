@@ -12,7 +12,7 @@ Download the Windows x64 ZIP from Releases, extract the whole directory, and run
 
 Open **Settings → Model connections**, enter your API endpoint, protocol, model ID and key. A connection can list multiple models; multiple providers are supported. OpenAI-compatible Chat Completions and Anthropic Messages are supported. Local model servers must expose a supported interface. Text completion alone does not establish compatibility with tools or images.
 
-Choose **New conversation** to get an independent working directory, or open an existing folder. A Git repository is not required. Source version: **v0.1.35**; see Releases for currently published binaries and checksums. macOS/Linux desktop distributions are not available.
+Choose **New conversation** to get an independent working directory, or open an existing folder. A Git repository is not required. Source version: **v0.1.36**; see Releases for currently published binaries and checksums. macOS/Linux desktop distributions are not available.
 
 **Live supplemental input:** While a desktop task runs, send additional text without stopping it. Inputs are saved before acknowledgement and delivered after the current response/tool step; pending inputs can be withdrawn and survive restart for explicit resume. The noninteractive CLI supports `exec --input-stream` and `exec --resume --session`; the normal interactive TTY does not yet offer live line editing. This reuses the engine without a default supervisor model. See [delivery and recovery boundaries](docs/live-input.md).
 
@@ -143,3 +143,5 @@ Media generation supports configured fal Queue endpoints for images, image edits
 [MIT](LICENSE)
 
 Current support boundaries: [capability matrix](docs/current-capabilities.md). Public embedding API: [extensions](docs/extensions.md). Packaged build provenance and scoped validation are available in Settings → Workspace; historical checks do not certify a later build.
+
+Windows packaging excludes explicit development-only resources while retaining all runtime libraries, locales, certificates and licenses. Python, MCP, PDF and image support remain bundled. See [packaging boundaries](docs/packaging-size.md).
