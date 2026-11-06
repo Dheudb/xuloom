@@ -53,6 +53,13 @@ def nodes():
     return [validate(value) for value in values]
 
 
+def public_config():
+    from xuloom.remote.config import profiles
+    from xuloom.core.model_catalog import connections, public_connection
+    return {"nodes": nodes(), "ssh": profiles(),
+            "models": [public_connection(row) for row in connections(load_config())]}
+
+
 def save(values):
     if not isinstance(values, list):
         raise ValueError("Supply Scaling nodes")

@@ -424,6 +424,11 @@ class DesktopBridge:
             from .readiness import inspect
             return await asyncio.to_thread(inspect,self.config(),self.execution_mode)
         if method.startswith("scaling."):
+            if method in {"scaling.config", "scaling.save"}:
+                from xuloom.scaling import config as scaling_config
+                if method == "scaling.config":
+                    return await asyncio.to_thread(scaling_config.public_config)
+                return await asyncio.to_thread(scaling_config.save, params.get("nodes"))
             from xuloom.scaling.control import invoke
             return await invoke(method, params)
         if method in {"context.get", "context.compact"}:

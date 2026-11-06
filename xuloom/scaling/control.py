@@ -121,10 +121,7 @@ class Controller:
 
     async def _dispatch(self, method, params):
         if method == "config":
-            from xuloom.remote.config import profiles
-            from xuloom.core.config import load_config
-            from xuloom.core.model_catalog import connections, public_connection
-            return {"nodes": config.nodes(), "ssh": profiles(), "models": [public_connection(row) for row in connections(load_config())]}
+            return config.public_config()
         if method == "save":
             return config.save(params.get("nodes"))
         if method == "check":

@@ -9,6 +9,30 @@ import unittest
 
 
 class StartupTests(unittest.TestCase):
+    def test_scaling_configuration_load_and_save_do_not_start_controller_or_model(self):
+        result = self.child('''
+import asyncio,json,os,sys
+from pathlib import Path
+from xuloom.desktop.bridge import DesktopBridge
+async def check():
+    bridge=DesktopBridge(lambda _:None,cwd=os.getcwd())
+    assert (await bridge.dispatch('scaling.config',{}))['nodes']==[]
+    row={'id':'local','location':'local','max_agents':100}
+    saved=await bridge.dispatch('scaling.save',{'nodes':[row]})
+    assert saved[0]['max_agents']==100
+    assert (await bridge.dispatch('scaling.config',{}))['nodes']==saved
+    await bridge.dispatch('config.get',{})
+    try: await bridge.dispatch('scaling.save',{'nodes':[row,row]})
+    except ValueError: pass
+    else: raise AssertionError('Duplicate node accepted')
+    assert (await bridge.dispatch('scaling.config',{}))['nodes']==saved
+    assert bridge.engine is None
+    assert not (Path(os.environ['XULOOM_DATA_DIR'])/'scaling').exists()
+asyncio.run(check())
+print(json.dumps({n:n in sys.modules for n in ('xuloom.scaling.control','anthropic','openai','paramiko')}))
+''')
+        self.assertFalse(any(result.values()), result)
+
     def child(self, script, *args):
         with tempfile.TemporaryDirectory() as folder:
             env = {k:v for k,v in os.environ.items() if not k.startswith(('XULOOM_', 'OPENAI_', 'ANTHROPIC_'))}

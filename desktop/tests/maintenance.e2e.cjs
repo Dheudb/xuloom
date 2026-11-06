@@ -24,7 +24,8 @@ const server=http.createServer((req,res)=>{req.resume();req.on('end',()=>{
     assert(!(await page.locator('body').innerText()).includes('PRIVATE-RESPONSE-SECRET'));assert.equal(calls,1,'Authentication failures do not blindly retry');
     await page.getByRole('button',{name:'检查模型设置',exact:true}).click();await page.getByRole('dialog',{name:'工作台设置',exact:true}).waitFor();
     await page.getByRole('tab',{name:'工作区',exact:true}).click();await page.locator('.build-details > summary').click();
-    await page.getByText(/版本：0\.1\.33/).waitFor();
+    const expectedVersion=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')).version;
+    await page.getByText('版本：'+expectedVersion+' · 构建：',{exact:false}).waitFor();
     const build=await page.evaluate(()=>window.xuloom.invoke('app.build-info'));
     if(process.env.XULOOM_TEST_EXECUTABLE){assert(build.buildId);assert(build.sourceCommit);assert.equal(build.dirty,false);assert.equal(build.validation.present,true);assert.equal(build.validation.realProvidersTested,false);}
     else assert.equal(build.validation.present,false,'Development mode must not claim packaged validation');
