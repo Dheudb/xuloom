@@ -9,6 +9,26 @@ const initial = {
   sessions: [],
   history: [],
 };
+test("queued input is applied once and late acknowledgements cannot restore it", async () => {
+  const { createSession, beginTurn, applyEvent } = await state;
+  const input = {id: "additional", text: "change direction"};
+  let session = beginTurn(createSession(initial), "original");
+  session = applyEvent(session, {session: "one", type: "user_input_queued", input});
+  session = applyEvent(session, {session: "one", type: "user_input_queued", input});
+  assert.equal(session.pendingInputs.length, 1);
+  const delivered = {session: "one", type: "user_input_applied", inputs: [input]};
+  session = applyEvent(session, delivered);
+  session = applyEvent(session, delivered);
+  session = applyEvent(session, {session: "one", type: "user_input_queued", input});
+  assert.equal(session.pendingInputs.length, 0);
+  assert.deepEqual(session.messages.filter(m => m.role === "user").map(m => m.text), ["original", "change direction"]);
+  assert.equal(session.streamIndex, session.messages.length - 1);
+  assert.equal(session.busy, true);
+  const other = {id: "withdrawn", text: "never deliver"};
+  session = applyEvent(session, {session: "one", type: "user_input_queued", input: other});
+  session = applyEvent(session, {session: "one", type: "user_input_withdrawn", id: other.id});
+  assert.equal(session.pendingInputs.length, 0);
+});
 test("a failed request removes its empty assistant placeholder and Rich tags", async () => {
   const { createSession, beginTurn, applyEvent } = await state;
   const session = applyEvent(beginTurn(createSession(initial), "hello"), {

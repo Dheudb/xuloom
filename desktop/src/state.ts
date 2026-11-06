@@ -48,6 +48,20 @@ export function applyEvent(
 ): SessionView {
   if (event.session !== session.id) return session;
   switch (event.type) {
+    case "user_input_queued":
+      if (session.messages.some(message => message.id === event.input.id)) return session;
+      return { ...session, pendingInputs: [...(session.pendingInputs || []).filter(item => item.id !== event.input.id), event.input] };
+    case "user_input_withdrawn":
+      return { ...session, pendingInputs: (session.pendingInputs || []).filter(item => item.id !== event.id) };
+    case "user_input_applied": {
+      const ids = new Set(event.inputs.map((item: {id:string}) => item.id));
+      const inputs = event.inputs.filter((item: {id:string})=>!session.messages.some(message=>message.id===item.id));
+      if (!inputs.length) return {...session,pendingInputs:(session.pendingInputs||[]).filter(item=>!ids.has(item.id))};
+      return { ...session, busy: true, pendingInputs: (session.pendingInputs || []).filter(item => !ids.has(item.id)),
+        streamIndex: session.messages.length + inputs.length,
+        messages: [...session.messages, ...inputs.map((item: {id:string;text:string}) => ({role:'user' as const,id:item.id,text:item.text})),
+          {role:'assistant',text:'',trace:event.trace || {id:'pending',startedAt:Date.now(),status:'running',steps:[]}}] };
+    }
     case "goal_changed":
     case "goal_final":
       return { ...session, goal: event.goal };

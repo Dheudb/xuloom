@@ -88,6 +88,20 @@ class DesktopBridge:
         self.attachment_guard = asyncio.Lock()
 
     def emit(self, event):
+        if event.get('type') == 'user_input_applied' and self.recorder and event.get('inputs'):
+            previous = self.recorder
+            previous.record['answer'] = previous.record.get('pendingText','')
+            previous.record['pendingText'] = ''
+            previous.accept({'type':'turn_finished'})
+            self.output({'type':'turn_trace','trace':copy.deepcopy(previous.record)})
+            self.recorder = TurnRecorder()
+            self.recorder.record['userMessageId'] = event['inputs'][-1]['id']
+            self.engine.turn_traces.append(self.recorder.record)
+            self.engine.active_turn_trace = self.recorder.record
+            if not self.engine.persist_session_state():
+                from xuloom.core.run_result import PersistenceError
+                raise PersistenceError('Supplemental input trace could not be saved')
+            event = {**event,'trace':copy.deepcopy(self.recorder.record)}
         if self.recorder and self.recorder.accept(event):
             # Deliver the settled trace before turn_finished clears the UI's
             # active response index. Snapshots never enter model messages.
@@ -793,7 +807,7 @@ class DesktopBridge:
             self.execution_mode = raw.get("metadata", {}).get("execution_mode", "host") if isinstance(raw, dict) else "host"
             controlled = bool(raw.get("metadata", {}).get("delegation", {}).get("authority_required")) if isinstance(raw, dict) else False
             controlled_model = raw.get("metadata", {}).get("delegation", {}).get("remote_worker", {}).get("model_binding", {}).get("model") if controlled else None
-            return {"controlledExecution": controlled, "controlledModel": controlled_model, "project": str(self.cwd), "persistedId": sid, "executionMode": self.execution_mode, "collaborationMode": self.collaboration_mode, "permissionMode": self.approval_policy.mode, "config": self.config(), "capabilities": self.capabilities(), "sessions": self.sessions(), "history": self.history(messages, traces), "activity": activity, "workers": workers, "fileChanges": self.file_changes}
+            return {"steering": True, "pendingInputs": raw.get("metadata", {}).get("user_inbox", []) if isinstance(raw, dict) else [], "controlledExecution": controlled, "controlledModel": controlled_model, "project": str(self.cwd), "persistedId": sid, "executionMode": self.execution_mode, "collaborationMode": self.collaboration_mode, "permissionMode": self.approval_policy.mode, "config": self.config(), "capabilities": self.capabilities(), "sessions": self.sessions(), "history": self.history(messages, traces), "activity": activity, "workers": workers, "fileChanges": self.file_changes}
         if method == "files.read":
             return preview_file(self.cwd, params.get("path"), self.file_changes)
         if method == "files.reference":
@@ -904,6 +918,14 @@ class DesktopBridge:
             if agent.get("path"):
                 return Path(agent["path"]).read_text(encoding="utf-8-sig")
             return str(agent.get("system_prompt", agent.get("description", "")))
+        if method in {'prompt.append','prompt.withdraw'}:
+            if method == 'prompt.append':
+                if not self.busy() or self.engine is None:
+                    raise ValueError('任务已结束，请直接发送新消息；补充内容仍保留在输入框中')
+                return self.engine.queue_input(params.get('text'),params.get('requestId'))
+            engine = await self.ensure_engine(write=True)
+            from xuloom.core.steering import withdraw
+            return withdraw(engine,params.get('requestId'))
         if method == "prompt.resume":
             self.require_idle()
             engine = await self.ensure_engine(write=True)
@@ -1068,10 +1090,12 @@ class DesktopBridge:
 
     async def goal_turn(self, engine):
         from xuloom.features import goals
-        self.recorder = TurnRecorder()
-        engine.turn_traces.append(self.recorder.record)
+        previous = engine.turn_traces[-1] if engine.user_inbox and engine.turn_traces and engine.turn_traces[-1].get('status') in {'cancelled','error','interrupted'} else None
+        self.recorder = TurnRecorder(previous)
+        if previous: engine.turn_traces[-1] = self.recorder.record
+        else: engine.turn_traces.append(self.recorder.record)
         engine.active_turn_trace = self.recorder.record
-        self.emit({"type": "managed_turn_started", "text": engine.goal["objective"]})
+        self.emit({'type':'turn_resumed','trace':copy.deepcopy(self.recorder.record)} if previous else {"type": "managed_turn_started", "text": engine.goal["objective"]})
         async def emit(event): self.emit(event)
         try:
             goal = await goals.run(engine, emit)

@@ -10,6 +10,7 @@
 | `submit_message(...)` | 异步读取文本、模型状态等流事件；唯一 `final` 的 `result` 为真实回执。提前关闭消费者会取消所属执行并保存取消结果 |
 | `run(...)` | 非流式执行，返回 `RunResult`；文本不是完成状态，以 `ok/reason/persisted` 判断 |
 | `request_abort()` | 请求停止；已完成结果保留，未确认副作用不会因此变成可安全重试 |
+| `queue_input(text, request_id=None)` | 同一事件循环内向运行中主任务追加文字；先保存再确认，安全边界送达。返回 `id/text/status`，详见[运行中追加指令](live-input.md) |
 | `load_session(id)` + `submit_message('', resume=True)` | 显式恢复原任务；不替换原 prompt，不通过猜测重放未知操作 |
 | `agents(action, **parameters)` | 原生 worker 的结构化启动、查询、消息、等待与取消；具体字段见 [框架接口](framework.md) |
 

@@ -4,7 +4,7 @@
 2. 在干净候选提交上运行 `python scripts/check_local.py --jobs 3 --output desktop/build/local-validation.json`，执行全量 Python 检查并记录提交、源码哈希、跳过项、每项结果和耗时。默认使用独立配置，不继承个人模型 Key。额外运行 `npm test`、`npm run build` 与本轮涉及的隐藏窗口 E2E。真实供应商测试另行授权，不混入本地通过结论。
 3. 验证报告必须匹配当前源码。用 `desktop/scripts/stage-update.py --validation-receipt ...` 构建资源，复用原安装的 Python/EXE；应用运行时只暂存，等待正常退出，不结束用户应用。
 4. 使用 `update-existing.ps1` 更新原安装，核对状态 `applied`、原 EXE 哈希、引擎版本、构建号与源码指纹。在原程序和包内 Python 上再次验证关键路径；保存成品日志。更新器对资源校验失败先拒绝修改；替换中途失败回退已替换资源。回滚失败必须保留暂存目录和日志，不能继续覆盖。
-5. `python desktop/scripts/release.py --tag v0.1.33` 生成完整 ZIP、`RELEASE.json` 与校验和。它要求干净源码并核对应用/引擎资源；不得打包私人 Skill、用户配置、凭据、历史或构建机安装来源。标签、源码、校验和和 ZIP 必须对应同一份已验证代码。对外发布时上传这些相同产物，而不是从其他目录找一个同名 EXE。
+5. `python desktop/scripts/release.py --tag v0.1.35` 生成完整 ZIP、`RELEASE.json` 与校验和。它要求干净源码并核对应用/引擎资源；不得打包私人 Skill、用户配置、凭据、历史或构建机安装来源。标签、源码、校验和和 ZIP 必须对应同一份已验证代码。对外发布时上传这些相同产物，而不是从其他目录找一个同名 EXE。
 
 随包 `build-provenance.json` 保存提交、源码树哈希和验证报告哈希；`build-validation.json` 保存本地验证范围。设置 → 工作区 → 程序版本与验证可查看摘要。签名安装器、自动更新和跨平台桌面成品当前没有提供，构建哈希不能代替代码签名。
 

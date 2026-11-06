@@ -2106,3 +2106,8 @@ body.panel-resizing iframe { pointer-events: none; }
 .task-readiness summary { cursor: pointer; margin: 12px 0; }
 .scaling-budget { margin: 12px 0; }
 .scaling-budget label { display: block; margin: 8px 0; }
+.pending-inputs { margin: 8px 0; max-height: 160px; overflow: auto; }
+.pending-inputs > div { display:flex; gap:12px; align-items:start; padding:10px 14px; border-radius:12px; background:#f2f7fc; margin:6px 0; }
+.pending-inputs span { flex:1; white-space:pre-wrap; overflow-wrap:anywhere; }
+.pending-inputs small { display:block; color:#697a8b; margin-bottom:4px; }
+.pending-inputs button { border:0; background:transparent; padding:3px; color:#697a8b; }

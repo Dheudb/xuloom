@@ -93,6 +93,8 @@ export default function App() {
   const [buildId, setBuildId] = useState("");
   const [appVersion, setAppVersion] = useState("");
   const [importing, setImporting] = useState(false);
+  const [steeringSending, setSteeringSending] = useState(false);
+  const steeringRequest = useRef<{session:string;text:string;id:string} | undefined>(undefined);
   const importOwner = useRef<{ id: string; remote: boolean } | null>(null);
   const [fileDrag, setFileDrag] = useState(false);
   const [attachmentPreview, setAttachmentPreview] = useState<{ name: string; source: string }>();
@@ -353,9 +355,25 @@ export default function App() {
       update({ busy: false, error: String(error) }, id);
     }
   }
+  async function appendInput() {
+    if (!active || !active.busy || !active.steering || steeringSending || !active.draft.trim()) return;
+    const id=active.id,text=active.draft.trim();
+    if (steeringRequest.current?.session !== id || steeringRequest.current?.text !== text)
+      steeringRequest.current={session:id,text,id:crypto.randomUUID()};
+    setSteeringSending(true);
+    try {
+      const receipt=await window.xuloom.invoke('prompt.append',{session:id,text,requestId:steeringRequest.current.id});
+      setSessions(previous=>previous.map(s=>s.id===id?{...s,error:'',draft:s.draft.trim()===text?'':s.draft,
+        ...(receipt.status==='queued' && !s.messages.some(m=>m.id===receipt.id)?{pendingInputs:[...(s.pendingInputs||[]).filter(item=>item.id!==receipt.id),receipt]}:{})}:s));
+      steeringRequest.current=undefined;
+    } catch(error) { update({error:String(error),errorAction:undefined},id); }
+    finally { setSteeringSending(false); }
+  }
   async function send() {
     if (active?.controlledExecution) return;
+    if (active?.busy && active.steering) { await appendInput(); return; }
     if (resumeAvailable) { await resume(); return; }
+    if (active?.pendingInputs?.length && !active.busy) { onError('还有未送达的补充要求，请继续原任务，或先取消这些消息再开始新任务。'); return; }
     if (opening || importing || modelChanging || permissionChanging || collaborationChanging || !active || active.busy || (!active.draft.trim() && !active.attachments.length)) return;
     if (active.attachments.some(item => item.available === false)) { onError("附件上传未完成；请移除后重新添加，再发送任务。"); return; }
     if (active.goalMode) {
@@ -818,6 +836,7 @@ export default function App() {
             </button>
           )}
           {!!runningCommands && !active?.busy && <button className="worker-strip" onClick={() => invoke("stop").catch(onError)}><Square size={13} />{runningCommands} 个后台命令正在运行 · 停止所有后台任务</button>}
+          {!!active?.pendingInputs?.length && <div className="pending-inputs" aria-label="等待送达的补充要求">{active.pendingInputs.map(item=><div key={item.id}><span><small>{active.busy ? '等待当前步骤结束后送达' : '已保存，继续原任务后送达'}</small>{item.text}</span><button aria-label="取消补充要求" title="取消尚未送达的消息" onClick={()=>void window.xuloom.invoke('prompt.withdraw',{session:active.id,requestId:item.id}).catch(onError)}><X size={13}/></button></div>)}</div>}
           {active?.goal && <GoalStrip key={active.id} goal={active.goal} busy={active.busy} invoke={invoke} onError={onError} details={() => setGoalDialog("goal")} />}
           {active?.controlledExecution && <p className="fine-print" role="status">此子代理由原主会话控制。可以查看历史和文件，或从消息创建独立分支；继续执行请返回主会话。</p>}
           {active?.goalMode && <details className="goal-limits"><summary>可选运行上限 · 留空则持续运行</summary>
@@ -847,8 +866,8 @@ export default function App() {
             )}
             <SkillInput key={activeId} sessionId={activeId} draft={active?.draft || ""}
               selected={active?.selected || []} capabilities={active?.capabilities}
-              placeholder={active?.controlledExecution ? "子代理历史 · 请返回主会话继续执行" : undefined}
-              disabled={opening || !active || active.busy || !!active.controlledExecution} inputRef={input} update={update} send={send} editPrevious={editLastPrompt} />
+              placeholder={active?.controlledExecution ? "子代理历史 · 请返回主会话继续执行" : active?.busy && active.steering ? "补充要求，将在当前步骤结束后送达…" : undefined}
+              allowSkills={!active?.busy} disabled={opening || !active || (active.busy && !active.steering) || !!active.controlledExecution} inputRef={input} update={update} send={send} editPrevious={editLastPrompt} />
             </div>
             <div className="composer-toolbar">
               <div className="composer-options">
@@ -893,6 +912,7 @@ export default function App() {
                     {active.loaded.length} Skills
                   </span>
                 ) : null}
+                {active?.busy && active.steering && !!active.draft.trim() && <button className="send-button" aria-label="追加指令" title="保存并在下一个安全边界送达" disabled={steeringSending} onClick={() => void appendInput()}><ArrowUp size={19}/></button>}
                 {active?.busy ? (
                   <button
                     className="send-button stop"

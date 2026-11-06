@@ -144,6 +144,7 @@ def available_output(goal):
 
 def update_objective(engine, objective):
     engine.require_writer()
+    if getattr(engine,'user_inbox',[]): raise ValueError('Withdraw queued supplemental inputs before replacing the goal')
     if not isinstance(objective, str) or not objective.strip(): raise ValueError("请填写目标")
     if engine.has_active_turn() or getattr(engine, "_goal_task", None): raise ValueError("Pause the goal before editing")
     if not engine.goal or engine.goal["status"] == "cancelled": raise ValueError("No editable goal")
@@ -196,7 +197,9 @@ async def run(engine, emit, validator=None):
             async def round_turn():
                 nonlocal result
                 engine._goal_turn_task = asyncio.current_task()
-                async for event in engine.submit_message(prompt, display_text=goal["objective"] if goal["rounds"] == 1 else "继续目标：" + goal["objective"], selected_skills=goal["skills"], sys_print_callback=lambda _: None):
+                pending_input = bool(getattr(engine,'user_inbox',[]))
+                options = {'resume':True} if pending_input else {'display_text':goal['objective'] if goal['rounds']==1 else '继续目标：'+goal['objective'],'selected_skills':goal['skills']}
+                async for event in engine.submit_message('' if pending_input else prompt, sys_print_callback=lambda _: None, **options):
                     if event["type"] == "final":
                         result = event["result"]
                         await emit({"type": "goal_round_result", "result": result})

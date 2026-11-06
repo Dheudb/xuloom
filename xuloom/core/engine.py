@@ -217,6 +217,8 @@ class QueryEngine(ModelStream):
         self.recent_tool_activity = []
         self.goal = None
         self.scheduled_deliveries = {}
+        self.user_inbox = []
+        self.user_input_event = asyncio.Event()
         self.loop_transition_history = []
         self.token_usage_history = []
         self.post_sampling_history = []
@@ -847,6 +849,10 @@ class QueryEngine(ModelStream):
 
     def has_active_turn(self) -> bool:
         return bool(getattr(self, "_context_compacting", False)) or self.active_run_task is not None and not self.active_run_task.done()
+
+    def queue_input(self, text: str, request_id=None):
+        from xuloom.core.steering import enqueue
+        return enqueue(self, text, request_id)
 
     async def request_abort(self) -> bool:
         self.abort_event.set()
@@ -2480,6 +2486,10 @@ class QueryEngine(ModelStream):
             from xuloom.features.goals import recover
             self.goal = recover(metadata.get("goal"))
             self.scheduled_deliveries = copy.deepcopy(metadata.get("scheduled_deliveries", {}))
+            from xuloom.core.steering import restore as restore_input
+            self.user_inbox = restore_input(metadata.get("user_inbox", []))
+            if self.user_inbox: self.user_input_event.set()
+            else: self.user_input_event.clear()
             self.last_run_result = copy.deepcopy(metadata.get("last_run_result"))
             self.native_context = copy.deepcopy(metadata.get("native_context"))
             self.last_compaction = copy.deepcopy(metadata.get("last_compaction"))
@@ -2601,6 +2611,7 @@ class QueryEngine(ModelStream):
             "collaboration_run": copy.deepcopy(self.tool_context.get("collaboration_run")),
             "goal": self.goal,
             "scheduled_deliveries": self.scheduled_deliveries,
+            "user_inbox": copy.deepcopy(self.user_inbox),
             "native_context": copy.deepcopy(self.native_context),
             "last_compaction": copy.deepcopy(self.last_compaction),
             "context_calibration": copy.deepcopy(self.context_calibration),
@@ -3254,19 +3265,23 @@ class QueryEngine(ModelStream):
         waited = bool(pending)
         if pending:
             stopped = asyncio.create_task(self.abort_event.wait())
+            input_ready = asyncio.create_task(self.user_input_event.wait())
             try:
                 while pending:
+                    if self.user_inbox: return True
+                    if input_ready.done(): input_ready = asyncio.create_task(self.user_input_event.wait())
                     if self.abort_event.is_set():
                         raise AbortRequestedError("Abort requested while waiting for subagents.")
                     await self._emit_stream_event(event_callback, {"type": "subagents_waiting", "count": len(pending),
                         "agent_ids": list(pending), "message": f"等待 {len(pending)} 个子代理返回结果，全部结束后再汇总。"})
-                    await asyncio.wait([*pending.values(), stopped], return_when=asyncio.FIRST_COMPLETED)
+                    await asyncio.wait([*pending.values(), stopped, input_ready], return_when=asyncio.FIRST_COMPLETED)
                     if self.abort_event.is_set():
                         raise AbortRequestedError("Abort requested while waiting for subagents.")
                     pending = active()
             finally:
                 stopped.cancel()
-                await asyncio.gather(stopped, return_exceptions=True)
+                input_ready.cancel()
+                await asyncio.gather(stopped, input_ready, return_exceptions=True)
         # Include workers that finished while the model was streaming its answer,
         # even if no worker remains active by the time this gate is reached.
         reports = workers.completed()
@@ -3408,6 +3423,11 @@ class QueryEngine(ModelStream):
                 return finish_run(self, "Ultra recovery cancelled; existing receipts were retained.", 'cancelled')
 
         while loop_state["turn_count"] < loop_state["max_turns"]:
+            from xuloom.core.steering import consume
+            try:
+                await consume(self, event_callback)
+            except PersistenceError as error:
+                return finish_run(self, str(error), 'persistence_error')
             mailbox = self.tool_context.get("delegated_mailbox")
             if mailbox:
                 incoming = mailbox()
@@ -3449,9 +3469,10 @@ class QueryEngine(ModelStream):
                 await advance(self, turn=turn_count, event_callback=event_callback, sys_print_callback=sys_print_callback)
                 # Inputs arriving during native continuation must reach the actor
                 # before any new reasoning request, using the existing inbox path.
-                if mailbox and mailbox():
+                if self.user_inbox or mailbox and mailbox():
                     continue
                 await self._apply_layered_compaction_if_needed(sys_print_callback, event_callback=event_callback)
+                if self.user_inbox: continue
                 remaining_output_budget = self._remaining_output_budget(loop_state)
                 if remaining_output_budget <= 0:
                     await self._record_loop_transition(
@@ -3595,6 +3616,8 @@ class QueryEngine(ModelStream):
                         "main_task": decision_plan.main_task, "worker_count": len(decision_plan.workers)})
                     sys_print_callback("Ultra 协作决策：" + {"answer": "直接回答", "delegate": "派发独立分工", "sequential": "主代理独立处理"}[decision_plan.decision])
                     if decision_plan.decision == "sequential": continue
+
+                if self.user_inbox and response.stop_reason != "tool_use": continue
                 
                 if response.stop_reason == "tool_use":
                     loop_state["workflow_guard_stalls"] = 0
@@ -3868,7 +3891,7 @@ class QueryEngine(ModelStream):
                         await self.memory_extractor.maybe_extract(self.messages)
                     self.persist_session_state()
                     mailbox = self.tool_context.get("delegated_mailbox")
-                    if mailbox and mailbox():
+                    if self.user_inbox or mailbox and mailbox():
                         # A message accepted while the model was streaming is
                         # still part of this assignment, not a completed reply.
                         continue
@@ -4090,6 +4113,8 @@ class QueryEngine(ModelStream):
     async def run(self, user_input: str, sys_print_callback=print, *, selected_skills=None):
         if self.has_active_turn() or getattr(self, "_goal_task", None) is not None and asyncio.current_task() not in (self._goal_task, getattr(self, "_goal_turn_task", None)):
             return RunResult("A turn is already running in this engine; wait or cancel it first.", "session_busy", session_id=self.session_id, agent_id=self.agent_id)
+        if self.user_inbox:
+            return RunResult('Resume the stopped task or withdraw its queued instructions before starting another task.', 'input_required')
         self.active_run_task = asyncio.current_task()
         try:
             return await self._run_loop(user_input, sys_print_callback=sys_print_callback, selected_skills=selected_skills)
@@ -4103,6 +4128,10 @@ class QueryEngine(ModelStream):
         if self.has_active_turn() or getattr(self, "_goal_task", None) is not None and asyncio.current_task() not in (self._goal_task, getattr(self, "_goal_turn_task", None)):
             result = RunResult("A turn is already running in this engine; wait or cancel it first.", "session_busy", session_id=self.session_id, agent_id=self.agent_id)
             yield {"type": "final", "text": result.text, "result": result.to_dict()}
+            return
+        if not resume and self.user_inbox:
+            result = RunResult('Resume the stopped task or withdraw its queued instructions before starting another task.', 'input_required')
+            yield {'type':'final','text':result.text,'result':result.to_dict()}
             return
         queue = asyncio.Queue()
 

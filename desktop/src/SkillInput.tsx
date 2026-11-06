@@ -4,13 +4,14 @@ import { Check, Puzzle } from "lucide-react";
 import type { Capabilities, Skill } from "./types";
 import { removeSkillMention, skillMention, skillScope } from "./skill-mention";
 
-export default function SkillInput({ sessionId, draft, selected, capabilities, disabled, placeholder, inputRef, update, send, editPrevious }: {
+export default function SkillInput({ sessionId, draft, selected, capabilities, disabled, placeholder, inputRef, update, send, editPrevious, allowSkills = true }: {
   sessionId: string; draft: string; selected: string[]; capabilities?: Capabilities; disabled: boolean;
   placeholder?: string;
   inputRef: RefObject<HTMLTextAreaElement | null>;
   update: (patch: { draft?: string; selected?: string[]; capabilities?: Capabilities }) => void;
   send: () => void;
   editPrevious?: () => void;
+  allowSkills?: boolean;
 }) {
   const [caret, setCaret] = useState(draft.length);
   const [focused, setFocused] = useState(false);
@@ -22,7 +23,7 @@ export default function SkillInput({ sessionId, draft, selected, capabilities, d
   const escapeAt = useRef(0);
   const mention = skillMention(draft, caret);
   const signature = JSON.stringify([draft, caret]);
-  const open = !!mention && focused && !disabled && dismissed !== signature;
+  const open = allowSkills && !!mention && focused && !disabled && dismissed !== signature;
   const options = (capabilities?.skills || []).filter((skill) => skill.valid && skill.enabled && !skill.shadowed &&
     (!mention?.query || (skill.name + " " + skill.description).toLowerCase().includes(mention.query)));
   const index = Math.min(highlight, Math.max(0, options.length - 1));
@@ -78,7 +79,7 @@ export default function SkillInput({ sessionId, draft, selected, capabilities, d
       onKeyDown={(event) => {
         if (event.nativeEvent.isComposing || event.keyCode === 229) return;
         if (event.key === "Backspace" && !event.ctrlKey && !event.metaKey && !event.altKey &&
-            selected.length && event.currentTarget.selectionStart === 0 && event.currentTarget.selectionEnd === 0) {
+            allowSkills && selected.length && event.currentTarget.selectionStart === 0 && event.currentTarget.selectionEnd === 0) {
           event.preventDefault();
           update({ selected: selected.slice(0, -1) });
           return;

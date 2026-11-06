@@ -79,6 +79,12 @@ async def execute_tool(self, tool_block, sys_print_callback=print, *, turn: int 
         return {"type": "tool_result", "tool_use_id": self._tb_get(tool_block, "id", ""), "content": str(error), "is_error": True}
     tool_name = self._tb_get(tool_block, "name", "")
     tool_id = self._tb_get(tool_block, "id", "")
+    from xuloom.core.steering import pending, deferred_result
+    if pending(self):
+        receipt = deferred_result(tool_id)
+        await self._emit_stream_event(event_callback, {"type":"tool_result", "tool_name":tool_name,
+            "tool_use_id":tool_id, "result":receipt['content'], "is_error":True, "status":"cancelled"})
+        return receipt
     tool_inputs = copy.deepcopy(self._tb_get(tool_block, "input", {}) or {})
     if self.tool_context.get("ultra_deciding"):
         return {"type": "tool_result", "tool_use_id": tool_id, "is_error": True, "_input_error": True,
@@ -249,6 +255,9 @@ async def execute_tool(self, tool_block, sys_print_callback=print, *, turn: int 
                     artifact_dir=str(artifact_directory(self.session_cwd) / self.session_id),
                     spill_recorder=spill_recorder,
                 )
+            elif pending(self):
+                res_text = serialize_tool_result(build_tool_result(ok=False, is_error=True,
+                    content=deferred_result(tool_id)['content'], metadata={'executed':False,'code':'user_input_pending'}))
             else:
                 self.in_progress_tools[tool_id].update(user_turn_id=user_turn_id, input_digest=digest, phase="executing")
                 if not self.persist_session_state():

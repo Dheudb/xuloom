@@ -69,7 +69,7 @@ def contract(engine, name):
 
 def current(engine, graph, name=None):
     mailbox = engine.tool_context.get("delegated_mailbox")
-    if (engine.abort_event.is_set() or graph["binding"] != binding(engine) or callable(mailbox) and mailbox()
+    if (engine.abort_event.is_set() or getattr(engine, 'user_inbox', []) or graph["binding"] != binding(engine) or callable(mailbox) and mailbox()
             or getattr(engine, "_continuation_approval_revision", engine.permission_manager.approval_policy.revision) != engine.permission_manager.approval_policy.revision):
         return False
     if name is None:

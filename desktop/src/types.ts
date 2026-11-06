@@ -118,6 +118,8 @@ export type SessionCatalog = {
   view: { sort: "recent" | "oldest" | "name" | "created" };
 };
 export type InitialSession = {
+  steering?: boolean;
+  pendingInputs?: { id: string; text: string }[];
   controlledExecution?: boolean;
   controlledModel?: string;
   remote?: RemoteLocation;

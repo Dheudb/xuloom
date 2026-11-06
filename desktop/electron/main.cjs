@@ -66,6 +66,7 @@ const engineMethods = new Set([
   "schedule.list", "schedule.add", "schedule.control",
   "prompt",
   "prompt.resume",
+  "prompt.append", "prompt.withdraw",
   "respond",
   "stop",
   "changes",
