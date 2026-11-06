@@ -3486,7 +3486,8 @@ class QueryEngine(ModelStream):
                     return finish_run(self, ("Session output token budget exhausted before another turn could start."), 'budget_exhausted')
                 self._inject_turn_attachments(turn_count)
                 # Archive oversized results before request assembly.
-                boundary_messages = self._get_messages_after_compact_boundary()
+                from xuloom.agents import ultra_decision
+                boundary_messages = ultra_decision.request_messages(self, self._get_messages_after_compact_boundary())
                 self._apply_tool_result_budget(boundary_messages)
                 api_messages = self._clean_roles_for_api(boundary_messages)
                 if self.model_provider == "anthropic" and self._is_native_anthropic():
@@ -3507,7 +3508,7 @@ class QueryEngine(ModelStream):
                 deciding = ultra_decision.pending(self)
                 decision_plan = None
                 if deciding:
-                    tools_schema = []
+                    tools_schema = ultra_decision.schema(self)
                     system_prompt += ultra_decision.contract(self)
                     await self._emit_stream_event(event_callback, {"type": "collaboration_decision", "id": get_msg_uuid(user_msg), "status": "running"})
                 await self._emit_stream_event(event_callback, {

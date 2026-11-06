@@ -42,10 +42,17 @@ def record(cwd, session_id, agent_id=None):
     if worker is None:
         raise ValueError("Agent is not registered to this conversation")
     child = saved(root / 'sessions' / 'subagents' / (agent_id + '.json'), root)
+    metadata = child.get('metadata', {}) if isinstance(child, dict) else {}
+    metadata = metadata if isinstance(metadata, dict) else {}
+    agent = metadata.get('agent', {})
+    agent = agent if isinstance(agent, dict) else {}
+    delegation = metadata.get('delegation', {})
+    delegation = delegation if isinstance(delegation, dict) else {}
     if child is None and worker.get('status') == 'queued':
         child = {'messages': [], 'metadata': {}, 'status': 'queued'}
-    elif (not isinstance(child, dict) or child.get('agent_id') != agent_id
-          or child.get('session_id') != session_id
+    elif (not isinstance(child, dict) or child.get('agent_id', agent.get('agent_id')) != agent_id
+          or agent.get('agent_id', agent_id) != agent_id
+          or child.get('session_id', delegation.get('owner_session_id')) != session_id
           or not isinstance(child.get('messages'), list)
           or not isinstance(child.get('metadata'), dict)
           or not isinstance(child['metadata'].get('delegation'), dict)

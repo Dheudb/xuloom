@@ -29,16 +29,17 @@ const server = http.createServer((req, res) => {
       }
       const task = human.findLast(m => m.content.startsWith('ULTRA_'))?.content || '';
       if (task.startsWith('ULTRA_SIMPLE')) {
-        simpleCalls++; assert.equal(body.tools, undefined);
+        simpleCalls++; assert.deepEqual(body.tools.map(t=>t.function.name), ['collaboration_decision']);
+        assert.equal(body.tool_choice.function.name, 'collaboration_decision');
         assert(history.includes('# Ultra collaboration decision (this request only)'));
-        return reply(res, JSON.stringify({ decision: 'answer', answer: 'SIMPLE_PASS' }));
+        return reply(res, null, 'collaboration_decision', { decision: 'answer', answer: 'SIMPLE_PASS' });
       }
       if (task.startsWith('ULTRA_COMPLEX')) {
         switch (++calls) {
           case 1:
-            assert.equal(body.tools, undefined);
-            return reply(res, JSON.stringify({ decision: 'delegate', reason: '两个独立来源可以分别核对', main_task: '主代理整理已有证据并汇总',
-              workers: [{ description: '第一来源', prompt: 'CHILD_FIRST: check source one' }, { description: '第二来源', prompt: 'CHILD_SECOND: check source two' }] }));
+            assert.deepEqual(body.tools.map(t=>t.function.name), ['collaboration_decision']);
+            return reply(res, null, 'collaboration_decision', { decision: 'delegate', reason: '两个独立来源可以分别核对', main_task: '主代理整理已有证据并汇总',
+              workers: [{ description: '第一来源', prompt: 'CHILD_FIRST: check source one' }, { description: '第二来源', prompt: 'CHILD_SECOND: check source two' }] });
           case 2:
             assert(body.tools.some(t => t.function.name === 'spawn_agent'));
             return reply(res, null, 'file_write_tool', { file_path: 'main-evidence.txt', content: 'PARENT_WORK' });
@@ -103,6 +104,15 @@ async function cli() {
     await send('ULTRA_COMPLEX: Compare two independent evidence sources, organize a main note, and synthesize.');
     await page.getByText('等待 2 个子代理返回结果，全部结束后再汇总。', { exact: true }).waitFor();
     assert.equal(children.length, 2); assert.equal(calls, 3);
+    if (await page.getByRole('button', {name:'展开能力面板',exact:true}).count())
+      await page.getByRole('button', {name:'展开能力面板',exact:true}).click();
+    await page.getByRole('button', {name:'代理',exact:true}).click();
+    await page.getByRole('button', {name:'查看完整对话历史',exact:true}).first().click();
+    const liveHistory = page.getByRole('dialog', {name:'子代理完整历史',exact:true});
+    await liveHistory.getByText('已到当前快照末尾',{exact:true}).waitFor();
+    assert((await liveHistory.innerText()).includes('CHILD_'), 'A running child checkpoint is readable before its first model result');
+    assert(!(await liveHistory.innerText()).includes('Agent receipt is missing'));
+    await liveHistory.getByLabel('关闭子代理历史',{exact:true}).click();
     await page.locator('.new-task').click();
     await page.waitForFunction(id=>document.querySelector('.session-item.active')?.getAttribute('data-session-id')!==id,originalId);
     await page.getByLabel('协作档位',{exact:true}).selectOption('ultra');
@@ -124,6 +134,11 @@ async function cli() {
     assert.equal(calls, 3); reply(children[1], 'EVIDENCE_SECOND');
     await page.getByText('COMPLEX_SYNTHESIS_PASS', { exact: true }).waitFor();
     await page.waitForFunction(() => !document.querySelector('.send-button.stop'));
+    await page.getByRole('button', {name:'查看完整对话历史',exact:true}).first().click();
+    const finishedHistory = page.getByRole('dialog', {name:'子代理完整历史',exact:true});
+    await finishedHistory.getByText('已到当前快照末尾',{exact:true}).waitFor();
+    assert((await finishedHistory.innerText()).includes('EVIDENCE_'), 'Completed receipt remains readable');
+    await finishedHistory.getByLabel('关闭子代理历史',{exact:true}).click();
     await app.close(); app = null; await launch();
     await page.getByText('COMPLEX_SYNTHESIS_PASS', { exact: true }).waitFor();
     await page.locator('.turn-process').last().locator(':scope > summary').click();

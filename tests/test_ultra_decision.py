@@ -7,7 +7,7 @@ from unittest.mock import patch
 from tests import test_tool_recovery as recovery
 from xuloom.core.engine import QueryEngine
 from xuloom.core.run_result import RunResult
-from xuloom.agents.ultra_decision import recover, pending
+from xuloom.agents.ultra_decision import recover, pending, DECISION_TOOL, schema
 
 
 def answer(text="4"):
@@ -40,11 +40,56 @@ class UltraDecisionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.ok, result)
         self.assertEqual(result.text, "4")
         self.assertEqual(len(self.requests), 1)
-        self.assertNotIn("tools", self.requests[0])
+        self.assertEqual([t['function']['name'] for t in self.requests[0]['tools']], [DECISION_TOOL])
+        self.assertEqual(self.requests[0]['tool_choice']['function']['name'], DECISION_TOOL)
         self.assertEqual(self.engine.subagent_registry, [])
         self.assertEqual(self.engine.tool_context["collaboration_run"]["decision"]["decision"], "answer")
         self.assertFalse(any(e.get("type")=="text_delta" and '"decision"' in e.get("text", "") for e in self.events))
         self.assertEqual(self.recorder.record["pendingText"], "", "The decision JSON is never presented as assistant text")
+
+    async def test_native_decision_tool_answers_without_dispatch_or_repair(self):
+        self.fixture([(DECISION_TOOL, answer("NATIVE_REPLY"))])
+        with patch.object(self.engine, '_execute_tool_wrapper', side_effect=AssertionError('Decision is not an executable action')):
+            result = await self.run_task("2+2?")
+        self.assertTrue(result.ok, result)
+        self.assertEqual(result.text, "NATIVE_REPLY")
+        self.assertEqual(len(self.requests), 1)
+        self.assertFalse(any(e['type'] in {'tool_protocol_error', 'tool_started', 'tool_scheduled'} for e in self.events))
+
+    async def test_native_decision_launches_workers_and_preserves_search_assignment(self):
+        plan = json.loads(delegate(1))
+        plan['workers'][0]['prompt'] = 'Search and verify distinct independent sources'
+        self.fixture([(DECISION_TOOL, json.dumps(plan)), ("record_tool", '{"value":"SEARCH_EVIDENCE"}'), "WAIT", "SOURCED_SYNTHESIS"])
+        tasks = []
+        async def child(child, user_input, sys_print_callback):
+            tasks.append(user_input)
+            return RunResult("VERIFIED_SOURCE", "completed", True)
+        with patch.object(QueryEngine, "run", child):
+            result = await self.run_task("Search literature and compare alternatives")
+        self.assertTrue(result.ok, result)
+        self.assertEqual(tasks, ['Search and verify distinct independent sources'])
+        self.assertEqual(self.tool.calls, ['SEARCH_EVIDENCE'])
+        self.assertNotIn(DECISION_TOOL, [t['function']['name'] for t in self.requests[1]['tools']])
+        self.assertNotIn('tool_choice', self.requests[1])
+        self.assertFalse(any(e['type'] == 'tool_protocol_error' for e in self.events))
+
+    async def test_native_malformed_and_multiple_decisions_never_dispatch(self):
+        self.fixture([(DECISION_TOOL, '{"decision":"answer","decision":"delegate"}'), (DECISION_TOOL, answer('FIXED'))])
+        result = await self.run_task()
+        self.assertTrue(result.ok, result)
+        self.assertEqual(result.text, 'FIXED')
+        self.assertEqual(self.tool.calls, [])
+        self.assertEqual(self.engine.subagent_registry, [])
+
+    async def test_anthropic_schema_declares_registered_roles_without_openai_wrapper(self):
+        self.engine.model_provider = 'anthropic'
+        try:
+            tool, = schema(self.engine)
+            self.assertEqual(tool['name'], DECISION_TOOL)
+            self.assertIn('delegate', tool['input_schema']['properties']['decision']['enum'])
+            self.assertIn('explore', tool['input_schema']['$defs']['Assignment']['properties']['subagent_type']['anyOf'][0]['enum'])
+        finally:
+            self.engine.model_provider = 'openai'
 
     async def test_sequential_requires_reason_and_then_uses_normal_tools(self):
         self.fixture([json.dumps({"decision":"sequential", "reason":"One tightly coupled local operation", "main_task":"Read and edit one item"}),
@@ -93,6 +138,18 @@ class UltraDecisionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.requests), 2)
         self.assertIn("Ultra decision rejected", json.dumps(self.requests[1]["messages"]))
         self.assertEqual(self.engine.subagent_registry, [])
+
+    async def test_repair_control_does_not_override_later_execution_or_new_human_input(self):
+        self.fixture(['bad', json.dumps({'decision':'sequential', 'reason':'Need evidence', 'main_task':'Read evidence'}),
+            ('record_tool', '{"value":"EVIDENCE"}'), 'DONE', answer('NEW_REPLY')])
+        result = await self.run_task('Search and verify evidence')
+        self.assertTrue(result.ok, result)
+        self.assertIn('Ultra decision rejected', json.dumps(self.requests[1]['messages']))
+        self.assertNotIn('Ultra decision rejected', json.dumps(self.requests[2]['messages']))
+        self.assertIn('Ultra decision rejected', str(self.engine.messages), 'Diagnostic history is retained')
+        result = await self.run_task('Hello in a new round')
+        self.assertEqual(result.text, 'NEW_REPLY')
+        self.assertNotIn('Ultra decision rejected', json.dumps(self.requests[-1]['messages']))
 
     async def test_unknown_role_invalidates_whole_plan_before_any_worker_starts(self):
         bad = json.loads(delegate()); bad["workers"][-1]["subagent_type"]="research-not-registered"

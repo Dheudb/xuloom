@@ -195,6 +195,13 @@ class SessionManager:
         try:
             path = self.get_subagent_transcript_path(agent_id)
             owner = payload.get("session_id") or payload.get("metadata", {}).get("delegation", {}).get("owner_session_id") or agent_id
+            nested = payload.get("metadata", {}).get("agent", {}).get("agent_id")
+            if payload.get("agent_id", agent_id) != agent_id or nested not in (None, agent_id):
+                raise ValueError("Subagent checkpoint identity does not match its destination")
+            delegated_owner = payload.get("metadata", {}).get("delegation", {}).get("owner_session_id")
+            if delegated_owner is not None and owner != delegated_owner:
+                raise ValueError("Subagent checkpoint owner does not match its delegation")
+            payload = {**payload, "agent_id": agent_id, "session_id": owner}
             self._save(path, self._make_json_safe(payload), owner)
             self.last_save_ok = True
             self.last_save_error = ""

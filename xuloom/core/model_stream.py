@@ -56,6 +56,8 @@ class ModelStream:
                 }
                 if tools_schema:
                     create_kwargs["tools"] = tools_schema
+                    if self.tool_context.get("ultra_deciding"):
+                        create_kwargs["tool_choice"] = {"type": "function", "function": {"name": "collaboration_decision"}}
                 profile = self.reasoning_profile if model_name == self.primary_model else configured_profile(self.model_provider, model_name, self.api_base_url)
                 if profile is not None:
                     create_kwargs.update(request_options(profile, self.model_provider,
@@ -75,6 +77,8 @@ class ModelStream:
 
                 def _dispatch_tool_if_ready(idx):
                     """Dispatch a tool call as soon as its arguments are fully received."""
+                    if self.tool_context.get("ultra_deciding"):
+                        return  # Decision calls are validated atomically, never dispatched as actions.
                     if idx in dispatched_indices:
                         return
                     record = tool_calls.get(idx)
@@ -350,7 +354,7 @@ class ModelStream:
                                 })
                         elif event_type == "content_block_stop":
                             content_block = getattr(event, "content_block", None)
-                            if getattr(content_block, "type", "") == "tool_use":
+                            if getattr(content_block, "type", "") == "tool_use" and not self.tool_context.get("ultra_deciding"):
                                 is_safe = self._is_concurrency_safe(
                                     getattr(content_block, "name", ""),
                                     getattr(content_block, "input", {}) or {},

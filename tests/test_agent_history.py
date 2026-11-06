@@ -104,6 +104,38 @@ class AgentHistoryTests(unittest.TestCase):
         for value in ('../parent', '', True):
             with self.assertRaises(ValueError): read(self.cwd, value)
 
+    def test_live_checkpoint_legacy_nested_identity_is_read_without_rewriting(self):
+        self.child.pop('agent_id')
+        self.child['metadata']['agent'] = {'agent_id': self.agent, 'agent_depth': 1}
+        self.child['messages'] = [{'role': 'assistant', 'content': 'LIVE_SEARCH_PROGRESS'}]
+        self.save()
+        before = self.child_path.read_bytes()
+        self.assertEqual(self.load()['entries'][0]['text'], 'LIVE_SEARCH_PROGRESS')
+        self.assertEqual(before, self.child_path.read_bytes())
+        self.child['metadata']['agent']['agent_id'] = 'another-child'; self.save()
+        with self.assertRaises(ValueError): self.load()
+        self.child['agent_id'] = self.agent; self.save()
+        with self.assertRaises(ValueError): self.load()
+
+    def test_real_checkpoint_writer_retains_identity_and_reader_does_not_rebase(self):
+        from xuloom.core.session import SessionManager
+        with SessionManager(session_dir=self.root / 'sessions', cwd=self.cwd) as manager:
+            payload = {'messages': [], 'metadata': {'agent': {'agent_id': self.agent},
+                'delegation': {'owner_session_id': self.parent}}}
+            manager.load_subagent_transcript(self.agent)
+            self.assertTrue(manager.save_subagent_transcript(self.agent, payload))
+            written = json.loads(self.child_path.read_bytes())
+            self.assertEqual(written['agent_id'], self.agent)
+            self.assertEqual(written['session_id'], self.parent)
+            self.load()
+            payload['messages'] = [{'role': 'assistant', 'content': 'NEXT_CHECKPOINT'}]
+            self.assertTrue(manager.save_subagent_transcript(self.agent, payload))
+            self.assertEqual(self.load()['entries'][0]['text'], 'NEXT_CHECKPOINT')
+            before = self.child_path.read_bytes()
+            for wrong in ({**payload, 'agent_id': 'foreign'}, {**payload, 'session_id': 'foreign'}):
+                self.assertFalse(manager.save_subagent_transcript(self.agent, wrong))
+                self.assertEqual(before, self.child_path.read_bytes())
+
     def test_no_write_migration_or_session_manager_on_read(self):
         from xuloom.core.session import SessionManager
         self.child['messages'] = [{'role': 'assistant', 'content': 'Saved'}]; self.save()

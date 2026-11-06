@@ -61,6 +61,32 @@ class OfficialResponsesWireTests(unittest.IsolatedAsyncioTestCase):
     asyncSetUp = recovery.RecoveryTests.asyncSetUp
     asyncTearDown = recovery.RecoveryTests.asyncTearDown
 
+    async def test_ultra_decision_uses_native_responses_function_without_executing_it(self):
+        await self.engine.client.close()
+        self.engine.primary_model = self.engine.model = 'gpt-6.1-sol'
+        self.engine.api_base_url = BASE
+        self.engine.set_collaboration_mode('ultra')
+        requests = []
+        def handler(request):
+            self.assertEqual(str(request.url), BASE + '/responses')
+            body = json.loads(request.content); requests.append(body)
+            self.assertEqual(body['tool_choice'], {'type': 'function', 'name': 'collaboration_decision'})
+            self.assertEqual([tool['name'] for tool in body['tools']], ['collaboration_decision'])
+            item = {'type': 'function_call', 'id': 'decision_item', 'call_id': 'decision_call',
+                'name': 'collaboration_decision', 'arguments': '{"decision":"answer","answer":"NATIVE_ULTRA"}', 'status': 'completed'}
+            response = {'id': 'resp_decision', 'object': 'response', 'status': 'completed', 'model': body['model'],
+                'output': [item], 'usage': {'input_tokens': 10, 'output_tokens': 5, 'total_tokens': 15}}
+            data = 'event: response.completed\ndata: ' + json.dumps({'type': 'response.completed', 'response': response}) + '\n\n'
+            return httpx.Response(200, headers={'content-type': 'text/event-stream'}, text=data)
+        self.engine.client = AsyncOpenAI(api_key='owned-fixture', base_url=BASE,
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler), trust_env=False))
+        result = await self.engine._run_loop('Hello', sys_print_callback=lambda _: None)
+        self.assertTrue(result.ok, result)
+        self.assertEqual(result.text, 'NATIVE_ULTRA')
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(self.tool.calls, [])
+        self.assertEqual(self.engine.subagent_registry, [])
+
     async def test_real_sdk_uses_responses_and_keeps_reasoning_tool_identity(self):
         await self.engine.client.close()
         self.engine.primary_model = self.engine.model = 'gpt-6.1-sol'
