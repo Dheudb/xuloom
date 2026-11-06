@@ -83,6 +83,20 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(engine.turn_traces[-1]["answer"], "saved result")
                 engine.persist_session_state.assert_called_once()
 
+    async def test_goal_resume_with_pending_input_reuses_the_stopped_trace(self):
+        from types import SimpleNamespace
+        trace = {'id':'original','userMessageId':'prompt','status':'cancelled','steps':[],'files':[],'answer':'partial'}
+        goal = {'objective':'same objective','status':'awaiting_review','reason':'review','last_result':{'text':'resumed','ok':True}}
+        engine = SimpleNamespace(goal=goal, user_inbox=[{'id':'pending','text':'change direction'}],
+            turn_traces=[trace], persist_session_state=Mock(return_value=True))
+        self.bridge.engine=engine
+        with patch('xuloom.features.goals.run',AsyncMock(return_value=goal)):
+            await self.bridge.goal_turn(engine)
+        self.assertEqual(len(engine.turn_traces),1)
+        self.assertEqual(engine.turn_traces[0]['id'],'original')
+        self.assertTrue(any(event['type']=='turn_resumed' for event in self.events))
+        self.assertFalse(any(event['type']=='managed_turn_started' for event in self.events))
+
     async def test_failed_scheduled_turn_cannot_reuse_a_previous_success_receipt(self):
         from types import SimpleNamespace
         self.bridge.engine = SimpleNamespace(last_run_result={"ok": True, "reason": "completed"}, session_id="fixture",

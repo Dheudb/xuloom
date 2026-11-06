@@ -1090,7 +1090,7 @@ class DesktopBridge:
 
     async def goal_turn(self, engine):
         from xuloom.features import goals
-        previous = engine.turn_traces[-1] if engine.user_inbox and engine.turn_traces and engine.turn_traces[-1].get('status') in {'cancelled','error','interrupted'} else None
+        previous = engine.turn_traces[-1] if getattr(engine,'user_inbox',[]) and engine.turn_traces and engine.turn_traces[-1].get('status') in {'cancelled','error','interrupted'} else None
         self.recorder = TurnRecorder(previous)
         if previous: engine.turn_traces[-1] = self.recorder.record
         else: engine.turn_traces.append(self.recorder.record)
