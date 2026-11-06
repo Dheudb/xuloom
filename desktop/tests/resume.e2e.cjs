@@ -66,6 +66,11 @@ async function stop() {
   assert.equal(await page.locator(".composer .send-button.resume").count(), 1);
   assert(await input().isEnabled());
 }
+async function capture(name) {
+  const png = await app.evaluate(async ({ BrowserWindow }) =>
+    (await BrowserWindow.getAllWindows()[0].webContents.capturePage(undefined, { stayHidden: true, stayAwake: true })).toPNG().toString("base64"));
+  fs.writeFileSync(path.join(root, "test-results", name), Buffer.from(png, "base64"));
+}
 (async () => {
   try {
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -80,9 +85,7 @@ async function stop() {
     await page.getByText("PARTIAL_PROGRESS", { exact: true }).last().waitFor();
     assert.equal(await page.locator(".message.user").count(), 1);
     fs.mkdirSync(path.join(root, "test-results"), { recursive: true });
-    const stoppedImage = await app.evaluate(async ({ BrowserWindow }) =>
-      (await BrowserWindow.getAllWindows()[0].webContents.capturePage(undefined, { stayHidden: true, stayAwake: true })).toPNG().toString("base64"));
-    fs.writeFileSync(path.join(root, "test-results", "resume-stopped.png"), Buffer.from(stoppedImage, "base64"));
+    await capture("resume-stopped.png");
     await input().fill("unsent draft");
     assert.equal(await page.getByRole("button", { name: "继续执行", exact: true }).count(), 0);
     assert(await page.getByRole("button", { name: "发送任务", exact: true }).isEnabled());
@@ -101,7 +104,7 @@ async function stop() {
     assert.equal(await page.locator(".message.user").count(), 1);
     assert.equal(await page.locator(".message.assistant").count(), 1);
     fs.mkdirSync(path.join(root, "test-results"), { recursive: true });
-    await page.screenshot({ path: path.join(root, "test-results", "resume-completed.png") });
+    await capture("resume-completed.png");
     await send("EDIT_ORIGINAL"); await page.getByText("PARTIAL_PROGRESS", { exact: true }).last().waitFor(); await stop();
     await input().focus(); await page.keyboard.press("Escape"); await page.keyboard.press("Escape");
     assert.equal(await input().inputValue(), "EDIT_ORIGINAL");
@@ -120,7 +123,7 @@ async function stop() {
     assert(recovery(data).some((file) => file.includes(path.sep + "revisions" + path.sep) && fs.readFileSync(file, "utf8").includes("EDIT_ORIGINAL")));
     const humansBeforeZero = await page.locator(".message.user").count();
     await send("ZERO_STOP"); await zeroReady; await stop();
-    await page.screenshot({ path: path.join(root, "test-results", "resume-empty.png") });
+    await capture("resume-empty.png");
     await page.getByRole("button", { name: "继续执行", exact: true }).click();
     await page.getByText("ZERO_DONE", { exact: true }).waitFor();
     await page.waitForFunction(() => !document.querySelector(".send-button.stop"));
