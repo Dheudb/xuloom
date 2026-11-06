@@ -4,13 +4,14 @@ import uuid
 import base64
 import asyncio
 from pathlib import Path
+from importlib.util import find_spec
 
-try:
-    from playwright.async_api import async_playwright
-    PLAYWRIGHT_AVAILABLE = True
-except ImportError:
-    PLAYWRIGHT_AVAILABLE = False
-    async_playwright = None
+PLAYWRIGHT_AVAILABLE = find_spec('playwright') is not None
+
+
+def async_playwright():
+    from playwright.async_api import async_playwright as factory
+    return factory()
 
 
 class BrowserSessionManager:

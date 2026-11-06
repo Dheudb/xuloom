@@ -9,7 +9,6 @@ import sys
 import time
 
 from xuloom.core.config import load_config_into_env
-from xuloom.core.engine import QueryEngine
 from xuloom.core.reasoning import EFFORTS
 from xuloom.core.session import SessionManager
 from xuloom.core.session_lock import SessionBusyError, SessionConflictError
@@ -142,6 +141,7 @@ async def stream(engine, prompt, skills, emit):
 
 
 async def open_engine(args, emit, *, read_only=False):
+    from xuloom.core.engine import QueryEngine
     cwd = Path(args.cwd).resolve(strict=True)
     if not cwd.is_dir(): raise ValueError("Working directory must be a directory")
     load_config_into_env()
@@ -476,7 +476,11 @@ def main(argv):
         reason = error.code if isinstance(error, ChatLinkError) else "session_busy" if isinstance(error, SessionBusyError) else "session_conflict" if isinstance(error, SessionConflictError) else "persistence_error" if isinstance(error, PersistenceError) else "error"
         result = {"ok": False, "reason": reason, "error": type(error).__name__}
         print(str(error) if isinstance(error, (ValueError, SessionBusyError, SessionConflictError, PersistenceError)) else type(error).__name__, file=sys.stderr)
+    if not result.get("ok", False):
+        from xuloom.core.run_result import failure_help
+        result["help"] = failure_help(result.get("reason", "unknown"))
     if args.json: wire.write(json.dumps({"type": "final", "result": result}, ensure_ascii=False, default=str) + "\n")
     else: wire.write(str(result.get("text") or json.dumps(result, ensure_ascii=False, default=str)) + "\n")
+    if not args.json and result.get("help"): wire.write(result["help"]["message"] + "\n")
     wire.flush()
     return EXIT_CODES.get(result["reason"], 1 if not result.get("ok") else 0)

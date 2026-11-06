@@ -1,6 +1,6 @@
 {
   "name": "xuloom-desktop",
-  "version": "0.1.32",
+  "version": "0.1.33",
   "private": true,
   "type": "module",
   "description": "Xuloom desktop workbench",
@@ -22,6 +22,7 @@
     "test:sandbox-cleanup": "node tests/sandbox-cleanup.e2e.cjs",
     "test:collaboration": "node tests/collaboration.e2e.cjs",
     "test:ultra-decision": "node tests/ultra-decision.e2e.cjs",
+    "test:maintenance": "node tests/maintenance.e2e.cjs",
     "test:message-actions": "node tests/message-actions.e2e.cjs",
     "test:composer": "node tests/composer.e2e.cjs",
     "test:workspace": "node tests/workspace.e2e.cjs",

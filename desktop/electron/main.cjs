@@ -451,6 +451,7 @@ async function invoke(method, params) {
     await shell.openExternal(url.href);
     return true;
   }
+  if (method === "app.build-info") return require('./build-info.cjs').buildInfo(app.getAppPath());
   if (method === "app.initialize") {
     restoration ||= restoreWorkspace();
     return {

@@ -6,17 +6,12 @@ import json
 import logging
 import re
 import time
+import sys
 from xuloom.branding import configuration_file
 from types import SimpleNamespace
 from typing import Optional
 
 _logger = logging.getLogger(__name__)
-from anthropic import (
-    APIConnectionError,
-    APIStatusError,
-    InternalServerError,
-    RateLimitError,
-)
 try:
     import git
 except ImportError:
@@ -112,7 +107,7 @@ from xuloom.core.model_stream import ModelStream, AbortRequestedError
 
 class QueryEngine(ModelStream):
     """
-    The main Agentic loop mapping the Context System and Tools to the Anthropic REST API.
+    The shared execution loop over explicit model connections, context and tools.
     """
     def __init__(
         self,
@@ -927,6 +922,41 @@ class QueryEngine(ModelStream):
             self.latent_tools[name] = tool
         self.activate_tools(self.activated_tools.intersection(tools))
         return set(tools)
+
+    def register_tool(self, tool):
+        """Register one trusted Python tool before a turn; never replace native tools."""
+        from xuloom.tools.base import BaseAgenticTool
+        self._assert_open()
+        if self.has_active_turn():
+            raise ValueError("Register tools while the engine is idle")
+        if not isinstance(tool, BaseAgenticTool):
+            raise TypeError("Custom tools must implement BaseAgenticTool")
+        definition = tool.get_tool_definition()
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", definition["name"]):
+            raise ValueError("Invalid custom tool name")
+        if tool.name in self.available_tools or tool.name in self.latent_tools:
+            raise ValueError("Tool name already registered: " + tool.name)
+        tool.context = self.tool_context
+        self.available_tools[tool.name] = tool
+        self.activated_tools.add(tool.name)
+        return tool.name
+
+    def set_event_handler(self, handler):
+        """Set the existing synchronous capability listener; streaming uses submit_message."""
+        self._assert_open()
+        if self.has_active_turn():
+            raise ValueError("Set the event handler while the engine is idle")
+        if handler is None:
+            self.tool_context.pop("capability_event", None)
+            return
+        if not callable(handler) or inspect.iscoroutinefunction(handler):
+            raise TypeError("Capability event handlers must be synchronous callables")
+        def notify(event):
+            try:
+                handler(copy.deepcopy(event))
+            except Exception as error:
+                _logger.warning("Capability listener failed (%s); execution receipts remain authoritative", type(error).__name__)
+        self.tool_context["capability_event"] = notify
 
 
     # ── Compact Boundary Slicing ──────────────────────────────────────
@@ -2706,7 +2736,7 @@ class QueryEngine(ModelStream):
                     raise PersistenceError("Final checkpoint could not be saved; close failed and the writer lease was retained.")
             except Exception as error:
                 failures.append(error)
-        cleanup = [self.client.close()]
+        cleanup = [self.client.close()] if self.client is not None else []
         if getattr(self.compactor, "client", None):
             cleanup.append(self.compactor.client.close())
         cleanup.extend(client.close() for client in self._retired_model_clients if not client.is_closed)
@@ -2802,7 +2832,6 @@ class QueryEngine(ModelStream):
             f"Pending auto-commit proposal: {'yes' if auto_commit.get('pending_proposal') else 'no'}",
             f"Session input tokens: {session_token_usage.get('input_tokens', 0)}",
             f"Session output tokens: {session_token_usage.get('output_tokens', 0)}",
-            f"Remaining output budget: {max(0, 64000 - int(session_token_usage.get('output_tokens', 0) or 0))}",
             f"Persistence status: {'ok' if self.last_persist_ok else 'error'}",
         ]
         if sandbox:
@@ -3123,13 +3152,16 @@ class QueryEngine(ModelStream):
         return remaining
 
     def _is_model_fallback_error(self, error: Exception) -> bool:
-        if isinstance(error, (APIConnectionError, RateLimitError, InternalServerError)):
-            return True
-
-        if isinstance(error, APIStatusError):
-            status_code = getattr(error, "status_code", None)
-            if status_code in {500, 502, 503, 504, 529}:
+        # Inspect only SDKs already loaded by the selected connection.
+        for name in ("anthropic", "openai"):
+            sdk = sys.modules.get(name)
+            transient = tuple(getattr(sdk, kind) for kind in ("APIConnectionError", "RateLimitError", "InternalServerError")
+                if isinstance(getattr(sdk, kind, None), type))
+            if isinstance(error, transient):
                 return True
+            status = getattr(sdk, "APIStatusError", None)
+            if isinstance(status, type) and isinstance(error, status):
+                return getattr(error, "status_code", None) in {500, 502, 503, 504, 529}
 
         rendered = str(error).lower()
         markers = [
@@ -4027,12 +4059,10 @@ class QueryEngine(ModelStream):
                             )
                             continue
                 rolled_back = self._rollback_incomplete_tool_turn(assistant_message)
+                from xuloom.core.network import model_error_message
                 if rolled_back:
-                    return finish_run(self, ("[bold red]API Loop Exception:[/bold red] "
-                        f"{str(e)}\n"
-                        "[dim]Rolled back the incomplete assistant tool_use turn to keep session history resumable.[/dim]"), 'api_error')
-                # Catch Anthropic Auth errors or general crashes
-                return finish_run(self, (f"[bold red]API Loop Exception:[/bold red] {str(e)}"), 'api_error')
+                    return finish_run(self, model_error_message(e) + " 未完成的工具调用记录已回退；已完成操作保留。", 'api_error')
+                return finish_run(self, model_error_message(e), 'api_error')
                 
         return finish_run(self, ("[bold red]System Halt:[/bold red] "
             f"Max internal reasoning turns ({loop_state['max_turns']}) reached without returning an answer."), 'turn_limit')
@@ -4111,6 +4141,8 @@ class QueryEngine(ModelStream):
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
                 await self.tool_context["subagent_tasks"].close()
+            if task.cancelled():
+                finish_run(self, "Event consumer cancelled execution; completed effects and uncertain tool receipts are retained.", "cancelled")
             self.active_run_task = None
             self.active_stream = None
             self.active_streaming_tool_entries = []

@@ -5,6 +5,7 @@ import json
 import re
 import subprocess
 import zipfile
+import runpy
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -35,6 +36,19 @@ def archive_files(package, replacements=()):
         for path in source.rglob("*"):
             files[target / path.relative_to(source)] = path
     return sorted(files.items())
+
+
+def verify_provenance(app, revision, sources):
+    provenance = json.loads((app / 'build-provenance.json').read_text(encoding='utf-8'))
+    payload = (app / 'build-validation.json').read_bytes()
+    validation = json.loads(payload)
+    if provenance.get('dirty') is not False or provenance.get('sourceCommit') != revision or provenance.get('sourceHashes') != sources:
+        raise ValueError('Application provenance does not match the clean release commit')
+    if validation.get('passed') is not True or validation.get('cleanSource') is not True or validation.get('sourceCommit') != revision or validation.get('sources') != sources:
+        raise ValueError('Validation does not certify the release commit')
+    if hashlib.sha256(payload).hexdigest() != provenance.get('validationReceiptSha256'):
+        raise ValueError('Packaged validation hash does not match provenance')
+    return provenance
 
 
 def main():
@@ -69,12 +83,14 @@ def main():
             replacements.append((Path("resources/python/Lib/site-packages") / dependency, stage / "dependencies" / dependency))
         if len({target for target, _ in replacements}) != len(replacements):
             raise SystemExit("Duplicate staged resource tree")
-        if ({p.name for p in app.iterdir()} - {"dist", "electron", "package.json", "build-provenance.json"}
+        if ({p.name for p in app.iterdir()} - {"dist", "electron", "package.json", "build-provenance.json", "build-validation.json"}
                 or not {"dist", "electron", "package.json"} <= {p.name for p in app.iterdir()}):
             raise SystemExit("Unexpected staged application resource")
     metadata = json.loads((app / "package.json").read_text(encoding="utf-8"))
     if metadata["version"] != args.tag[1:]:
         raise SystemExit("Application resource version must match the release tag")
+    revision = git('rev-parse', 'HEAD')
+    verify_provenance(app, revision, runpy.run_path(str(DESKTOP/'scripts/stage-update.py'))['source_hashes']())
     # Reject old resources, missing new modules, and additional private skill payloads.
     for directory, installed, patterns in [
         (ROOT / "xuloom", site, ("*.py", "*.md")),
@@ -98,7 +114,6 @@ def main():
     checksum = output.with_name("SHA256SUMS.txt")
     if output.exists():
         raise SystemExit("Release archive already exists; never overwrite a published build")
-    revision = git("rev-parse", "HEAD")
     record = {"tag": args.tag, "sourceCommit": revision, "platform": "windows-x64",
               "version": metadata["version"], "buildId": metadata.get("buildId"),
               "bundledSkills": ['code-development', 'code-review', 'data-analysis', 'debug-issue', 'document-summary', 'document-writing', 'experiment-design', 'skill-creator', 'web-research']}

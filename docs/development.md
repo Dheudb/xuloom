@@ -31,6 +31,8 @@ Python 依赖和 CLI 入口在 `setup.py`。`requirements.txt` 只引用当前�
 
 ## 验证命令
 
+发布候选使用[版本与验证流程](release-process.md)：先提交候选，再运行 `python scripts/check_local.py --jobs 3`，生成与该提交和源码哈希对应的结果。性能可用 `python scripts/benchmark_base.py --samples 3` 测量；不要把本地模拟服务的结果当作真实模型任务成功率。
+
 ```powershell
 # 仓库根目录
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
@@ -103,15 +105,15 @@ GitHub Actions 验证 Python 3.9/3.12、前端和 Windows 成品，并上传便�
 cd desktop
 npm run build
 cd ..
-python desktop/scripts/stage-update.py
+python desktop/scripts/stage-update.py --validation-receipt desktop/build/local-validation.json
 ```
 
 使用脚本输出的暂存目录，调用 `desktop/scripts/update-existing.ps1`，指定原安装目录与暂存资源路径。更新器等待应用自然退出，保留旧资源，不结束用户应用。随后用原 EXE 进行成品验收；暂存脚本仅从本地源码构建 wheel，不复制用户 Skills 或配置。
 
-将已测试的源码提交后，确认原安装目录的应用版本与准备发布的标签一致，再归档：
+源码应在验证与构建之前固定到候选提交。确认原安装的源码、随包验证、版本与准备发布的标签一致，再归档；发布脚本会拒绝脏来源、过期验证或不匹配的验证哈希：
 
 ```powershell
-python desktop/scripts/release.py --tag v0.1.0
+python desktop/scripts/release.py --tag v0.1.33
 ```
 
 脚本核对引擎、前端和 Electron 代码与源码一致，复用原安装的 EXE 与 Python 运行时，不创建另一份 EXE。

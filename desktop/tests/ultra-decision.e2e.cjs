@@ -99,9 +99,19 @@ async function cli() {
     await page.waitForFunction(() => !document.querySelector('.send-button.stop'));
     assert.equal(simpleCalls, 1); assert.equal(children.length, 0);
     assert.equal(await page.locator('.turn-retry').count(), 0, 'Simple answer has no fake decision process item');
+    const originalId=await page.locator('.session-item.active').getAttribute('data-session-id');
     await send('ULTRA_COMPLEX: Compare two independent evidence sources, organize a main note, and synthesize.');
     await page.getByText('等待 2 个子代理返回结果，全部结束后再汇总。', { exact: true }).waitFor();
     assert.equal(children.length, 2); assert.equal(calls, 3);
+    await page.locator('.new-task').click();
+    await page.waitForFunction(id=>document.querySelector('.session-item.active')?.getAttribute('data-session-id')!==id,originalId);
+    await page.getByLabel('协作档位',{exact:true}).selectOption('ultra');
+    await page.waitForFunction(()=>!document.querySelector('.collaboration-picker').disabled);
+    await send('ULTRA_SIMPLE_OTHER: answer in another conversation');
+    await page.getByText('SIMPLE_PASS',{exact:true}).waitFor();await page.waitForFunction(()=>!document.querySelector('.send-button.stop'));
+    assert.equal(children.length,2);assert.equal(calls,3,'Switching and asking elsewhere never restarts background workers');
+    await page.locator(`.session-item[data-session-id="${originalId}"]`).click();
+    await page.getByText('等待 2 个子代理返回结果，全部结束后再汇总。',{exact:true}).waitFor();
     assert.equal(await page.getByText('COMPLEX_SYNTHESIS_PASS', { exact: true }).count(), 0);
     assert.equal(await page.locator('.send-button.stop').count(), 1);
     const trace = page.locator('.turn-process').last();
@@ -120,7 +130,7 @@ async function cli() {
     await page.getByText('协作决策 · 计划派发 2 项独立分工', { exact: true }).waitFor();
     assert(!(await page.locator('.conversation').innerText()).includes('"decision"'));
     await capture(); await app.close(); app = null;
-    await cli(); assert.equal(simpleCalls, 2); assert.deepEqual(failures, []);
+    await cli(); assert.equal(simpleCalls, 3); assert.deepEqual(failures, []);
     console.log('PASS: desktop + CLI Ultra decision; simple task one request/zero workers; two independent workers run alongside main file write; wait-all synthesis; decision/receipts survive restart; no raw decision JSON displayed. Loopback models only.');
   } finally { if (app) await app.close().catch(() => {}); server.closeAllConnections(); server.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -6,7 +6,7 @@ from pydantic import BaseModel
 class BaseAgenticTool(ABC):
     """
     The fundamental interface that all Xuloom tools must inherit. 
-    It leverages Pydantic to tightly map abstract types to Anthropic's required tool JSON schema.
+    Pydantic inputs are projected into each supported provider's native tool schema.
     """
     
     # Must be defined strictly by subclasses
@@ -38,7 +38,7 @@ class BaseAgenticTool(ABC):
     @classmethod
     def get_tool_definition(cls) -> Dict[str, Any]:
         """
-        Dynamically generates the JSON schema specification for Anthropic API
+        Dynamically generates the provider-neutral JSON schema specification
         by interrogating the Pydantic input_schema Model.
         """
         if not cls.name or not cls.description:

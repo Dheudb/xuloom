@@ -176,6 +176,7 @@ export type ToolActivity = {
   waitingRequestId?: string;
 };
 export type SessionView = InitialSession & {
+  errorAction?: "settings" | "activity";
   goal?: { id?: string; objective: string; status: string; accepted_by?: string; reason?: string; check_results?: { kind: string; path: string; passed: boolean }[]; elapsed_seconds?: number; round_started_at?: number; phase?: string; rounds?: number; output_used?: number; budget?: { seconds?: number | null; rounds?: number | null; output_tokens?: number | null } } | null;
   goalMode?: boolean;
   goalLimits?: { seconds?: number; output_tokens?: number; rounds?: number };

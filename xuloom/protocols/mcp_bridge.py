@@ -10,17 +10,37 @@ from urllib.parse import urlsplit
 import ipaddress
 import copy
 import httpx
+from importlib.util import find_spec
 
 from xuloom.protocols.mcp_config import MCPConfigStore, validate_server, validate_name
 from xuloom.context.tool_results import build_tool_result
 
-try:
-    from mcp import ClientSession, StdioServerParameters
-    from mcp.client.stdio import stdio_client, get_default_environment
-    from mcp.client.streamable_http import streamable_http_client
-    MCP_AVAILABLE = True
-except ImportError:
-    MCP_AVAILABLE = False
+MCP_AVAILABLE = find_spec("mcp") is not None
+
+
+def ClientSession(*args, **kwargs):
+    from mcp import ClientSession as factory
+    return factory(*args, **kwargs)
+
+
+def StdioServerParameters(*args, **kwargs):
+    from mcp import StdioServerParameters as factory
+    return factory(*args, **kwargs)
+
+
+def get_default_environment():
+    from mcp.client.stdio import get_default_environment as factory
+    return factory()
+
+
+def stdio_client(*args, **kwargs):
+    from mcp.client.stdio import stdio_client as factory
+    return factory(*args, **kwargs)
+
+
+def streamable_http_client(*args, **kwargs):
+    from mcp.client.streamable_http import streamable_http_client as factory
+    return factory(*args, **kwargs)
 
 
 def runtime_info():
@@ -41,6 +61,8 @@ def connection_error(exc):
         return "连接超时；检查网络、启动命令及服务配置。"
     if isinstance(exc, FileNotFoundError):
         return "找不到启动程序；检查服务所需的 npx、uvx 或其他运行环境。"
+    if isinstance(exc, ImportError):
+        return "MCP 依赖缺失或无法加载；桌面用户请重新解压完整程序包，源码环境请检查 MCP 依赖。"
     return "MCP 连接或请求失败（" + type(exc).__name__ + "）；检查运行环境、地址及凭据。"
 
 

@@ -10,6 +10,7 @@ import type { Capabilities } from "./types";
 import { ReasoningSettings } from "./ReasoningControls";
 import { ContextSettings } from "./ContextSettings";
 import TaskReadiness from './TaskReadiness';
+import BuildDetails from './BuildDetails';
 
 export function SettingsDialog({
   config,
@@ -320,6 +321,7 @@ export function SettingsDialog({
           </fieldset>
         </div>
         <div className="form-section" role="tabpanel" id="settings-panel-workspace" aria-labelledby="settings-tab-workspace" hidden={tab !== "workspace"}>
+          <BuildDetails />
           <h3><Link2 size={16} /> 聊天链接</h3>
           <p className="fine-print">右键会话可复制本机或 SSH 聊天链接。链接不包含聊天正文或凭据；远端地址只使用已配置的 SSH 目标，不自动导入主机。</p>
           <label>打开聊天链接<input aria-label="聊天链接" placeholder="xuloom://chat/…" value={chatUrl} onChange={event => setChatUrl(event.target.value)} /></label>

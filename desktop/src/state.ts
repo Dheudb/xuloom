@@ -7,6 +7,7 @@ export function createSession(initial: InitialSession): SessionView {
     collaborationMode: initial.collaborationMode || "auto",
     busy: false,
     error: "",
+    errorAction: undefined,
     messages: initial.history,
     streamIndex: null,
     tools: initial.activity || [],
@@ -28,6 +29,7 @@ export function beginTurn(session: SessionView, text: string): SessionView {
     ...session,
     busy: true,
     error: "",
+    errorAction: undefined,
     draft: "",
     editingId: undefined,
     attachments: [],
@@ -112,6 +114,7 @@ export function applyEvent(
         messages: finishTrace(session, "cancelled"),
         streamIndex: null,
         error: "任务已停止，已收到的内容保留。",
+        errorAction: undefined,
         interactions: [],
         tools: settleTools(session, "cancelled"),
       };
@@ -126,6 +129,7 @@ export function applyEvent(
         messages: finishTrace(session, event.type === "engine_exit" ? "interrupted" : "error").filter((message, index) =>
           index !== session.streamIndex || !!message.text.trim() || !!message.trace?.steps.length || !!message.trace && message.trace.id !== "pending"),
         error: (event.message || "引擎发生错误").replace(/\[\/?bold red\]/g, ""),
+        errorAction: event.help?.action === "settings" ? "settings" : "activity",
         interactions: [],
         tools: settleTools(session, "interrupted", event.type === "engine_exit"),
       };

@@ -53,7 +53,7 @@ Auto / Ultra 默认不设并发上限；只有显式配置有限的宿主并发�
 
 `list/result/wait/capacity` 读取原生生命周期，`cancel` 停止所属工作，`followup` 明确继续同一 worker。重复读取结果不会重新执行。重启后的历史 `running` 记录显示为 `interrupted`；它不是当前存活证明，不会自动重跑。`wait` 的结构化模式等待任一目标结束即返回，要汇总全部结果需检查所有目标的 `status`，不能把 `queued` 或 `running` 当作结束。`pending` 表示当前进程是否仍有该任务的未结束执行或排队任务，`executing` 只表示当前是否占用执行槽位；两者都不能代替结果验收。遇到 `awaiting_resume` 或 `interrupted` 时应按恢复规则处理，不能盲目循环等待。
 
-事件复用 `engine.tool_context["capability_event"]` 回调：持久化注册后通知启动/状态，保存结果与完成记录后通知完成。回调应快速返回且不抛异常。断线可能丢通知，上层应通过 `list/result` 恢复实际记录，不能仅因缺少通知重新启动任务。
+能力事件通过 `engine.set_event_handler(callback)` 接收：持久化注册后通知启动/状态，保存结果与完成记录后通知完成。同步回调应快速返回；监听器异常不改变执行回执。流式模型事件与最终结果通过 `submit_message` 读取，详见[公开扩展接口](extensions.md)。断线可能丢通知，上层应通过 `list/result` 恢复实际记录，不能仅因缺少通知重新启动任务。直接写 `tool_context["capability_event"]` 的旧宿主仍可工作，但这是内部配置，不作为新的公开接入方式。
 
 `session_busy` 表示另一个写者占用，`session_conflict` 表示快照已过期或存档结构／修订号无效；执行入口遇到这些错误时，不会继续请求模型或执行工具。`tool_error` 表示参数、权限或工具操作失败；`persistence_error` 表示无法确认完整存储，可能已有副作用，需要读取实际记录后处理。框架没有为此增加另一套 Job 状态，也不承诺外部系统的 exactly-once 事务。
 

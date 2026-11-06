@@ -13,8 +13,6 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-with redirect_stdout(sys.stderr):
-    from xuloom.core.engine import QueryEngine
 from xuloom.core.config import CONFIG_FILE, load_config_into_env, save_current_env_to_config, load_config
 from xuloom.core.model_catalog import connections, select_model, active_connection, apply_connection_env
 
@@ -435,6 +433,8 @@ async def _interactive_model_switch(engine, tui):
 
 
 async def interactive_loop(resume_session_id: str = None, initial_prompt: str = None, auto_approve: bool = False, collaboration_mode=None, execution_mode=None, working_directory=None, strict_resume=False):
+    with redirect_stdout(sys.stderr):
+        from xuloom.core.engine import QueryEngine
     load_config_into_env()
     print_welcome_screen()
 
@@ -881,7 +881,8 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
                         previous_client, previous_compactor = engine.client, engine.compactor
                         engine.switch_model_runtime(provider=selected["provider"], model=model,
                             api_base_url=selected.get("base_url", ""), api_key=selected.get("api_key", ""), network_mode=selected.get("network_mode", "direct"))
-                        await previous_client.close()
+                        if previous_client is not None:
+                            await previous_client.close()
                         if previous_compactor.client:
                             await previous_compactor.client.close()
                         console.print(f"[green]Model switched to {model}.[/green]")

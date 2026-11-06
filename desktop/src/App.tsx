@@ -792,6 +792,10 @@ export default function App() {
           {active?.error && (!paused || active.error !== "任务已停止，已收到的内容保留。") && (
             <div className="session-error" role="alert">
               {active.error}
+              {active.errorAction && <button onClick={() => {
+                if (active.errorAction === "settings") setSettingsOpen(true);
+                else { setFilePreview(undefined); setPanelTab("activity"); setPanelOpen(true); }
+              }}>{active.errorAction === "settings" ? "检查模型设置" : "查看活动"}</button>}
               <button
                 aria-label="清除会话提示"
                 onClick={() => update({ error: "" })}

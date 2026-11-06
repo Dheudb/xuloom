@@ -8,6 +8,24 @@ import httpx
 from xuloom.core.config import load_config
 
 
+def model_error_message(error):
+    """Do not expose response bodies, credentials or signed URLs in API failures."""
+    status = getattr(error, "status_code", None)
+    if status in (401, 403):
+        return f"模型服务认证或权限失败（HTTP {status}）；请检查 Key、账号权限和 API 地址。已有结果保留。"
+    if status == 429:
+        return "模型服务限流或额度不足（HTTP 429）；请检查额度与连接限流设置，稍后继续。已有结果保留。"
+    if status in (400, 404, 422):
+        return f"模型服务拒绝请求（HTTP {status}）；请核对模型名、接口协议及支持的参数。已有结果保留。"
+    if isinstance(status, int) and status >= 500:
+        return f"模型服务暂时不可用（HTTP {status}）；请稍后继续。已有结果保留。"
+    if isinstance(error, ImportError):
+        return "运行依赖无法加载；桌面用户请重新解压完整程序包，源码环境请检查安装依赖。已有记录保留。"
+    if isinstance(error, (TimeoutError, ConnectionError)) or type(error).__name__ in {"APIConnectionError", "APITimeoutError", "ConnectError", "ReadTimeout"}:
+        return "模型连接失败或超时；请检查服务地址、网络和代理。已有结果保留，不会自动重放未确认操作。"
+    return f"执行异常（{type(error).__name__}）；请查看活动记录并核对已有结果后继续。"
+
+
 def model_network_mode(value=None):
     mode = value if value is not None else os.environ.get("XULOOM_NETWORK_MODE") or load_config().get("network_mode", "direct")
     if mode not in {"direct", "system"}:
@@ -84,6 +102,8 @@ def openai_credentials(api_key, client_type):
 
 def create_model_client(*, provider, model, api_base_url, api_key, network_mode, request_owner=None):
     """One explicit client factory for generation and context compression."""
+    if not model:
+        return None  # Unconfigured sessions need neither an SDK nor a connection.
     from xuloom.security.credentials import api_key as checked_key
     key = checked_key(api_key or ("not-configured" if not model else ""))
     from xuloom.core.request_flow import RequestFlow, connection_id

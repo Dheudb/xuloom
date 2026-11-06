@@ -1,55 +1,21 @@
 # 文档导航
 
-| 文档 | 内容 |
-|---|---|
-| [Scaling 蜂群](scaling.md) | 实验工作台、本机与多 SSH 节点、均衡分组、运行中对话、自适应容量、CLI 与恢复边界 |
-| [桌面 App](desktop.md) | 使用便携包、打开项目、设置模型、恢复历史 |
-| [CLI](cli.md) | 安装、启动、命令和会话恢复 |
-| [条件式工具续跑](tool-sequences.md) | 字面动作、回执条件、新输入与权限边界、App/CLI 共享执行 |
-| [原生条件续跑](native-continuations.md) | 普通工具声明动作图、请求边界自动推进、分支、只读并行与恢复 |
-| [原生续跑本地验收](native-continuations-validation-2026-11-02.md) | 最终全量、独立进程恢复、原 EXE 与实际 App／CLI 验证 |
-| [v0.1.23 发布检查](release-v0.1.23-validation.md) | 版本边界、包内专项、App／CLI 与公开资源范围 |
-| [工具续跑本地验收](tool-sequences-validation-2026-11-02.md) | HarnessMM／DeepSeek 参考范围、最终全量与原安装验证 |
-| [目标与调度](goals-and-schedules.md) | 目标预算与验收、正式非交互 CLI、延迟和重复唤醒 |
-| [条件满足后跟进](followups.md) | 子代理全部结束或实验标记出现后续办，去重、授权与不重放 |
-| [记忆与上下文压缩](memory-and-compaction.md) | 两层记忆、触发阈值、模型开销、归档与当前边界 |
-| [压缩改进验收](compaction-validation-2026-11-03.md) | 窗口与保存故障、完整工具边界、原生 Responses、App／CLI 的本地证据 |
-| [链接与文件引用](references.md) | 图标、路径与行号、过程／子代理预览、CLI 超链接及远端边界 |
-| [模型配置](models.md) | 支持的协议、本地模型与兼容边界 |
-| [后台渲染与验证](browser-capture.md) | 隐藏窗口截图、原生图像输入、权限与 CLI 依赖 |
-| [本机与 SSH 网页预览验证](remote-html-validation-2026-11-02.md) | 远端相对资源、App／CLI 读取、截图路径及版本／关闭边界 |
-| [Skills 与子代理](capabilities.md) | 目录规范、发现顺序、导入与执行 |
-| [MCP 与搜索](mcp.md) | 市场、配置、连接测试和内置搜索 |
-| [项目架构](architecture.md) | 目录职责和运行流程 |
-| [开发者基座严格检查](developer-base-audit.md) | 持续验收清单、证据与尚未完成的边界 |
-| [持续目标与功能验收](product-roadmap.md) | SSH、异构代理、聊天导航、多媒体生成与双端 UI 的追加范围 |
-| [仓库与分支状态](git-status.md) | 桌面分支标识、CLI 查询及只读边界 |
-| [聊天深链接](chat-links.md) | 右键复制、桌面/CLI 打开、移动与归档边界 |
-| [输出与来源](session-summary.md) | 本轮/会话的真实输出文件、来源链接、工具入口及 App/CLI/SSH 查询 |
-| [实例连接绑定](runtime-connections.md) | 多供应商客户端、压缩器与子代理的连接归属、切换及恢复 |
-| [媒体接口核对与计划](media-adapters-plan.md) | 官方协议现状、后续生成工具的边界与验收；尚非已实现功能 |
-| [SSH 截图验证](remote-capture-validation-2026-11-02.md) | 执行端 Chromium、资源与 Cookie 边界、图像回传和 App/CLI 验收 |
-| [Codex 异构后端验证](codex-backend-validation-2026-11-02.md) | 实际 App Server / Responses、线程恢复、权限和保存故障、App/CLI 与成品检查 |
-| [外部 Agent 后端计划](external-agents-plan.md) | Claude/Pi/Codex/DSH 协议、权限和生命周期接入约束；其余故障与跨平台联动继续推进 |
-| [工具发现与恢复验证](tool-discovery-validation-2026-11-02.md) | 实际 Pi／Claude 工具缓存、会话恢复、桌面控制管道及原安装验证 |
-| [开发与打包](development.md) | 环境、测试、Windows 运行时与构建产物 |
-| [框架排查记录](framework-audit-2026-10-30.md) | 工具回执、写后记录、Windows Shell、故障注入及验证边界 |
-| [源码对照与加固](framework-source-comparison-2026-10-30.md) | Codex、Pi、DSH 与 Claude 公开资料对照，文件事务、进程和完整输出修复 |
-| [输入与恢复加固](input-and-recovery-hardening-2026-10-30.md) | 模型输入声明、原生工具图片、文件撤销与模型配置事务 |
-| [Ultra 主动委派校准](ultra-delegation-2026-10-30.md) | Codex 策略对照、非阻塞子任务指引与实际请求验证 |
+[当前能力与支持边界](current-capabilities.md)是当前版本的能力索引；本机构建的提交、构建号与验证范围可在设置中查看。过去版本的通过数字集中从[历史记录](history/README.md)查阅。
 
-普通用户从桌面说明开始；修改代码从开发说明和架构开始。
+| 文档 | 用途 |
+| --- | --- |
+| [桌面 App](desktop.md) / [CLI](cli.md) | 安装、模型配置、会话与操作入口 |
+| [模型连接](models.md) / [凭据](credentials.md) | 支持协议、Key、代理与能力声明 |
+| [Skills 与子代理](capabilities.md) / [MCP](mcp.md) | 配置、发现、角色与工具连接 |
+| [框架接口](framework.md) / [开发者扩展](extensions.md) | 公开程序入口、工具注册、事件、取消与恢复 |
+| [目标与调度](goals-and-schedules.md) / [条件跟进](followups.md) | 持续任务、定时消息及已有回执驱动的继续 |
+| [上下文与记忆](memory-and-compaction.md) | 压缩、归档、来源与调用开销 |
+| [工具续跑](tool-sequences.md) / [原生续跑](native-continuations.md) | 已确定步骤的条件推进与中断边界 |
+| [文件引用](references.md) / [来源与产物](session-summary.md) | 链接、文件、引用与历史查看 |
+| [后台截图](browser-capture.md) / [媒体生成](media.md) | 按需能力、用户配置及环境条件 |
+| [SSH](remote.md) / [外部 Agent](external-agents.md) | 远程会话、可选执行器及各自边界 |
+| [Scaling](scaling.md) | 实验工作台，独立启用与显式用量确认 |
+| [开发与打包](development.md) / [发布约定](release-process.md) | 本地全量、构建追溯、升级与回退 |
+| [v0.1.33 整理范围](maintenance-2026-11-06.md) | 本轮修改、性能基线、验证方式及剩余限制 |
 
-模型 Thinking 开关、effort 选择、CLI 用法及简化派发入口见 [模型思考控制](model-reasoning-2026-10-30.md)。
-
-文件正文阅读、自动换行和目录栏调整见 [文件分栏修复](file-review-layout-2026-10-30.md)。
-
-执行过程图标、图片缩略图与持久回看见 [执行过程与图片回看](tool-transcript-2026-10-30.md)。
-
-## 远程执行
-
-[SSH 远程执行](remote.md) 包含桌面聊天、交互/非交互 CLI、共享连接设置、聊天链接、离线导航恢复、[HTML 资源预览](remote-html-validation-2026-11-02.md)和[附件传输](remote-attachments.md)。[原生分布式委派](distributed-workers-plan.md)已通过本机加密 SSH 检查；四种外部 CLI 的加密回环及成品控制端恢复见[专项记录](external-ssh-validation-2026-11-02.md)，其余故障与跨平台原生验收继续按持续目标推进。
-
-- [DSH 后端验证](dsh-backend-validation-2026-11-02.md)：实际 headless、受控模型／MCP、完整历史与 App／CLI 续聊。
-
-- [外部后端 SSH 与控制端恢复](external-ssh-validation-2026-11-02.md)：四种已安装 CLI、原生回执版本、显式拒绝、写后断线及成品进程恢复。
+普通使用不要求配置 SSH、Scaling 或外部 CLI。真实模型长任务、物理跨机、跨平台成品与系统级强隔离分别验收，不由历史本地协议测试自动推出。

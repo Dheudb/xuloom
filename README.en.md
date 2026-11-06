@@ -139,3 +139,5 @@ Media generation supports configured fal Queue endpoints for images, image edits
 ## License
 
 [MIT](LICENSE)
+
+Current support boundaries: [capability matrix](docs/current-capabilities.md). Public embedding API: [extensions](docs/extensions.md). Packaged build provenance and scoped validation are available in Settings → Workspace; historical checks do not certify a later build.

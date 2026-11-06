@@ -474,7 +474,8 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
                 await sub_engine.tool_context["command_sessions"].close(owner=child_agent_id)
             if not completed:
                 await sub_engine.shell_task_manager.close(owner=child_agent_id)
-            await sub_engine.client.close()
+            if sub_engine.client is not None:
+                await sub_engine.client.close()
             if getattr(sub_engine.compactor, "client", None):
                 await sub_engine.compactor.client.close()
 

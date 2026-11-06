@@ -11,11 +11,6 @@ try:
 except ImportError:
     Image = None
 
-try:
-    import pymupdf
-except ImportError:
-    pymupdf = None
-
 class FileReadToolInput(BaseModel):
     file_path: str = Field(..., description="The absolute path of the file to read.")
     offset: int = Field(None, description="The line number to start reading from (1-indexed). Negative values count from end.")
@@ -66,8 +61,10 @@ Images are delivered visually. Notebook JSON is read as text; discover notebook 
                 and base.netloc.lower() == "api.anthropic.com" and "document" in (self._inputs() or []))
 
     def _pdf(self, path, pages, offset, limit, mode):
-        if pymupdf is None:
-            raise ValueError("PDF reading requires PyMuPDF")
+        try:
+            import pymupdf
+        except ImportError:
+            raise ValueError("PDF reading requires PyMuPDF") from None
         if mode not in {"auto", "text", "image"}:
             raise ValueError("pdf_mode must be auto, text or image")
         if pages and (offset is not None or limit is not None):

@@ -16,9 +16,9 @@ DESKTOP = ROOT / "desktop"
 
 def source_hashes():
     files = set()
-    for name in ("xuloom", "tests", "desktop/src", "desktop/electron", "desktop/tests", "desktop/scripts"):
+    for name in ("xuloom", "tests", "scripts", "examples", "docs", "desktop/src", "desktop/electron", "desktop/tests", "desktop/scripts"):
         files.update(p for p in (ROOT/name).rglob("*") if p.is_file() and p.suffix in {".py", ".md", ".tsx", ".ts", ".css", ".cjs", ".ps1"} and "__pycache__" not in p.parts)
-    files.update(ROOT/name for name in ("setup.py", "desktop/package.json", "desktop/package-lock.json"))
+    files.update(ROOT/name for name in ("setup.py", "pyproject.toml", "README.md", "README.en.md", "desktop/package.json", "desktop/package-lock.json"))
     return {p.relative_to(ROOT).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(files)}
 
 
@@ -33,6 +33,9 @@ def main():
         validation = json.loads(args.validation_receipt.read_text(encoding="utf-8"))
         if validation.get("passed") is not True or validation.get("sources") != sources:
             raise SystemExit("Validation receipt does not certify the current source")
+        if validation.get('cleanSource') is True and (validation.get('sourceCommit') != subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
+                or subprocess.check_output(['git','status','--porcelain','--untracked-files=normal'],cwd=ROOT).strip()):
+            raise SystemExit('Clean validation no longer matches the candidate commit')
     package = args.package_directory.resolve()
     executable = package / "Xuloom.exe"
     if not executable.is_file() or not (package / "resources/python/python.exe").is_file():
@@ -83,6 +86,8 @@ def main():
         raise SystemExit("Python distribution and application versions must match")
     (app / "package.json").write_text(json.dumps({"name": "xuloom-desktop", "productName": "Xuloom",
         "version": version, "main": "electron/main.cjs", "buildId": build_id}, indent=2), encoding="utf-8")
+    if validation:
+        shutil.copyfile(args.validation_receipt, app / "build-validation.json")
     subprocess.run([str(package / "resources/python/python.exe"), "-I", "-B", "-c",
         "import sys;sys.path[:0]=[sys.argv[1],sys.argv[1]+'/dependencies'];import xuloom,xuloom.core.session_mutation,xuloom.core.engine,xuloom.skills.terminal;from xuloom.protocols.mcp_bridge import MCP_AVAILABLE;assert MCP_AVAILABLE;assert xuloom.__version__==sys.argv[2];print('Staged engine, version and bundled dependencies verified')",
         str(stage), version], cwd=stage, check=True)

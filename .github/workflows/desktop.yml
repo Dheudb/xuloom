@@ -47,6 +47,8 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+      - run: npm run test:maintenance
+      - run: npm run test:ultra-decision
       - run: npm run test:e2e
       - run: npm run test:sessions
       - run: npm run test:draft-exit

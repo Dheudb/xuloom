@@ -184,7 +184,8 @@ class DesktopBridge:
             apply_connection_env(active_connection(cfg))
         previous_client, previous_compactor = engine.client, engine.compactor
         engine.switch_model_runtime(provider=provider, model=config["model"], api_base_url=config["baseUrl"], api_key=key, network_mode=config["networkMode"], persist=False)
-        await previous_client.close()
+        if previous_client is not None:
+            await previous_client.close()
         if previous_compactor.client:
             await previous_compactor.client.close()
         self.model_signature = signature
@@ -379,8 +380,10 @@ class DesktopBridge:
                 if self.stop_requested and event.get("type") == "final":
                     continue
                 if event.get("type") == "final" and not event.get("result", {}).get("ok", False):
+                    from xuloom.core.run_result import failure_help
                     receipt = event.get("result", {})
-                    self.emit({"type": "turn_error", "message": re.sub(r"\[/?bold red\]", "", event["text"]) + " (" + receipt.get("reason", "unknown") + ")", "result": receipt})
+                    help = failure_help(receipt.get("reason", "unknown"))
+                    self.emit({"type": "turn_error", "message": re.sub(r"\[/?bold red\]", "", event["text"]) + " " + help["message"], "result": receipt, "help": help})
                     continue
                 self.emit(event)
             self.emit({"type": "sessions_changed", "sessions": self.sessions()})
