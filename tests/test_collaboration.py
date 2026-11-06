@@ -363,7 +363,9 @@ class ConversationPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(system.endswith(contract(self.engine)))
         self.assertGreater(system.index("# Collaboration: ultra"), system.index("# Tool-Specific Rules"))
         self.assertNotIn("run_in_background=false when the current answer requires", system)
-        self.assertNotIn("tools", request, "The first Ultra request decides before any tool action")
+        self.assertEqual([tool['function']['name'] for tool in request['tools']], ['collaboration_decision'],
+            "Only the non-executable decision function is exposed before any tool action")
+        self.assertEqual(request['tool_choice']['function']['name'], 'collaboration_decision')
         self.assertEqual(self.engine.tool_context["collaboration_run"]["decision"]["decision"], "answer")
         self.assertEqual(len(self.requests), 1)
         self.assertEqual(self.engine.subagent_registry, [])

@@ -242,7 +242,8 @@ class CliTests(unittest.TestCase):
         first, _, result = self.cli("exec", "Hello", "--collaboration", "ultra")
         self.assertEqual(first.returncode, 0, first.stderr)
         self.assertEqual(len(self.requests), 1)
-        self.assertNotIn("tools", self.requests[-1])
+        self.assertEqual([tool['function']['name'] for tool in self.requests[-1]['tools']], ['collaboration_decision'])
+        self.assertEqual(self.requests[-1]['tool_choice']['function']['name'], 'collaboration_decision')
         self.assertEqual(result["text"], "CLI_RESULT_你好")
         self.assertIn("# Collaboration: ultra", json.dumps(self.requests[-1]))
         sid = result["session_id"]

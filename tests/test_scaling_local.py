@@ -143,7 +143,10 @@ class LocalDaemonTests(unittest.IsolatedAsyncioTestCase):
             elif "SCALING SYNTHESIZE" in text or "SCALING REVIEW" in text:answer={"decision":"complete","report":"Evidence reviewed","groups":[]}
             else:
                 if text.startswith("Independent evidence branch"):
-                    try:overlap.wait(timeout=12);parallel.append(True)
+                    # Cold daemon startup may overlap other full-suite processes.
+                    # Still withhold every reply until all four workers arrive:
+                    # a serialized executor breaks the barrier and fails below.
+                    try:overlap.wait(timeout=30);parallel.append(True)
                     except threading.BrokenBarrierError:parallel.append(False)
                 answer="Fixture evidence or summary"
             value=json.dumps(answer) if isinstance(answer,dict) else answer
