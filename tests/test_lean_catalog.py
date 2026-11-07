@@ -37,6 +37,7 @@ class LeanCatalogTests(unittest.IsolatedAsyncioTestCase):
     async def test_ultra_plan_and_custom_tools_remain_visible(self):
         self.engine.set_collaboration_mode('ultra', persist=False)
         self.assertIn('spawn_agent', self.names())
+        self.assertTrue({'web_search_tool', 'web_fetch_tool'} <= self.names())
         self.engine.set_mode('plan')
         self.assertNotIn('bash_tool', self.names())
         self.assertIn('exit_plan_mode', self.names())
@@ -53,6 +54,14 @@ class LeanCatalogTests(unittest.IsolatedAsyncioTestCase):
         configure_role(self.engine, {'system_prompt': 'Find evidence'}, allowed_tools=['grep_tool'])
         self.assertEqual(self.names(), {'grep_tool'})
         self.assertNotIn('tool_search_tool', self.engine.available_tools)
+
+    async def test_ultra_search_visibility_cannot_restore_role_denied_tools(self):
+        from xuloom.agents.role_runtime import configure_role
+        self.engine.set_collaboration_mode('ultra', persist=False)
+        configure_role(self.engine, {'web_search': 'disabled'}, allowed_tools=None)
+        self.assertNotIn('web_search_tool', self.names())
+        self.assertNotIn('web_fetch_tool', self.names())
+        self.assertNotIn('spawn_agent', self.names())
 
     async def test_search_reuses_the_actual_sdk_default_without_guessing_another_host(self):
         self.engine.api_base_url = None

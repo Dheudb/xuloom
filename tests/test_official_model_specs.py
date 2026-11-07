@@ -61,7 +61,7 @@ class OfficialResponsesWireTests(unittest.IsolatedAsyncioTestCase):
     asyncSetUp = recovery.RecoveryTests.asyncSetUp
     asyncTearDown = recovery.RecoveryTests.asyncTearDown
 
-    async def test_ultra_decision_uses_native_responses_function_without_executing_it(self):
+    async def test_ultra_uses_normal_responses_without_a_forced_routing_request(self):
         await self.engine.client.close()
         self.engine.primary_model = self.engine.model = 'gpt-6.1-sol'
         self.engine.api_base_url = BASE
@@ -70,15 +70,12 @@ class OfficialResponsesWireTests(unittest.IsolatedAsyncioTestCase):
         def handler(request):
             self.assertEqual(str(request.url), BASE + '/responses')
             body = json.loads(request.content); requests.append(body)
-            if len(requests) == 1:
-                self.assertEqual(body['tool_choice'], {'type': 'function', 'name': 'collaboration_decision'})
-                self.assertEqual([tool['name'] for tool in body['tools']], ['collaboration_decision'])
-                item = {'type': 'function_call', 'id': 'decision_item', 'call_id': 'decision_call',
-                    'name': 'collaboration_decision', 'arguments': json.dumps({'decision':'sequential','reason':'Short conversation','main_task':'Reply normally','workers':[]}), 'status': 'completed'}
-            else:
-                self.assertNotIn('tool_choice', body)
-                item = {'type':'message','id':'final_message','role':'assistant','status':'completed',
-                    'content':[{'type':'output_text','text':'NATIVE_ULTRA','annotations':[]}]}
+            self.assertNotIn('tool_choice', body)
+            names = {tool['name'] for tool in body['tools']}
+            self.assertTrue({'spawn_agent','web_search_tool','web_fetch_tool'} <= names)
+            self.assertNotIn('collaboration_decision',names)
+            item = {'type':'message','id':'final_message','role':'assistant','status':'completed',
+                'content':[{'type':'output_text','text':'NATIVE_ULTRA','annotations':[]}]}
             response = {'id': 'resp_decision', 'object': 'response', 'status': 'completed', 'model': body['model'],
                 'output': [item], 'usage': {'input_tokens': 10, 'output_tokens': 5, 'total_tokens': 15}}
             data = 'event: response.completed\ndata: ' + json.dumps({'type': 'response.completed', 'response': response}) + '\n\n'
@@ -88,7 +85,7 @@ class OfficialResponsesWireTests(unittest.IsolatedAsyncioTestCase):
         result = await self.engine._run_loop('Hello', sys_print_callback=lambda _: None)
         self.assertTrue(result.ok, result)
         self.assertEqual(result.text, 'NATIVE_ULTRA')
-        self.assertEqual(len(requests), 2)
+        self.assertEqual(len(requests), 1)
         self.assertEqual(self.tool.calls, [])
         self.assertEqual(self.engine.subagent_registry, [])
 

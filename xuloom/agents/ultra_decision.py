@@ -1,17 +1,24 @@
-"""One model-owned Ultra decision over the normal request and worker journals."""
+"""Recovery compatibility for Ultra plans saved before direct native delegation."""
 import copy
 import hashlib
-import json
-from types import SimpleNamespace
 from typing import Literal, Optional
-
-from pydantic import BaseModel, Field, model_validator, ValidationError
+from pydantic import BaseModel, Field, model_validator
 from xuloom.core.messages import create_tool_result_message, get_msg_uuid
 from xuloom.core.run_result import PersistenceError
-from xuloom.protocols.dsml import ToolProtocolError, parse_tool_arguments
-from xuloom.protocols.stream_watch import StreamInterrupted
 
-DECISION_TOOL = "collaboration_decision"
+
+def request_messages(engine, messages):
+    """Omit obsolete routing instructions from requests; keep stored history intact."""
+    result = []
+    for message in messages:
+        content = message.get('content')
+        if message.get('_is_meta'):
+            if message.get('_origin') == 'tool_protocol' and isinstance(content, str) and content.startswith('[Ultra decision rejected before any tool execution]'):
+                continue
+            if message.get('role') == 'assistant' and isinstance(content, list) and len(content) == 1 and isinstance(content[0], dict) and content[0].get('type') == 'text' and isinstance(content[0].get('text'), str) and content[0]['text'].startswith('Collaboration decision: '):
+                continue
+        result.append(message)
+    return result
 
 
 class Assignment(BaseModel):
@@ -43,22 +50,6 @@ class Decision(BaseModel):
         return self
 
 
-def pending(engine):
-    return (engine.collaboration_mode == "ultra" and engine.agent_depth == 0
-        and not engine.tool_context.get("delegation")
-        and not engine.tool_context.get("collaboration_run", {}).get("decision"))
-
-
-def request_messages(engine, messages):
-    """Scope repair instructions to their request without deleting diagnostic history."""
-    latest = max((i for i, m in enumerate(messages) if m.get('role') == 'user'
-        and not m.get('_is_meta') and not m.get('_is_tool_result') and m.get('_origin', 'human') == 'human'), default=-1)
-    deciding = pending(engine)
-    return [m for i, m in enumerate(messages) if not (m.get('_origin') == 'tool_protocol' and m.get('_is_meta')
-        and isinstance(m.get('content'), str) and m['content'].startswith('[Ultra decision rejected before any tool execution]'))
-        or deciding and i > latest]
-
-
 def calls_for(plan, owner):
     if not isinstance(owner, str) or not owner:
         raise ValueError("Ultra decisions require a durable original task identity")
@@ -78,107 +69,6 @@ def receipts_saved(engine, results):
         if isinstance(block, dict) and block.get("type") == "tool_result")
     if expected and expected <= resolved:
         decision["receipts_saved"] = True
-
-
-def contract(engine):
-    roles = sorted(engine.tool_context["agent_registry"].definitions())
-    return ("\n# Ultra collaboration decision (this request only)\n"
-        'Call collaboration_decision once with your decision; it plans work and executes no tools. '
-        'A complete JSON decision is accepted for older transports. '
-        "This stage plans execution only, never a final answer. For a simple conversation, choose sequential with no workers. "
-        "For complex work, delegate useful independent research, alternatives or checks; keep the critical path and synthesis in main_task. "
-        "Research, requested searches and substantive multi-direction ideation require execution, not an answer composed here without evidence. "
-        "Do not invent workers to meet a quota. Choose sequential with a brief reason when no useful independent branch exists. "
-        "Include applicable user/Skill constraints in assignments. The runtime launches accepted workers and supplies receipts; do not claim launches here. "
-        "Roles (or omit subagent_type): " + ", ".join(roles))
-
-
-def schema(engine):
-    """Use the existing provider tool transport, not an untyped JSON-only request."""
-    parameters = Decision.model_json_schema()
-    # Pydantic defaults permit legacy records; the request schema must declare
-    # the fields needed by the cross-field validator rather than just decision.
-    parameters["properties"]["decision"]["enum"] = ["delegate", "sequential"]
-    parameters["properties"].pop("answer")  # Old saved decisions remain readable; new decisions cannot publish answers.
-    parameters["required"] = ["decision", "reason", "main_task", "workers"]
-    parameters["properties"]["main_task"]["description"] = "Main execution assignment; the original task and constraints still apply."
-    parameters["properties"]["workers"]["description"] = "Independent assignments for delegate; empty for justified sequential execution."
-    roles = sorted(engine.tool_context["agent_registry"].definitions())
-    parameters["$defs"]["Assignment"]["properties"]["subagent_type"] = {
-        "anyOf": [{"type": "string", "enum": roles}, {"type": "null"}], "default": None}
-    tool = {"name": DECISION_TOOL, "description": "Choose direct conversation, sequential work or independent delegated assignments.",
-        "parameters": parameters}
-    return [{"type": "function", "function": tool}] if engine.model_provider == "openai" else [
-        {"name": tool["name"], "description": tool["description"], "input_schema": parameters}]
-
-
-def decision_callback(engine, callback):
-    async def emit(event):
-        if event.get("type") in {"stream_status", "model_stream", "model_status", "model_retry"}:
-            await engine._emit_stream_event(callback, event)
-    return emit
-
-
-async def receive(engine, deciding, *, event_callback=None, **kwargs):
-    if not deciding:
-        return await engine._stream_model_response(event_callback=event_callback, **kwargs)
-    engine.tool_context["ultra_deciding"] = True
-    try:
-        response, entries, fallback = await engine._stream_model_response(
-            event_callback=decision_callback(engine, event_callback), **kwargs)
-        if entries:
-            await engine._cancel_streaming_tool_tasks(entries)
-        return response, [], fallback
-    except ToolProtocolError as error:
-        error.code, error.visible_text = "invalid_collaboration_decision", ""
-        raise
-    except StreamInterrupted as error:
-        error.partial_text = ""  # An incomplete decision is not a user answer.
-        raise
-    finally:
-        engine.tool_context.pop("ultra_deciding", None)
-
-
-def convert(engine, response, user_message):
-    raw = "\n".join(engine._tb_get(block, "text", "") for block in response.content
-        if engine._tb_get(block, "type", "") == "text")
-    try:
-        calls = [b for b in response.content if engine._tb_get(b, "type", "") == "tool_use"]
-        if any(engine._tb_get(b, "type", "") not in {"text", "thinking", "redacted_thinking", "tool_use"} for b in response.content):
-            raise ValueError("Return a complete JSON decision, not executable tool calls")
-        if calls:
-            if response.stop_reason != "tool_use" or len(calls) != 1 or engine._tb_get(calls[0], "name", "") != DECISION_TOOL:
-                raise ValueError("Call collaboration_decision exactly once; no executable tool calls are accepted here")
-            block = calls[0]
-            raw = engine._tb_get(block, "_raw_arguments", "") or json.dumps(engine._tb_get(block, "input", {}), ensure_ascii=False)
-            if engine._tb_get(block, "_argument_error", ""):
-                raise ValueError(engine._tb_get(block, "_argument_error", ""))
-            payload = parse_tool_arguments(raw)
-        else:
-            if response.stop_reason != "end_turn":
-                raise ValueError("Decision was incomplete; no work was executed")
-            text = raw.strip()
-            if text.startswith("```json\n") and text.endswith("```"): text = text[8:-3].strip()
-            payload = parse_tool_arguments(text)
-        if payload.get("decision") == "answer":
-            raise ValueError("Ultra planning cannot return final answers or infer a sequential fallback. Choose delegate with independent assignments, or sequential with a concrete reason and main_task. Execute the original task before answering.")
-        plan = Decision.model_validate(payload)
-        roles = engine.tool_context["agent_registry"].definitions()
-        for worker in plan.workers:
-            if worker.subagent_type is not None and worker.subagent_type not in roles:
-                raise ValueError("Unknown worker role; registered roles: " + ", ".join(sorted(roles)))
-        if plan.workers and "spawn_agent" not in engine._get_effective_tools():
-            raise ValueError("Delegation is unavailable in the current role/mode")
-    except (ValueError, ValidationError) as error:
-        detail = error.errors(include_input=False, include_context=False, include_url=False) if isinstance(error, ValidationError) else str(error)
-        raise ToolProtocolError("Invalid Ultra decision: " + str(detail), code="invalid_collaboration_decision", raw_text=raw) from None
-    owner = get_msg_uuid(user_message)
-    calls = calls_for(plan, owner)
-    engine.tool_context["collaboration_run"]["decision"] = {"user_message_id": owner, **plan.model_dump(), "calls": calls}
-    thinking = [block for block in response.content if engine._tb_get(block, "type", "") in {"thinking", "redacted_thinking"}]
-    content = thinking + [engine._make_text_block("Collaboration decision: " + plan.reason + "\nMain assignment: " + plan.main_task)] + [
-        engine._make_tool_use_block(tool_id=c["id"], name=c["name"], input_payload=c["input"]) for c in calls]
-    return SimpleNamespace(content=content, stop_reason="tool_use" if calls else "end_turn", usage=response.usage), plan
 
 
 async def recover(engine, user_message, *, event_callback=None, sys_print_callback=print):

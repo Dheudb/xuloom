@@ -86,9 +86,6 @@ async def execute_tool(self, tool_block, sys_print_callback=print, *, turn: int 
             "tool_use_id":tool_id, "result":receipt['content'], "is_error":True, "status":"cancelled"})
         return receipt
     tool_inputs = copy.deepcopy(self._tb_get(tool_block, "input", {}) or {})
-    if self.tool_context.get("ultra_deciding"):
-        return {"type": "tool_result", "tool_use_id": tool_id, "is_error": True, "_input_error": True,
-            "content": "No tool was executed: Ultra requires a validated collaboration decision before any tool action."}
     from xuloom.core.continuation import FIELD, KEY, register, observe, current
     has_declaration = FIELD in tool_inputs
     declaration = tool_inputs.pop(FIELD, None)

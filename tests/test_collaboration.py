@@ -266,7 +266,6 @@ class ConversationPolicyTests(unittest.IsolatedAsyncioTestCase):
                 gate.set()
 
         self.fixture([
-            json.dumps({"decision":"sequential", "reason":"Follow the explicit launch requested next", "main_task":"Launch the user-specified workers"}),
             (launch_tool, json.dumps({"prompt": "Independently check the given evidence.", "count": 2})),
             ("record_tool", '{"value":"PARENT_EVIDENCE"}'),
             "PROVISIONAL",
@@ -282,7 +281,7 @@ class ConversationPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(row["status"] == "completed" for row in self.engine.subagent_registry))
         self.assertTrue(all(row["background"] for row in self.engine.subagent_registry))
         self.assertIn("WORKER_EVIDENCE", json.dumps(self.requests[-1]["messages"]))
-        self.assertEqual(len(self.requests), 5, "One explicit Ultra decision; no worker relaunch")
+        self.assertEqual(len(self.requests), 4, "Native tool execution; no routing request or worker relaunch")
 
     async def test_registered_role_enum_and_invalid_role_repair_precede_approval_or_execution(self):
         roles = self.root / ".xuloom/agents"
@@ -349,25 +348,23 @@ class ConversationPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(prompted, ["spawn_agent"])
         self.assertEqual(self.engine.subagent_registry, [])
 
-    async def test_proactive_policy_and_nonblocking_guidance_reach_real_model_request(self):
+    async def test_proactive_policy_and_native_tools_reach_first_model_request(self):
         self.engine.set_collaboration_mode("ultra")
-        self.fixture([json.dumps({'decision':'sequential','reason':'Short conversation','main_task':'Reply normally','workers':[]}), 'Hello.'])
+        self.fixture(['Hello.'])
         result = await self.engine._run_loop("Say hello.", sys_print_callback=lambda _: None)
         self.assertTrue(result.ok)
         request = self.requests[0]
         system = "\n".join(message["content"] for message in request["messages"] if message["role"] == "system")
-        self.assertIn("Proactively delegate independent", system)
+        self.assertIn("Use subagents when parallel work would materially improve speed or quality.", system)
         self.assertIn("work alongside agents", system)
         self.assertEqual(system.count("# Collaboration: ultra"), 1)
-        from xuloom.agents.ultra_decision import contract
-        self.assertTrue(system.endswith(contract(self.engine)))
         self.assertGreater(system.index("# Collaboration: ultra"), system.index("# Tool-Specific Rules"))
-        self.assertNotIn("run_in_background=false when the current answer requires", system)
-        self.assertEqual([tool['function']['name'] for tool in request['tools']], ['collaboration_decision'],
-            "Only the non-executable decision function is exposed before any tool action")
-        self.assertEqual(request['tool_choice']['function']['name'], 'collaboration_decision')
-        self.assertEqual(self.engine.tool_context["collaboration_run"]["decision"]["decision"], "sequential")
-        self.assertEqual(len(self.requests), 2)
+        names = {tool['function']['name'] for tool in request['tools']}
+        self.assertTrue({'spawn_agent','web_search_tool','web_fetch_tool'} <= names)
+        self.assertNotIn('collaboration_decision', names)
+        self.assertNotIn('tool_choice', request)
+        self.assertNotIn('decision', self.engine.tool_context['collaboration_run'])
+        self.assertEqual(len(self.requests), 1)
         self.assertEqual(self.engine.subagent_registry, [])
 
     async def test_auto_retains_selective_policy_with_same_tools_and_permissions(self):
@@ -389,7 +386,7 @@ class ConversationPolicyTests(unittest.IsolatedAsyncioTestCase):
         for mode in ("solo", "auto", "ultra"):
             self.engine.set_collaboration_mode(mode)
             self.requests = []
-            self.fixture(([json.dumps({'decision':'sequential','reason':'Short question','main_task':'Answer normally','workers':[]})] if mode == 'ultra' else []) + ['4'])
+            self.fixture(['4'])
             prior = copy.deepcopy(self.engine.tool_context["collaboration_run"])
             result = await self.engine._run_loop("2+2?", sys_print_callback=lambda _: None)
             self.assertEqual(result.reason, "completed")

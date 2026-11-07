@@ -16,7 +16,7 @@ def visible(engine):
     builtin = getattr(engine, "builtin_tool_names", set())
     selected = CORE_TOOLS | engine.activated_tools | engine.tool_context.get('role_declared_tools', frozenset())
     if getattr(engine, 'collaboration_mode', '') == 'ultra':
-        selected = selected | {'spawn_agent'}
+        selected = selected | {'spawn_agent', 'web_search_tool', 'web_fetch_tool'}
     if getattr(engine, 'coordinator_mode', False):
         selected = selected | {'spawn_agent', 'agent_tool', 'plan_tool', 'todo_write_tool'}
     if engine.tool_context.get('team_member_name'):

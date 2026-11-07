@@ -68,7 +68,7 @@ class ReasoningWireTests(unittest.IsolatedAsyncioTestCase):
     async def test_selected_controls_reach_actual_request_and_do_not_change_collaboration(self):
         self.engine.set_collaboration_mode("ultra")
         self.engine.reasoning_profile = profile(efforts=["high"], effort="high", thinking="disabled")
-        self.fixture([json.dumps({'decision':'sequential','reason':'Short question','main_task':'Reply normally','workers':[]}), 'ANSWER'])
+        self.fixture(['ANSWER'])
         result = await self.engine._run_loop("A direct question.", sys_print_callback=lambda _: None)
         self.assertTrue(result.ok)
         self.assertEqual(self.requests[0]["extra_body"], {"thinking": {"type": "disabled"}})

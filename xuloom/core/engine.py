@@ -3504,13 +3504,6 @@ class QueryEngine(ModelStream):
                     mcp_instructions=self._build_mcp_instructions(),
                 )
                 system_prompt += self._get_coordinator_system_prompt_addon()
-                from xuloom.agents import ultra_decision
-                deciding = ultra_decision.pending(self)
-                decision_plan = None
-                if deciding:
-                    tools_schema = ultra_decision.schema(self)
-                    system_prompt += ultra_decision.contract(self)
-                    await self._emit_stream_event(event_callback, {"type": "collaboration_decision", "id": get_msg_uuid(user_msg), "status": "running"})
                 await self._emit_stream_event(event_callback, {
                     "type": "memory_files",
                     "turn": turn_count,
@@ -3544,10 +3537,10 @@ class QueryEngine(ModelStream):
                     await self._replay_vcr_response_events(
                         response,
                         turn_count=turn_count,
-                        event_callback=ultra_decision.decision_callback(self, event_callback) if deciding else event_callback,
+                        event_callback=event_callback,
                     )
                 else:
-                    response, streaming_tool_entries, streaming_fallback = await ultra_decision.receive(self, deciding,
+                    response, streaming_tool_entries, streaming_fallback = await self._stream_model_response(
                         system_prompt=system_prompt,
                         api_messages=api_messages,
                         tools_schema=tools_schema,
@@ -3576,8 +3569,6 @@ class QueryEngine(ModelStream):
                     tools_schema=tools_schema,
                     thinking_config=effective_thinking_config,
                 )
-                if deciding:
-                    response, decision_plan = ultra_decision.convert(self, response, user_msg)
                 protocol_failures = 0
                 await self._emit_stream_event(event_callback, {
                     "type": "token_usage",
@@ -3603,21 +3594,10 @@ class QueryEngine(ModelStream):
                 )
                 if getattr(response, "responses_output", None):
                     assistant_message["_responses_output"] = response.responses_output
-                if decision_plan is not None and decision_plan.decision == "sequential":
-                    assistant_message["_is_meta"] = True
                 self.messages.append(assistant_message)
                 self._sync_message_context()
                 # Checkpointing memory auto-flush
-                checkpoint_saved = self.persist_session_state()
-                if decision_plan is not None and not checkpoint_saved:
-                    raise PersistenceError("Ultra decision could not be saved; no planned worker was launched")
-                if decision_plan is not None:
-                    await self._emit_stream_event(event_callback, {"type": "collaboration_decision", "id": get_msg_uuid(user_msg),
-                        "status": "completed", "decision": decision_plan.decision, "reason": decision_plan.reason,
-                        "main_task": decision_plan.main_task, "worker_count": len(decision_plan.workers)})
-                    sys_print_callback("Ultra 协作决策：" + {"answer": "直接回答", "delegate": "派发独立分工", "sequential": "主代理独立处理"}[decision_plan.decision])
-                    if decision_plan.decision == "sequential": continue
-
+                self.persist_session_state()
                 if self.user_inbox and response.stop_reason != "tool_use": continue
                 
                 if response.stop_reason == "tool_use":
@@ -3924,7 +3904,7 @@ class QueryEngine(ModelStream):
                         self._record_token_usage(SimpleNamespace(usage=e.usage, content=[self._make_text_block(e.raw_text)]), loop_state, turn_count,
                             system_prompt=system_prompt, api_messages=api_messages, tools_schema=tools_schema,
                             thinking_config=effective_thinking_config)
-                    subject = "协作决策格式" if e.code == "invalid_collaboration_decision" else "工具调用格式"
+                    subject = "工具调用格式"
                     message = (f"{subject}错误，正在请求模型修正（{protocol_failures}/2）。已完成的操作保留。" if retrying else
                                f"{subject}多次修正失败，任务已中断。已完成的操作和文件保留，可继续当前会话。")
                     await self._record_loop_transition("tool_protocol_repair" if retrying else "tool_protocol_exhausted",
@@ -3938,9 +3918,7 @@ class QueryEngine(ModelStream):
                         partial = create_assistant_message(e.visible_text, model=loop_state["active_model"], stop_reason="protocol_error")
                         partial["_is_meta"] = True
                         self.messages.append(partial)
-                    repair_feedback = ("[Ultra decision rejected before any tool execution]\n" + str(e) + ultra_decision.contract(self)
-                        if e.code == "invalid_collaboration_decision" else
-                        "\n\n[Tool protocol error: current completion rejected before any of its calls executed]\n" + str(e) +
+                    repair_feedback = ("\n\n[Tool protocol error: current completion rejected before any of its calls executed]\n" + str(e) +
                         "\nCorrect the tool call using the currently declared tools schema. Prefer native function/tool_calls. "
                         "Arguments must be a JSON object; arrays must be actual arrays, not serialized strings. "
                         "If using DSML, use only declared parameter names, each exactly once, and close every tag. "

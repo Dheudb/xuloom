@@ -15,7 +15,7 @@
 
 Windows 下载包自带 Python 和 MCP SDK，无需安装 Python、选择解释器或安装 Node.js。 发布包只精简明确的开发资源，保留 PDF、图片、全部语言和许可证，详见[体积与精简边界](docs/packaging-size.md)。第三方 MCP 程序可能另需 Node.js、uv 等环境，按服务说明准备。
 
-当前源码版本为 **v0.1.38**，可下载成品及校验和以 Releases 为准。成品面向 Windows x64；Linux/macOS 可使用源码 CLI，尚无对应的桌面发行包。
+当前源码版本为 **v0.1.39**，可下载成品及校验和以 Releases 为准。成品面向 Windows x64；Linux/macOS 可使用源码 CLI，尚无对应的桌面发行包。
 
 **Scaling 蜂群（实验阶段／开发测试版）：** 左侧独立工作台，显式确认高用量后选择本机和／或多个 SSH 节点及各自容量。每组一个独立 Xuloom 组长，默认最多带 50 个 worker，数量均衡分配（51 分为 25＋26）；断开 SSH 后继续执行，重连后同步结果。API 默认继承本机配置，由远端直接请求供应商，也可为节点选择其他 API／模型池。运行中可与主 agent 对话、查询进展和调整方向；变更方向会先等待旧任务确认停止，保留历史与产物。支持资源自适应、排队、权限请求和显式重试。App 与 `xuloom scaling` 共用控制端，不改变普通会话的 Solo／Auto／Ultra。配置、命令和本地验证范围见 [Scaling](docs/scaling.md)。
 
@@ -53,7 +53,7 @@ SSH 会话的 HTML 可直接在文件面板预览，支持工作区内的相对 
 
 可选的 [Claude Code / Pi / Codex / DSH 后端](docs/external-agents.md) 可使用用户已安装 CLI，继续走 Xuloom 的原生队列、工具授权和中央历史。Claude 使用 Anthropic Messages；Pi／DSH 支持 Anthropic Messages 和 OpenAI Chat，Codex 使用 OpenAI Responses。Pi 主动停止在回执与历史确认后可通过同一 worker 明确续聊，未知结果不会自动重放，见 [停止与恢复边界](docs/external-agents.md#续聊停止与边界)。DSH 使用独立最小 headless 配置，见 [DSH 验证](docs/dsh-backend-validation-2026-11-02.md)。外部 CLI 经 SSH 的完整联动仍在 [持续目标](docs/product-roadmap.md) 中，不能把原生 SSH worker 当成所有后端已验收。
 
-默认首轮只向模型声明文件读写、命令和工具发现五个入口，其余工具按需加载；Ultra 先做结构化协作决策，工作阶段直接提供后台派发入口。精简提示不会关闭权限、参数校验或恢复检查。用户指令、选中 Skill、已激活工具和历史会增加实际输入，详见 [首轮输入与原生搜索](docs/lean-context-search.md)。
+默认首轮只向模型声明文件读写、命令和工具发现五个入口，其余工具按需加载；Ultra 从首轮直接提供委派、网页搜索和读取入口，使用通用主动协作规则，不再增加独立分类请求。精简提示不会关闭权限、参数校验或恢复检查。用户指令、选中 Skill、已激活工具和历史会增加实际输入，详见 [首轮输入与原生搜索](docs/lean-context-search.md)。
 
 按需发现的工具会随会话保存，续聊时恢复当前角色仍允许使用的工具；晚注册的 MCP 工具也重新检查角色范围。外部 CLI 缓存工具定义不等于获得执行权限，模型请求和实际执行仍受原生可见性及授权约束。详见 [工具发现与恢复验证](docs/tool-discovery-validation-2026-11-02.md)。
 

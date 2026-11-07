@@ -130,8 +130,6 @@ async def receive(engine, *, system_prompt, api_messages, tools_schema, turn_cou
     tools = [{"type": "function", "strict": False, **tool.get("function", tool)} for tool in tools_schema]
     options = dict(model=model_name, instructions=system_prompt, input=inputs(engine, engine._get_messages_after_compact_boundary()), tools=tools,
         stream=True, store=False, max_output_tokens=max_tokens, include=["reasoning.encrypted_content"])
-    if engine.tool_context.get("ultra_deciding"):
-        options["tool_choice"] = {"type": "function", "name": "collaboration_decision"}
     if engine.reasoning_profile:
         from xuloom.core.reasoning import request_options
         if engine.reasoning_profile["adapter"] != "openai": raise ContextLimitError("Responses requires declared OpenAI reasoning controls")
