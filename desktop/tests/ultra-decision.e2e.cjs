@@ -29,10 +29,15 @@ const server = http.createServer((req, res) => {
       }
       const task = human.findLast(m => m.content.startsWith('ULTRA_'))?.content || '';
       if (task.startsWith('ULTRA_SIMPLE')) {
-        simpleCalls++; assert.deepEqual(body.tools.map(t=>t.function.name), ['collaboration_decision']);
-        assert.equal(body.tool_choice.function.name, 'collaboration_decision');
-        assert(history.includes('# Ultra collaboration decision (this request only)'));
-        return reply(res, null, 'collaboration_decision', { decision: 'answer', answer: 'SIMPLE_PASS' });
+        simpleCalls++;
+        if (body.tool_choice?.function?.name === 'collaboration_decision') {
+          assert.deepEqual(body.tools.map(t=>t.function.name), ['collaboration_decision']);
+          assert(!body.tools[0].function.parameters.properties.answer);
+          assert(history.includes('# Ultra collaboration decision (this request only)'));
+          return reply(res, null, 'collaboration_decision', {decision:'sequential',reason:'Short conversation',main_task:'Reply normally',workers:[]});
+        }
+        assert(!body.tools.some(t=>t.function.name === 'collaboration_decision'));
+        return reply(res, 'SIMPLE_PASS');
       }
       if (task.startsWith('ULTRA_COMPLEX')) {
         switch (++calls) {
@@ -84,7 +89,7 @@ async function cli() {
     assert.equal(code, 0, stderr + stdout);
     const events = stdout.trim().split(/\r?\n/).map(JSON.parse), finals = events.filter(e => e.type === 'final');
     assert.equal(finals.length, 1); assert.equal(finals[0].result.text, 'SIMPLE_PASS');
-    assert(events.some(e => e.type === 'collaboration_decision' && e.decision === 'answer'));
+    assert(events.some(e => e.type === 'collaboration_decision' && e.decision === 'sequential'));
     assert(!events.some(e => e.type === 'text_delta' && e.text.includes('"decision"')));
   } finally { clearTimeout(timeout); }
 }
@@ -98,8 +103,8 @@ async function cli() {
     await page.waitForFunction(() => !document.querySelector('.collaboration-picker').disabled);
     await send('ULTRA_SIMPLE: 2+2?'); await page.getByText('SIMPLE_PASS', { exact: true }).waitFor();
     await page.waitForFunction(() => !document.querySelector('.send-button.stop'));
-    assert.equal(simpleCalls, 1); assert.equal(children.length, 0);
-    assert.equal(await page.locator('.turn-retry').count(), 0, 'Simple answer has no fake decision process item');
+    assert.equal(simpleCalls, 2); assert.equal(children.length, 0);
+    assert.equal(await page.locator('.turn-retry:not(.turn-decision)').count(), 0, 'Simple conversation has no protocol retry');
     const originalId=await page.locator('.session-item.active').getAttribute('data-session-id');
     await send('ULTRA_COMPLEX: Compare two independent evidence sources, organize a main note, and synthesize.');
     await page.getByText('等待 2 个子代理返回结果，全部结束后再汇总。', { exact: true }).waitFor();
@@ -145,7 +150,7 @@ async function cli() {
     await page.getByText('协作决策 · 计划派发 2 项独立分工', { exact: true }).waitFor();
     assert(!(await page.locator('.conversation').innerText()).includes('"decision"'));
     await capture(); await app.close(); app = null;
-    await cli(); assert.equal(simpleCalls, 3); assert.deepEqual(failures, []);
-    console.log('PASS: desktop + CLI Ultra decision; simple task one request/zero workers; two independent workers run alongside main file write; wait-all synthesis; decision/receipts survive restart; no raw decision JSON displayed. Loopback models only.');
+    await cli(); assert.equal(simpleCalls, 6); assert.deepEqual(failures, []);
+    console.log('PASS: desktop + CLI Ultra planning never returns the final answer; simple conversation two requests/zero workers; independent workers run alongside main work; wait-all synthesis and live history survive restart. Loopback models only.');
   } finally { if (app) await app.close().catch(() => {}); server.closeAllConnections(); server.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

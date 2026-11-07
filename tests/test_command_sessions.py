@@ -25,6 +25,14 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
     async def start(self, code, **kwargs):
         return json.loads(await self.tool.execute(argv=[sys.executable, "-u", "-c", code], wait_ms=1000, **kwargs))
 
+    async def test_command_schema_rejects_subagent_namespace_and_preserves_command_ids(self):
+        from pydantic import ValidationError
+        with self.assertRaisesRegex(ValidationError, 'agent_tool'):
+            CommandInput.model_validate({'action':'poll','command_id':'subagent-00000000-0000-0000-0000-000000000000'})
+        value = CommandInput.model_validate({'action':'poll','command_id':'cmd-'+'a'*32})
+        self.assertEqual(value.command_id, 'cmd-'+'a'*32)
+        self.assertEqual(self.manager.records, {})
+
     async def test_exact_utf8_stdin_and_separate_json_stderr(self):
         text = '你好\n"quotes" $HOME `not shell`\n' * 1000
         result = await self.start("import sys,json; text=sys.stdin.read(); print(json.dumps({'text':text},ensure_ascii=False)); print('diagnostic',file=sys.stderr)", stdin=text)

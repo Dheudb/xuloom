@@ -51,7 +51,7 @@ class CliTests(unittest.TestCase):
                 has_tool_result = body["messages"][-1]["role"] == "tool"
                 delta, finish = {"content": "CLI_RESULT_你好"}, "stop"
                 if owner.mode == "text" and any(m.get("role") == "system" and "# Ultra collaboration decision (this request only)" in str(m.get("content")) for m in body["messages"]):
-                    delta = {"content": json.dumps({"decision": "answer", "answer": "CLI_RESULT_你好"})}
+                    delta = {"content": json.dumps({'decision':'sequential','reason':'Short conversation','main_task':'Reply normally','workers':[]})}
                 if owner.mode == 'native-search' and len(owner.requests) <= 2:
                     name = 'tool_search_tool' if len(owner.requests) == 1 else 'web_search_tool'
                     arguments = {'query': 'web search', 'activate': ['web_search_tool']} if len(owner.requests) == 1 else {'query': 'question', 'max_results': 15}
@@ -241,9 +241,9 @@ class CliTests(unittest.TestCase):
     def test_collaboration_flag_and_resume_preserve_mode_without_changing_permissions(self):
         first, _, result = self.cli("exec", "Hello", "--collaboration", "ultra")
         self.assertEqual(first.returncode, 0, first.stderr)
-        self.assertEqual(len(self.requests), 1)
-        self.assertEqual([tool['function']['name'] for tool in self.requests[-1]['tools']], ['collaboration_decision'])
-        self.assertEqual(self.requests[-1]['tool_choice']['function']['name'], 'collaboration_decision')
+        self.assertEqual(len(self.requests), 2)
+        self.assertEqual([tool['function']['name'] for tool in self.requests[0]['tools']], ['collaboration_decision'])
+        self.assertEqual(self.requests[0]['tool_choice']['function']['name'], 'collaboration_decision')
         self.assertEqual(result["text"], "CLI_RESULT_你好")
         self.assertIn("# Collaboration: ultra", json.dumps(self.requests[-1]))
         sid = result["session_id"]

@@ -351,7 +351,7 @@ class ConversationPolicyTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_proactive_policy_and_nonblocking_guidance_reach_real_model_request(self):
         self.engine.set_collaboration_mode("ultra")
-        self.fixture([json.dumps({"decision":"answer", "answer":"Hello."})])
+        self.fixture([json.dumps({'decision':'sequential','reason':'Short conversation','main_task':'Reply normally','workers':[]}), 'Hello.'])
         result = await self.engine._run_loop("Say hello.", sys_print_callback=lambda _: None)
         self.assertTrue(result.ok)
         request = self.requests[0]
@@ -366,8 +366,8 @@ class ConversationPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([tool['function']['name'] for tool in request['tools']], ['collaboration_decision'],
             "Only the non-executable decision function is exposed before any tool action")
         self.assertEqual(request['tool_choice']['function']['name'], 'collaboration_decision')
-        self.assertEqual(self.engine.tool_context["collaboration_run"]["decision"]["decision"], "answer")
-        self.assertEqual(len(self.requests), 1)
+        self.assertEqual(self.engine.tool_context["collaboration_run"]["decision"]["decision"], "sequential")
+        self.assertEqual(len(self.requests), 2)
         self.assertEqual(self.engine.subagent_registry, [])
 
     async def test_auto_retains_selective_policy_with_same_tools_and_permissions(self):
@@ -389,7 +389,7 @@ class ConversationPolicyTests(unittest.IsolatedAsyncioTestCase):
         for mode in ("solo", "auto", "ultra"):
             self.engine.set_collaboration_mode(mode)
             self.requests = []
-            self.fixture([json.dumps({"decision":"answer", "answer":"4"}) if mode == "ultra" else "4"])
+            self.fixture(([json.dumps({'decision':'sequential','reason':'Short question','main_task':'Answer normally','workers':[]})] if mode == 'ultra' else []) + ['4'])
             prior = copy.deepcopy(self.engine.tool_context["collaboration_run"])
             result = await self.engine._run_loop("2+2?", sys_print_callback=lambda _: None)
             self.assertEqual(result.reason, "completed")

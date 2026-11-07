@@ -92,11 +92,15 @@ const statusText: Record<string, string> = {
 export default function McpDialog({
   sessionId,
   busy,
+  creatingSession,
+  createSession,
   invoke,
   close,
 }: {
   sessionId: string;
   busy: boolean;
+  creatingSession: boolean;
+  createSession: () => void;
   invoke: (method: string, params?: Record<string, unknown>) => Promise<any>;
   close: () => void;
 }) {
@@ -120,18 +124,18 @@ export default function McpDialog({
   const [callbackUrl, setCallbackUrl] = useState("");
   const signingIn = useRef("");
   const dialog=useDialogFocus();
-  const locked = busy || !!working;
+  const locked = !sessionId || busy || !!working;
 
   useEffect(() => {
     let alive = true;
-    invoke("mcp.list")
+    if (sessionId) invoke("mcp.list")
       .then((value) => alive && setSnapshot(value))
       .catch((e) => alive && setError(String(e)));
     load("builtin", "");
     const unsubscribe = window.xuloom.onEvent((event) => {
-      if (event.session === sessionId && event.type === "mcp_changed")
+      if (sessionId && event.session === sessionId && event.type === "mcp_changed")
         setSnapshot(event.snapshot);
-      if (event.session === sessionId && event.type === "mcp_oauth_authorize")
+      if (sessionId && event.session === sessionId && event.type === "mcp_oauth_authorize")
         setAuthorization({ name: event.name, url: event.url, callback: event.callback });
     });
     return () => {
@@ -311,7 +315,7 @@ export default function McpDialog({
           <div>
             <span className="eyebrow">TOOLS & CONNECTIONS</span>
             <h2>MCP 市场</h2>
-            <p className="mcp-subtitle">为当前项目添加搜索、文档和开发工具</p>
+            <p className="mcp-subtitle">{sessionId ? "为当前工作区添加搜索、文档和开发工具" : "浏览搜索、文档和开发工具"}</p>
           </div>
           <button
             className="icon-button"
@@ -341,6 +345,8 @@ export default function McpDialog({
             </button>
             <button
               className={tab === "installed" ? "active" : ""}
+              disabled={!sessionId}
+              title={!sessionId ? "打开会话后管理对应工作区的服务" : undefined}
               onClick={() => setTab("installed")}
             >
               我的服务 · {snapshot?.servers.length || 0}
@@ -351,6 +357,10 @@ export default function McpDialog({
             自定义服务
           </button>
         </div>
+        {!sessionId && <div className="notice" role="status">
+          <p>可以直接浏览和搜索市场。安装前请新建或打开一个会话，服务配置会保存在该会话的工作区，并与 CLI 共用。</p>
+          <button disabled={creatingSession} onClick={createSession}>{creatingSession ? "正在创建会话…" : "新建会话并配置"}</button>
+        </div>}
         {busy && (
           <p className="notice">
             当前有任务正在运行，完成或停止后可以修改 MCP 配置。
@@ -487,7 +497,7 @@ export default function McpDialog({
             ) : (
               <>
                 <div className="mcp-installed-heading">
-                  <p>配置保存在当前项目，与 CLI 共用。</p>
+                  <p>配置保存在当前工作区，与 CLI 共用。</p>
                   <button
                     disabled={locked}
                     onClick={() => action("mcp.reload", {}, "reload")}
@@ -832,7 +842,7 @@ export default function McpDialog({
         </div>
         <footer className="mcp-footer">
           <span>内置 DDGS 多搜索源搜索可独立使用。</span>
-          <span>当前项目 · {snapshot?.project.split(/[\\/]/).pop()}</span>
+          <span>{sessionId ? "当前工作区 · " + (snapshot?.project.split(/[\\/]/).pop() || "正在读取…") : "尚未选择安装工作区"}</span>
         </footer>
       </section>
     </div>

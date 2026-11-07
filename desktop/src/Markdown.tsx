@@ -10,6 +10,7 @@ import { Check, Copy } from "lucide-react";
 import { fileReference, webReference } from "./references";
 import ReferenceIcon from "./ReferenceIcon";
 import { ReferenceNavigation } from "./ReferenceNavigation";
+import remarkReferenceList from "./remark-reference-list";
 
 const ReferenceLabel = createContext(false);
 
@@ -76,7 +77,7 @@ export default function Markdown({ text, onOpenFile, sessionId, basePath, remote
     <>
     <MarkdownImageContext.Provider value={{ sessionId, basePath }}>
     <ReactMarkdown
-      remarkPlugins={[remarkGfm, remarkMath, remarkDisplayMath]}
+      remarkPlugins={[remarkGfm, remarkMath, remarkDisplayMath, remarkReferenceList]}
       urlTransform={(url, key) => key === "src" ? url : webReference(url) || chatURL(url) || (canOpen && fileReference(url) ? url : "")}
       components={{
         pre: ({ children, node }) => {

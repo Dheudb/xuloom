@@ -577,10 +577,7 @@ export default function App() {
           <button className="sidebar-action" aria-label="Scaling 蜂群" onClick={() => setScalingOpen(true)}><Workflow size={16} />Scaling 蜂群 <span className="scaling-beta">实验阶段</span></button>
           <button
             className="sidebar-action"
-            disabled={!active}
-            title={
-              !active ? "先打开项目，再管理 MCP 服务" : "为当前项目管理外部工具"
-            }
+            title={active ? "为当前工作区管理外部工具" : "浏览 MCP 服务目录"}
             onClick={() => setMcpOpen(true)}
           >
             <Store size={16} />
@@ -1023,7 +1020,8 @@ export default function App() {
           }}
           close={() => setSettingsOpen(false)}
           save={saveModel}
-          extensions={active ? { busy: active.busy || !!runningWorkers || !!runningCommands, invoke, changed: (capabilities) => update({ capabilities }), openMcp: () => { setSettingsOpen(false); setMcpOpen(true); } } : undefined}
+          openMcp={() => { setSettingsOpen(false); setMcpOpen(true); }}
+          extensions={active ? { busy: active.busy || !!runningWorkers || !!runningCommands, invoke, changed: (capabilities) => update({ capabilities }) } : undefined}
           deleteConnection={async (connectionId) => {
             const config = await invoke("config.delete", { connectionId, confirm: true });
             applyModel(config);
@@ -1034,15 +1032,13 @@ export default function App() {
       )}
       {attachmentPreview && <AttachmentPreview image={attachmentPreview} close={() => setAttachmentPreview(undefined)} />}
       {scalingOpen && <ScalingWorkbench close={() => setScalingOpen(false)} />}
-      {mcpOpen && active && (
+      {mcpOpen && (
         <McpDialog
-          key={active.id}
-          sessionId={active.id}
-          busy={
-            active.busy ||
-            !!runningCommands ||
-            active.workers.some((worker) => worker.status === "running")
-          }
+          key={active?.id || "browse"}
+          sessionId={active?.id || ""}
+          busy={!!active?.busy || !!runningCommands || !!runningWorkers}
+          creatingSession={opening}
+          createSession={() => void openSession()}
           invoke={invoke}
           close={() => setMcpOpen(false)}
         />

@@ -2,7 +2,7 @@ import json
 from xuloom.utils.shell import shell_guidance
 from typing import List, Optional
 from pathlib import Path
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from xuloom.tools.base import BaseAgenticTool
 
 MAX_WAIT_MS = 120000
@@ -13,7 +13,7 @@ class CommandInput(BaseModel):
     argv: Optional[List[str]] = Field(None, description="Preferred: executable and arguments, without shell interpolation")
     command: Optional[str] = Field(None, description="Alternative shell command")
     cwd: Optional[str] = Field(None, description="Defaults to this conversation's working directory")
-    command_id: Optional[str] = None
+    command_id: Optional[str] = Field(None, description="ID returned by command_tool.start; not a subagent ID")
     stdin: Optional[str] = Field(None, max_length=1000000, description="Exact UTF-8 text; no shell quoting required")
     keep_stdin_open: bool = False
     eof: bool = False
@@ -23,6 +23,13 @@ class CommandInput(BaseModel):
     stream: str = Field("stdout", pattern="^(stdout|stderr)$")
     offset: int = Field(0, ge=0, description="Byte cursor returned by the previous read")
     max_bytes: int = Field(4000, ge=4, le=100000)
+
+    @field_validator("command_id")
+    @classmethod
+    def command_identity(cls, value):
+        if value and value.startswith("subagent-"):
+            raise ValueError("This is a subagent ID, not a command ID. Use agent_tool with action=wait and agent_ids=[this ID], or action=result with agent_id=this ID.")
+        return value
 
 
 class CommandTool(BaseAgenticTool):

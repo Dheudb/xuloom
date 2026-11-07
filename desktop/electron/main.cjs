@@ -502,6 +502,9 @@ async function invoke(method, params) {
     return true;
   }
   if (method === "config.get") return globalConfig().request("config.get");
+  // Browsing is read-only and does not require a conversation or model setup.
+  // Installation, testing and OAuth still require their actual owning session.
+  if (method === "mcp.market" && !params.session) return globalConfig().request(method, params);
   if (method === "task.readiness" && !params.session) return globalConfig().request(method, params);
   if (["media.connections", "media.save", "media.remove", "media.models", "media.saveModel", "media.removeModel"].includes(method) && !params.session) {
     if (!["media.connections", "media.models"].includes(method) && [...sessions.values()].some(running)) throw new Error("请先停止运行中的任务，再修改生成模型");

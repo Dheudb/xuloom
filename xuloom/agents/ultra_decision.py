@@ -85,7 +85,7 @@ def contract(engine):
     return ("\n# Ultra collaboration decision (this request only)\n"
         'Call collaboration_decision once with your decision; it plans work and executes no tools. '
         'A complete JSON decision is accepted for older transports. '
-        "For a simple conversational task, choose answer and put the complete reply in answer; omit workers/main_task. "
+        "This stage plans execution only, never a final answer. For a simple conversation, choose sequential with no workers. "
         "For complex work, delegate useful independent research, alternatives or checks; keep the critical path and synthesis in main_task. "
         "Research, requested searches and substantive multi-direction ideation require execution, not an answer composed here without evidence. "
         "Do not invent workers to meet a quota. Choose sequential with a brief reason when no useful independent branch exists. "
@@ -96,6 +96,13 @@ def contract(engine):
 def schema(engine):
     """Use the existing provider tool transport, not an untyped JSON-only request."""
     parameters = Decision.model_json_schema()
+    # Pydantic defaults permit legacy records; the request schema must declare
+    # the fields needed by the cross-field validator rather than just decision.
+    parameters["properties"]["decision"]["enum"] = ["delegate", "sequential"]
+    parameters["properties"].pop("answer")  # Old saved decisions remain readable; new decisions cannot publish answers.
+    parameters["required"] = ["decision", "reason", "main_task", "workers"]
+    parameters["properties"]["main_task"]["description"] = "Main execution assignment; the original task and constraints still apply."
+    parameters["properties"]["workers"]["description"] = "Independent assignments for delegate; empty for justified sequential execution."
     roles = sorted(engine.tool_context["agent_registry"].definitions())
     parameters["$defs"]["Assignment"]["properties"]["subagent_type"] = {
         "anyOf": [{"type": "string", "enum": roles}, {"type": "null"}], "default": None}
@@ -146,19 +153,20 @@ def convert(engine, response, user_message):
             raw = engine._tb_get(block, "_raw_arguments", "") or json.dumps(engine._tb_get(block, "input", {}), ensure_ascii=False)
             if engine._tb_get(block, "_argument_error", ""):
                 raise ValueError(engine._tb_get(block, "_argument_error", ""))
-            plan = Decision.model_validate(parse_tool_arguments(raw))
+            payload = parse_tool_arguments(raw)
         else:
             if response.stop_reason != "end_turn":
                 raise ValueError("Decision was incomplete; no work was executed")
             text = raw.strip()
             if text.startswith("```json\n") and text.endswith("```"): text = text[8:-3].strip()
-            plan = Decision.model_validate(parse_tool_arguments(text))
+            payload = parse_tool_arguments(text)
+        if payload.get("decision") == "answer":
+            raise ValueError("Ultra planning cannot return final answers or infer a sequential fallback. Choose delegate with independent assignments, or sequential with a concrete reason and main_task. Execute the original task before answering.")
+        plan = Decision.model_validate(payload)
         roles = engine.tool_context["agent_registry"].definitions()
         for worker in plan.workers:
             if worker.subagent_type is not None and worker.subagent_type not in roles:
                 raise ValueError("Unknown worker role; registered roles: " + ", ".join(sorted(roles)))
-        if plan.decision == "answer" and engine.tool_context["workflow_completion"].pending:
-            raise ValueError("The selected Skill requires execution; choose delegate or sequential")
         if plan.workers and "spawn_agent" not in engine._get_effective_tools():
             raise ValueError("Delegation is unavailable in the current role/mode")
     except (ValueError, ValidationError) as error:
@@ -168,9 +176,8 @@ def convert(engine, response, user_message):
     calls = calls_for(plan, owner)
     engine.tool_context["collaboration_run"]["decision"] = {"user_message_id": owner, **plan.model_dump(), "calls": calls}
     thinking = [block for block in response.content if engine._tb_get(block, "type", "") in {"thinking", "redacted_thinking"}]
-    content = thinking + ([engine._make_text_block(plan.answer)] if plan.decision == "answer" else
-        [engine._make_text_block("Collaboration decision: " + plan.reason + "\nMain assignment: " + plan.main_task)] +
-        [engine._make_tool_use_block(tool_id=c["id"], name=c["name"], input_payload=c["input"]) for c in calls])
+    content = thinking + [engine._make_text_block("Collaboration decision: " + plan.reason + "\nMain assignment: " + plan.main_task)] + [
+        engine._make_tool_use_block(tool_id=c["id"], name=c["name"], input_payload=c["input"]) for c in calls]
     return SimpleNamespace(content=content, stop_reason="tool_use" if calls else "end_turn", usage=response.usage), plan
 
 

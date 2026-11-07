@@ -24,6 +24,7 @@ export function SettingsDialog({
   discoverModels,
   deleteConnection,
   extensions,
+  openMcp,
   targetLabel,
   mediaControl,
 }: {
@@ -37,7 +38,8 @@ export function SettingsDialog({
   workspaceAction: (method: string, params: Record<string, unknown>) => Promise<void>;
   discoverModels: (value: Record<string, unknown>) => Promise<{ models: string[] }>;
   deleteConnection: (connectionId: string) => Promise<ModelConfig>;
-  extensions?: { busy: boolean; invoke: (method: string, params?: Record<string, unknown>) => Promise<any>; changed: (value: Capabilities) => void; openMcp: () => void };
+  extensions?: { busy: boolean; invoke: (method: string, params?: Record<string, unknown>) => Promise<any>; changed: (value: Capabilities) => void };
+  openMcp: () => void;
   targetLabel?: string;
   mediaControl?: (action: "status" | "cancel", identity: string) => Promise<void>;
 }) {
@@ -142,7 +144,7 @@ export function SettingsDialog({
         {tab === "media" && <div role="tabpanel" id="settings-panel-media" aria-labelledby="settings-tab-media"><MediaSettings invoke={extensions?.invoke || ((method, params) => window.xuloom.invoke(method, params))} busy={extensions?.busy} hasSession={!!extensions} control={mediaControl} /></div>}
         {tab === "remote" && <div role="tabpanel" id="settings-panel-remote" aria-labelledby="settings-tab-remote"><RemoteSettings navigationAction={workspaceAction} open={async (id, sessionId) => { await workspaceAction("remote.open", { id, sessionId }); close(); }} /></div>}
         {["skills", "agents", "mcp"].includes(tab) && <div role="tabpanel" id={"settings-panel-" + tab} aria-labelledby={"settings-tab-" + tab}>
-          {!extensions ? <p>请先新建或打开一个会话，再管理扩展；无需配置模型或打开代码仓库。</p> : tab === "mcp" ? <><h3>MCP 服务</h3><p>连接外部工具。支持本地 stdio 与远程 Streamable HTTP，可浏览市场、自定义服务、测试连接及启停。</p><p>配置保存在当前工作区的 .xuloom/mcp_servers.json；API Key 与本地运行环境由服务提供方决定。</p><button onClick={extensions.openMcp}>打开 MCP 管理</button></> : <ExtensionSettings key={tab} kind={tab as "skills" | "agents"} {...extensions} />}
+          {tab === "mcp" ? <><h3>MCP 服务</h3><p>连接外部工具。支持本地 stdio 与远程 Streamable HTTP，可浏览市场、自定义服务、测试连接及启停。</p><p>{extensions ? "配置保存在当前工作区的 .xuloom/mcp_servers.json，与 CLI 共用。" : "可以直接浏览市场；安装和管理服务前，选择或新建一个会话即可，无需配置模型或打开代码仓库。"}</p><button onClick={openMcp}>打开 MCP 管理</button></> : !extensions ? <p>请先新建或打开一个会话，再管理扩展；无需配置模型或打开代码仓库。</p> : <ExtensionSettings key={tab} kind={tab as "skills" | "agents"} {...extensions} />}
         </div>}
         <div className="form-section model-connection-form" role="tabpanel" id="settings-panel-model" aria-labelledby="settings-tab-model" hidden={tab !== 'model'}>
           <fieldset className="model-form" disabled={saving || discovering || deleting}>

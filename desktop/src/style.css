@@ -682,6 +682,21 @@ a,
 .markdown ol {
   padding-left: 22px;
 }
+.markdown ol.reference-list {
+  margin: 16px 0;
+  padding-left: 2.6em;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.markdown .reference-list > li {
+  margin: 0 0 10px;
+  padding-left: 4px;
+}
+.markdown .reference-list > li::marker {
+  content: "[" counter(list-item) "]  ";
+  color: var(--muted);
+}
+.markdown .reference-list p { margin: 0; }
 .markdown pre {
   background: var(--surface-soft);
   border: 1px solid var(--line);

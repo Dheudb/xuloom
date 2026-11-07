@@ -120,6 +120,19 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.engine.session_token_usage["output_tokens"], 20)
         self.assertNotIn("tool_protocol", str(conversation_history(self.engine.messages)))
 
+    async def test_subagent_id_in_command_poll_is_rejected_before_handler_with_correct_tool_hint(self):
+        self.fixture([('command_tool', '{"action":"poll","command_id":"subagent-00000000-0000-0000-0000-000000000000","wait_ms":120000}'), 'Use the agent wait interface.'])
+        manager = self.engine.tool_context['command_sessions']
+        with patch.object(manager, 'poll', AsyncMock(side_effect=AssertionError('Wrong namespace must never reach the command handler'))):
+            result = await self.run_task()
+        self.assertEqual(result, 'Use the agent wait interface.')
+        request = json.dumps(self.requests[1]['messages'])
+        self.assertIn('subagent ID', request)
+        self.assertIn('agent_tool', request)
+        self.assertIn('invalid_tool_input', request)
+        self.assertNotIn('effects: uncertain', request)
+        self.assertEqual(manager.records, {})
+
     async def test_native_tool_image_reaches_model_and_durable_ui_reference(self):
         from PIL import Image
         from xuloom.context.tool_media import image_preview

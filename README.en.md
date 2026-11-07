@@ -12,7 +12,7 @@ Download the Windows x64 ZIP from Releases, extract the whole directory, and run
 
 Open **Settings → Model connections**, enter your API endpoint, protocol, model ID and key. A connection can list multiple models; multiple providers are supported. OpenAI-compatible Chat Completions and Anthropic Messages are supported. Local model servers must expose a supported interface. Text completion alone does not establish compatibility with tools or images.
 
-Choose **New conversation** to get an independent working directory, or open an existing folder. A Git repository is not required. Source version: **v0.1.37**; see Releases for currently published binaries and checksums. macOS/Linux desktop distributions are not available.
+Choose **New conversation** to get an independent working directory, or open an existing folder. A Git repository is not required. Source version: **v0.1.38**; see Releases for currently published binaries and checksums. macOS/Linux desktop distributions are not available.
 
 **Live supplemental input:** While a desktop task runs, send additional text without stopping it. Inputs are saved before acknowledgement and delivered after the current response/tool step; pending inputs can be withdrawn and survive restart for explicit resume. The noninteractive CLI supports `exec --input-stream` and `exec --resume --session`; the normal interactive TTY does not yet offer live line editing. This reuses the engine without a default supervisor model. See [delivery and recovery boundaries](docs/live-input.md).
 
@@ -79,6 +79,8 @@ Assign tasks through the Agents panel or name the role in your request. Creating
 
 Go to **Settings → MCP services → Open MCP manager**. Choose a catalog entry or add a custom service. Local stdio services need a command, argument array and optional environment variables. Remote Streamable HTTP services need a URL and optional headers.
 
+Browse and search the catalog without a conversation or model connection. Before installation, explicitly create or open a conversation to select the owning workspace; no code repository is required.
+
 Save, test the connection, then explicitly enable the service. Installation saves a disabled configuration. Testing starts the program or accesses the remote service; it does not call the chat model.
 
 Workspace configuration is `<workspace>/.xuloom/mcp_servers.json`:
@@ -97,7 +99,7 @@ Workspace configuration is `<workspace>/.xuloom/mcp_servers.json`:
 }
 ```
 
-This example needs Node.js/npm and a real allowed directory. Remote services use `type: "http"`, `url`, and `headers`. Keep credentials in headers/environment rather than visible command arguments. Use trusted services. OAuth and legacy SSE are not implemented. Windows system execution isolation disables MCP.
+This example needs Node.js/npm and a real allowed directory. Remote services use `type: "http"`, `url`, and `headers`. Keep credentials in headers/environment rather than visible command arguments. Use trusted services. HTTP services support [OAuth login, refresh and logout](docs/mcp-oauth.md); legacy SSE is not supported. Windows system execution isolation disables MCP.
 
 ## Data, permissions and limits
 
