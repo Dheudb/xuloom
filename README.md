@@ -15,7 +15,7 @@
 
 Windows 下载包自带 Python 和 MCP SDK，无需安装 Python、选择解释器或安装 Node.js。 发布包只精简明确的开发资源，保留 PDF、图片、全部语言和许可证，详见[体积与精简边界](docs/packaging-size.md)。第三方 MCP 程序可能另需 Node.js、uv 等环境，按服务说明准备。
 
-当前源码版本为 **v0.1.39**，可下载成品及校验和以 Releases 为准。成品面向 Windows x64；Linux/macOS 可使用源码 CLI，尚无对应的桌面发行包。
+当前源码版本为 **v0.1.40**，可下载成品及校验和以 Releases 为准。成品面向 Windows x64；Linux/macOS 可使用源码 CLI，尚无对应的桌面发行包。
 
 **Scaling 蜂群（实验阶段／开发测试版）：** 左侧独立工作台，显式确认高用量后选择本机和／或多个 SSH 节点及各自容量。每组一个独立 Xuloom 组长，默认最多带 50 个 worker，数量均衡分配（51 分为 25＋26）；断开 SSH 后继续执行，重连后同步结果。API 默认继承本机配置，由远端直接请求供应商，也可为节点选择其他 API／模型池。运行中可与主 agent 对话、查询进展和调整方向；变更方向会先等待旧任务确认停止，保留历史与产物。支持资源自适应、排队、权限请求和显式重试。App 与 `xuloom scaling` 共用控制端，不改变普通会话的 Solo／Auto／Ultra。配置、命令和本地验证范围见 [Scaling](docs/scaling.md)。
 

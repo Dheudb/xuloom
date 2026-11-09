@@ -40,10 +40,14 @@ class UltraDecisionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('decision', self.engine.tool_context['collaboration_run'])
         self.assertEqual(self.engine.subagent_registry, [])
         self.assertFalse(any(e['type']=='collaboration_decision' for e in self.events))
+        self.assertFalse(any(e.get('source')=='ultra_prepare' for e in self.events))
 
     async def test_assessment_search_runs_automatically_without_another_model_instruction(self):
         from xuloom.tools.web_tool import WebSearchTool
-        search = AsyncMock(return_value='Inspected evidence: https://example.invalid/fixture-paper')
+        async def search_result(**kwargs):
+            self.assertTrue(any(e.get('source')=='ultra_prepare' for e in self.events),'Explain the accepted approach before starting search')
+            return 'Inspected evidence: https://example.invalid/fixture-paper'
+        search = AsyncMock(side_effect=search_result)
         self.fixture([('ultra_prepare', json.dumps(dict(task_type='research',main_task='Compare evidence',evidence='search',
             search_queries=['compare independent approaches'],rationale='External evidence is needed'))), 'SOURCED_RESULT'])
         with patch.object(WebSearchTool, 'execute', search): result = await self.run_task('Research and compare alternatives')
@@ -53,6 +57,26 @@ class UltraDecisionTests(unittest.IsolatedAsyncioTestCase):
         system = '\n'.join(m['content'] for m in self.requests[0]['messages'] if m['role']=='system')
         self.assertIn('use ultra_prepare for research',system)
         self.assertNotIn('Scientific/technical ideation',system)
+        commentary = [e for e in self.events if e.get('source')=='ultra_prepare']
+        self.assertEqual(len(commentary),1)
+        self.assertEqual(commentary[0]['channel'],'commentary')
+        self.assertEqual(commentary[0]['text'].strip(),'External evidence is needed')
+        self.assertEqual([s['text'] for s in self.recorder.record['steps'] if s['kind']=='text'],['External evidence is needed\n\n'])
+        self.assertEqual(result.text,'SOURCED_RESULT')
+
+    async def test_cli_stream_preserves_public_approach_and_separate_final_result(self):
+        from xuloom.cli import stream
+        from xuloom.tools.web_tool import WebSearchTool
+        self.fixture([('ultra_prepare',json.dumps(dict(task_type='research',main_task='Compare sources',evidence='search',
+            search_queries=['supplied fixture query'],rationale='I will check independent sources before comparing the results.'))),'CLI_FINAL'])
+        async def emit(event): self.events.append(event)
+        with patch.object(WebSearchTool,'execute',AsyncMock(return_value='FIXTURE_EVIDENCE')):
+            result=await stream(self.engine,'Compare the evidence',[],emit)
+        commentary=[e for e in self.events if e.get('source')=='ultra_prepare']
+        self.assertEqual(len(commentary),1)
+        self.assertEqual(commentary[0]['channel'],'commentary')
+        self.assertEqual(result['text'],'CLI_FINAL')
+        self.assertEqual(len(self.requests),2,'No extra model request for public progress')
 
     async def test_sequential_work_is_not_forced_to_launch_workers(self):
         self.fixture([('ultra_prepare',json.dumps(dict(task_type='sequential',main_task='Record work',evidence='not_needed',rationale='One dependent operation'))),
@@ -158,6 +182,9 @@ class UltraDecisionTests(unittest.IsolatedAsyncioTestCase):
         search.assert_awaited_once()
         self.assertEqual(len(self.engine.subagent_registry),1,'Identical assignments are not multiplied')
         self.assertIn('OWNED_SEARCH_EVIDENCE',json.dumps(self.requests[-1]['messages']))
+        commentary = [e for e in self.events if e.get('source')=='ultra_prepare']
+        self.assertEqual(len(commentary),1,'Rejected plans must not emit public progress')
+        self.assertEqual(commentary[0]['text'].strip(),plan['rationale'])
 
     async def test_same_prompt_keeps_distinct_roles_and_explicit_replicate_labels(self):
         plan=dict(task_type='multi_path',main_task='Compare independent results',evidence='provided',rationale='Different roles and explicit repeat labels',
@@ -189,6 +216,7 @@ class UltraDecisionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.ok,result)
         self.assertEqual(result.text,'RESUMED_SYNTHESIS')
         search.assert_awaited_once()
+        self.assertEqual(len([e for e in self.events if e.get('source')=='ultra_prepare']),1,'Resume must not repeat the accepted explanation')
 
     def seed_legacy(self):
         self.engine.require_writer()

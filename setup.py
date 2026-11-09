@@ -3,7 +3,7 @@ from pathlib import Path
 
 setup(
     name="xuloom",
-    version="0.1.39",
+    version="0.1.40",
     description="Xuloom — General-purpose Agent framework for desktop and CLI",
     long_description=Path(__file__).with_name("README.md").read_text(encoding="utf-8"),
     long_description_content_type="text/markdown",

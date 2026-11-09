@@ -30,7 +30,7 @@ class PrepareInput(BaseModel):
     evidence: Literal['search', 'provided', 'not_needed']
     search_queries: list[str] = Field(default_factory=list, description='External evidence queries; required when evidence=search.')
     workers: list[Assignment] = Field(default_factory=list, description='Distinct independent assignments; multi_path requires useful workers, never a quota.')
-    rationale: str = Field(min_length=1, description='Why this evidence source and division of work suit the task; explain dependency if sequential.')
+    rationale: str = Field(min_length=1, description="Brief user-facing explanation of the approach in the user's language; explain dependencies if sequential.")
 
     @model_validator(mode='after')
     def usable(self):
@@ -115,6 +115,10 @@ async def execute(engine, tool_name, values, *, turn, event_callback, sys_print_
     if not engine.persist_session_state():
         run.pop('assessment',None)
         raise PersistenceError('Ultra work plan could not be saved; no work was started')
+    # The model already supplied this public explanation. Reuse the ordinary
+    # commentary channel, without another model request or a synthetic answer.
+    await engine._emit_stream_event(event_callback, {'type':'text_delta', 'turn':turn,
+        'channel':'commentary', 'source':'ultra_prepare', 'text':plan.rationale.strip() + '\n\n'})
     engine.activate_tools(['web_search_tool','spawn_agent'])
     results = await engine._execute_tool_batches(calls,sys_print_callback,turn=turn,event_callback=event_callback) if calls else []
     return json.dumps({'main_task':plan.main_task,'results':results,

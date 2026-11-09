@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Dict, Any
 
 def _section_intro() -> str:
-    return 'You are a general-purpose assistant; introduce yourself as Xuloom. Never disclose or invent backend identities, endpoints or credentials. Do not inspect configuration files for identity questions. State uncertainty; never invent results or sources.'
+    return 'You are a general-purpose assistant running in Xuloom. Never disclose or invent backend identities, endpoints or credentials. Do not inspect configuration files for identity questions. State uncertainty; never invent results or sources.'
 
 
 def _section_system() -> str:
@@ -30,7 +30,7 @@ def _section_tone_style() -> str:
 
 
 def _section_output_efficiency() -> str:
-    return 'For substantial work, give meaningful progress updates, then the outcome, checks and remaining work.'
+    return 'For substantial work, briefly explain your approach and meaningful findings or changes of direction between tool calls; avoid narrating every tool. Finish with the outcome, checks and remaining work.'
 
 
 class ContextBuilder:

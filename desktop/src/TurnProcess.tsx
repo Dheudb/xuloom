@@ -77,7 +77,7 @@ export default function TurnProcess({ trace, sessionId }: { trace: TurnTrace; se
     ? `你在 ${durationText(elapsed)} 后停止了`
     : <>{state}{state && elapsed !== undefined ? " · " : ""}{elapsed !== undefined ? `${trace.approximate ? "约" : ""}用时 ${durationText(elapsed)}` : state ? "" : "执行过程"}{phase ? ` · ${phase}` : ""}</>}</span>;
   const commentary = trace.outputChannel === "commentary" ? trace.pendingText?.trim() : "";
-  if (!commentary && !trace.steps.some((step) => step.kind === "tool" || step.kind === "notice" || step.kind === "text" && step.protocolError)) {
+  if (!commentary && !steps.some((step) => step.kind !== "compaction")) {
     return elapsed === undefined && !state && !notices.length ? null : <div className="turn-process turn-process-time" data-turn-status={trace.status}>{label}
       {notices.map(step => <CompactStatus key={step.compaction.id} notice={step.compaction} turnStatus={trace.status} />)}</div>;
   }

@@ -111,6 +111,8 @@ async function cli() {
     assert.equal(await page.locator('.turn-retry:not(.turn-decision)').count(), 0, 'Simple conversation has no protocol retry');
     const originalId=await page.locator('.session-item.active').getAttribute('data-session-id');
     await send('ULTRA_COMPLEX: Compare two independent evidence sources, organize a main note, and synthesize.');
+    await page.locator('.turn-commentary').filter({hasText:'Independent supplied sources'}).waitFor();
+    assert.equal(await page.locator('.message-text').filter({hasText:'Independent supplied sources'}).count(),0,'Model-authored approach belongs in the process');
     await page.locator('.turn-commentary').filter({hasText:'PROVISIONAL_MUST_WAIT'}).waitFor();
     assert.equal(await page.locator('.message-text').filter({hasText:'PROVISIONAL_MUST_WAIT'}).count(),0,'Provisional output must stream inside process, never as the final answer');
     await page.getByText('等待 2 个子代理返回结果，全部结束后再汇总。', { exact: true }).waitFor();
@@ -154,6 +156,7 @@ async function cli() {
     await page.getByText('COMPLEX_SYNTHESIS_PASS', { exact: true }).waitFor();
     await page.locator('.turn-process').last().locator(':scope > summary').click();
     assert((await page.locator('.turn-process').last().innerText()).includes('PROVISIONAL_MUST_WAIT'),'Draft remains in the saved process after restart');
+    assert.equal(await page.locator('.turn-process').last().locator('.turn-commentary').filter({hasText:'Independent supplied sources'}).count(),1,'Accepted approach survives restart once');
     assert.equal(await page.locator('.message-text').filter({hasText:'PROVISIONAL_MUST_WAIT'}).count(),0);
     assert.equal(await page.locator('.turn-process').last().locator('.turn-tool').count(),4);
     assert(!(await page.locator('.conversation').innerText()).includes('"decision"'));
