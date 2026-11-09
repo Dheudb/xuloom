@@ -104,7 +104,7 @@ export default function App() {
   const input = useRef<HTMLTextAreaElement>(null);
   const navigation = useRef(0);
   const active = sessions.find((item) => item.id === activeId);
-  const selectedModel = active?.remote ? active.config : globalModel;
+  const selectedModel = active?.config || globalModel;
   const conversationScroll = useConversationScroll(activeId, active?.messages, active?.interactions);
   const effectiveSidebarWidth = clampSidebarWidth(sidebarWidth ?? defaultSidebarWidth(viewport), viewport, panelOpen);
   const draftSessions = useRef(sessions);
@@ -466,31 +466,34 @@ export default function App() {
       else await invoke("attachments.open", { id: item.id });
     } catch (error) { onError(error); }
   }
-  function applyModel(config: ModelConfig) {
-    const remoteKey = active?.remote?.key;
-    if (!remoteKey) setGlobalModel(config);
-    setSessions(previous => previous.map(session => session.busy || (remoteKey ? session.remote?.key !== remoteKey : !!session.remote) ? session : { ...session, config }));
+  function applyModel(config: ModelConfig, owner = activeId) {
+    if (!owner) setGlobalModel(config);
+    setSessions(previous => previous.map(session => session.id === owner ? { ...session, config } : session));
   }
   async function saveModel(value: ModelConfig & { apiKey: string }) {
+    const owner = activeId;
     const config = await invoke("config.save", value);
-    applyModel(config);
+    applyModel(config, owner);
+    if (!active?.remote) setGlobalModel(await window.xuloom.invoke("config.get"));
   }
   async function selectModel(value: string) {
     if (modelChanging) return;
     setModelChanging(true);
+    const owner = activeId;
     try {
       const [connectionId, model] = JSON.parse(value);
       const config = await invoke("config.select", { connectionId, model });
-      applyModel(config);
+      applyModel(config, owner);
     } catch (error) { onError(error); }
     finally { setModelChanging(false); }
   }
   async function selectReasoning(value: { thinking?: "default" | "enabled" | "disabled"; effort?: string }) {
     if (!selectedModel || modelChanging) return;
     setModelChanging(true);
+    const owner = activeId;
     try {
       const config = await invoke("config.reasoning", { connectionId: selectedModel.connectionId, model: selectedModel.model, ...value });
-      applyModel(config);
+      applyModel(config, owner);
     } catch (error) { onError(error); }
     finally { setModelChanging(false); }
   }
@@ -1025,6 +1028,7 @@ export default function App() {
           deleteConnection={async (connectionId) => {
             const config = await invoke("config.delete", { connectionId, confirm: true });
             applyModel(config);
+            if (!active?.remote) setGlobalModel(await window.xuloom.invoke("config.get"));
             return config;
           }}
           discoverModels={(value) => invoke("config.models", value)}

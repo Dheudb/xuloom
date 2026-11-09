@@ -13,6 +13,9 @@ BRIEFS = {
 
 def visible(engine):
     effective = engine._get_effective_tools()
+    from xuloom.agents.ultra_execution import required, NAMES
+    if required(engine):
+        return {name:engine.available_tools[name] for name in NAMES}
     builtin = getattr(engine, "builtin_tool_names", set())
     selected = CORE_TOOLS | engine.activated_tools | engine.tool_context.get('role_declared_tools', frozenset())
     if getattr(engine, 'collaboration_mode', '') == 'ultra':
@@ -23,7 +26,7 @@ def visible(engine):
         selected = selected | {'send_message_tool'}
     if getattr(engine, 'plan_manager', None) and engine.plan_manager.get_mode() == 'plan':
         selected = selected | {'exit_plan_mode'}
-    return {name: tool for name, tool in effective.items() if name in selected or name not in builtin}
+    return {name: tool for name, tool in effective.items() if name not in NAMES and (name in selected or name not in builtin)}
 
 
 def compact_definition(definition):

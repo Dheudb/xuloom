@@ -31,6 +31,7 @@
     "test:storage": "node tests/storage.e2e.cjs",
     "test:archives": "node tests/archives.e2e.cjs",
     "test:models": "node tests/models.e2e.cjs",
+    "test:conversation-models": "node tests/conversation-models.e2e.cjs",
     "test:settings-layout": "node tests/settings-layout.e2e.cjs",
     "test:permissions": "node tests/permissions.e2e.cjs",
     "test:subagents": "node tests/subagents.e2e.cjs",

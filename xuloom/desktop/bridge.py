@@ -13,6 +13,7 @@ from xuloom.branding import configuration_file
 
 from xuloom.core.config import load_config, load_config_into_env, update_config
 from xuloom.core.model_catalog import public_config, active_connection, save_connection, delete_connection, select_model, select_reasoning, discover_models, apply_connection_env, apply_catalog_env
+from xuloom.core.model_catalog import session_config, model_selection, connections
 from xuloom.security.permissions import ApprovalPolicy
 from xuloom.desktop.activity import restore_activity
 from xuloom.desktop.turns import TurnRecorder, conversation_history
@@ -83,6 +84,7 @@ class DesktopBridge:
         self.oauth_callback = None
         self.oauth_name = None
         self.model_signature = None
+        self.model_selection = None
         self.file_changes = []
         self.attachment_upload = None
         self.attachment_guard = asyncio.Lock()
@@ -90,6 +92,7 @@ class DesktopBridge:
     def emit(self, event):
         if event.get('type') == 'user_input_applied' and self.recorder and event.get('inputs'):
             previous = self.recorder
+            if previous.record.get('outputChannel') == 'commentary': previous.flush()
             previous.record['answer'] = previous.record.get('pendingText','')
             previous.record['pendingText'] = ''
             previous.accept({'type':'turn_finished'})
@@ -181,10 +184,37 @@ class DesktopBridge:
             raise ValueError("Wait for running tasks or stop them before changing this session")
 
     def config(self):
-        return public_config(load_config())
+        return public_config(session_config(load_config(), self.model_selection))
+
+    async def remember_preferences(self):
+        """Only explicit user changes seed new chats; existing chats keep their checkpoint."""
+        values = {'model':copy.deepcopy(self.model_selection), 'permissionMode':self.approval_policy.mode,
+            'collaborationMode':self.collaboration_mode}
+        await asyncio.to_thread(update_config, lambda cfg:{**cfg,'new_session_preferences':values})
+
+    def save_model_selection(self, selection):
+        """Use the existing session lease; choosing a model needs no engine/MCP startup."""
+        if self.engine:
+            self.engine.require_writer()
+            previous = getattr(self.engine, "model_selection", None)
+            self.engine.model_selection = selection
+            if not self.engine.persist_session_state():
+                self.engine.model_selection = previous
+                raise OSError("会话模型选择保存失败，原选择已保留")
+        elif self.resume_id:
+            from xuloom.core.session import SessionManager
+            with SessionManager(cwd=str(self.cwd)) as manager:
+                manager.acquire_writer(self.resume_id)
+                state = manager.load_session_state(self.resume_id)
+                if state.get("metadata", {}).get("delegation", {}).get("authority_required"):
+                    raise ValueError("请通过原主代理调整受控子任务")
+                metadata = {**state.get("metadata", {}), "model_selection": selection}
+                if not manager.save_session_state(self.resume_id, state["messages"], metadata):
+                    raise OSError("会话模型选择保存失败，原选择已保留")
+        self.model_selection = selection
 
     async def sync_model(self, engine, force=False):
-        cfg = load_config()
+        cfg = session_config(load_config(), self.model_selection, required=True)
         config = public_config(cfg)
         provider = config["provider"]
         key = active_connection(cfg).get("api_key", "")
@@ -198,11 +228,14 @@ class DesktopBridge:
             apply_connection_env(active_connection(cfg))
         previous_client, previous_compactor = engine.client, engine.compactor
         engine.switch_model_runtime(provider=provider, model=config["model"], api_base_url=config["baseUrl"], api_key=key, network_mode=config["networkMode"], persist=False)
+        engine.reasoning_profile = copy.deepcopy(config.get("modelReasoning", {}).get(config["model"]))
+        engine._sync_model_runtime_context()
         if previous_client is not None:
             await previous_client.close()
         if previous_compactor.client:
             await previous_compactor.client.close()
         self.model_signature = signature
+        engine.model_selection = copy.deepcopy(self.model_selection)
 
     def capabilities(self):
         definitions = self.agents.definitions()
@@ -302,8 +335,8 @@ class DesktopBridge:
                 raise ValueError("Session could not be resumed")
             if write:
                 engine.require_writer()
-            # History restores conversation state; current saved settings determine
-            # how its next request connects, including changes made in another tab.
+            # Resolve this conversation's choice against the current credential
+            # catalog. Another tab's selected model must not change this one.
             await self.sync_model(engine, force=True)
             for record in engine.subagent_registry:
                 if record.get("status") == "running":
@@ -499,6 +532,10 @@ class DesktopBridge:
                 if not manager.save_session_state(identity, [], {}):
                     raise OSError("Could not save the new conversation")
             return {"sessionId": identity, "project": str(self.cwd)}
+        if method == 'preferences.seed':
+            if not (load_config().get('new_session_preferences') or {}).get('model'):
+                await self.remember_preferences()
+            return True
         if method == "session.status":
             from xuloom.core.session import SessionManager
             from xuloom.core.session_lock import SessionLock, SessionBusyError
@@ -691,6 +728,7 @@ class DesktopBridge:
                     if not manager.save_session_state(self.resume_id, raw["messages"], raw["metadata"]):
                         raise OSError("协作档位保存失败: " + manager.last_save_error)
             self.collaboration_mode = mode
+            await self.remember_preferences()
             value = {"collaborationMode": mode, "limits": profile}
             self.emit({"type": "collaboration_mode_changed", **value})
             return value
@@ -706,6 +744,7 @@ class DesktopBridge:
                 for request_id, future in list(self.pending.items()):
                     if self.pending_kinds.get(request_id) in {"permission", "plan_approval"} and not future.done():
                         future.set_result("allow")
+            await self.remember_preferences()
             self.emit({"type": "permission_mode_changed", "permissionMode": self.approval_policy.mode})
             return {"permissionMode": self.approval_policy.mode}
         if method == "config.models":
@@ -798,6 +837,37 @@ class DesktopBridge:
             if sid:
                 raw = json.loads((session_directory(self.cwd) / (sid + ".json")).read_text(encoding="utf-8"))
                 messages = raw if isinstance(raw, list) else raw.get("messages", [])
+            metadata = raw.get("metadata", {}) if isinstance(raw, dict) else {}
+            cfg = load_config()
+            if sid and not messages and not metadata:
+                preferences = cfg.get('new_session_preferences') or {}
+                choice = preferences.get('model')
+                try:
+                    chosen = session_config(cfg, choice, required=True) if choice else cfg
+                except ValueError:
+                    chosen = cfg  # Removed API/model cannot retain an unusable credential binding.
+                seeded = {'model_selection':model_selection(chosen, choice),
+                    'collaboration_mode':preferences.get('collaborationMode','auto')}
+                if seeded['collaboration_mode'] not in {'solo','auto','ultra'}: seeded['collaboration_mode']='auto'
+                from xuloom.core.session import SessionManager
+                with SessionManager(cwd=str(self.cwd)) as manager:
+                    manager.acquire_writer(sid)
+                    current = manager.load_session_state(sid)
+                    if current.get('metadata') or current.get('messages'):
+                        raw = current; messages = current.get('messages',[]); metadata = current.get('metadata',{})
+                    else:
+                        if not manager.save_session_state(sid,[],seeded): raise OSError('新会话偏好保存失败')
+                        metadata = seeded; raw = {'messages':[], 'metadata':seeded}
+                        if params.get('inheritPreferences') is True or 'permissionMode' not in params:
+                            self.approval_policy.set_mode(preferences.get('permissionMode','ask') if preferences.get('permissionMode','ask') in {'ask','full'} else 'ask')
+            self.model_selection = metadata.get("model_selection")
+            if not self.model_selection:
+                runtime = metadata.get("model_runtime", {})
+                matching = next((item for item in connections(cfg) if item["provider"] == runtime.get("provider")
+                    and item.get("base_url", "") == runtime.get("api_base_url", "")
+                    and runtime.get("primary_model") in item.get("models", [])), None)
+                chosen = session_config(cfg, {"connectionId": matching["id"], "model": runtime["primary_model"]}) if matching else cfg
+                self.model_selection = model_selection(chosen)
             activity, workers = restore_activity(raw, self.cwd)
             saved_changes = raw.get("metadata", {}).get("file_changes", []) if isinstance(raw, dict) else []
             saved_paths = {os.path.normcase(item["path"]) for item in saved_changes}
@@ -1020,6 +1090,19 @@ class DesktopBridge:
             return json.loads(await self.engine.available_tools["agent_tool"].execute(action=method.split(".")[1]))
         if method in {"config.save", "config.select", "config.delete", "config.reasoning"}:
             self.require_idle()
+            if self.resume_id and method in {"config.select", "config.reasoning"}:
+                cfg = load_config()
+                if method == "config.select":
+                    cfg = select_model(cfg, params.get("connectionId"), params.get("model"))
+                    cfg = session_config(cfg, {"connectionId": params["connectionId"], "model": params["model"],
+                        "reasoning": (self.model_selection or {}).get("reasoning", {})}, required=True)
+                else:
+                    cfg = select_reasoning(session_config(cfg, self.model_selection, required=True), params)
+                self.save_model_selection(model_selection(cfg, self.model_selection))
+                if self.engine:
+                    await self.sync_model(self.engine)
+                await self.remember_preferences()
+                return self.config()
             if method == "config.delete":
                 if params.get("confirm") is not True:
                     raise ValueError("请确认删除 API 连接")
@@ -1029,6 +1112,8 @@ class DesktopBridge:
             else:
                 change = (lambda cfg: save_connection(cfg, params)) if method == "config.save" else (lambda cfg: select_model(cfg, params.get("connectionId"), params.get("model")))
             cfg = await asyncio.to_thread(update_config, change)
+            if self.resume_id and (method == "config.save" or method == "config.delete" and (self.model_selection or {}).get("connectionId") == params.get("connectionId")):
+                self.save_model_selection(model_selection(cfg, self.model_selection))
             provider, network_mode = cfg["model_provider"], cfg["network_mode"]
             from xuloom.security.credentials import is_protected
             if is_protected(active_connection(cfg).get("api_key")):
@@ -1052,7 +1137,9 @@ class DesktopBridge:
             os.environ["XULOOM_NETWORK_MODE"] = network_mode
             if self.engine:
                 await self.sync_model(self.engine)
-            return public_config(cfg)
+            if self.resume_id and method in {'config.save','config.delete'}:
+                await self.remember_preferences()
+            return self.config()
         if method == "changes":
             return await git_changes(self.cwd)
         raise ValueError("Unknown method: " + method)

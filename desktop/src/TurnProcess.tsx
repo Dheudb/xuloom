@@ -71,11 +71,13 @@ export default function TurnProcess({ trace, sessionId }: { trace: TurnTrace; se
   const steps = trace.steps.filter(step => step.kind !== "text" || step.protocolError || step.text.trim());
   const notices = trace.steps.filter((step) => step.kind === "compaction");
   const phase = turnPhase(trace);
-  const timing = stream ? `本轮 ${trace.modelStreams?.length} 次模型请求；最近一次：${stream.firstTextMs !== undefined ? `首个文本 ${(stream.firstTextMs / 1000).toFixed(1)} 秒` : "尚未收到文本"}；已收到 ${stream.textChars || 0} 字符；推理数据 ${stream.reasoningChunks || 0} 段${stream.finishReason ? `；结束标记 ${stream.finishReason}` : ""}${stream.error ? `；${stream.error}` : ""}` : undefined;
+  const reasoning = stream?.reasoningTokens !== undefined ? `接口报告推理 ${stream.reasoningTokens} tokens` : stream?.reasoningItems ? `接口返回 ${stream.reasoningItems} 项推理记录` : `推理数据 ${stream?.reasoningChunks || 0} 段（流片段，非 Token）`;
+  const timing = stream ? `本轮 ${trace.modelStreams?.length} 次模型请求；最近一次：${stream.firstTextMs !== undefined ? `首个文本 ${(stream.firstTextMs / 1000).toFixed(1)} 秒` : "尚未收到文本"}；已收到 ${stream.textChars || 0} 字符；${reasoning}${stream.finishReason ? `；结束标记 ${stream.finishReason}` : ""}${stream.error ? `；${stream.error}` : ""}` : undefined;
   const label = <span title={timing}>{trace.status === "cancelled" && elapsed !== undefined
     ? `你在 ${durationText(elapsed)} 后停止了`
     : <>{state}{state && elapsed !== undefined ? " · " : ""}{elapsed !== undefined ? `${trace.approximate ? "约" : ""}用时 ${durationText(elapsed)}` : state ? "" : "执行过程"}{phase ? ` · ${phase}` : ""}</>}</span>;
-  if (!trace.steps.some((step) => step.kind === "tool" || step.kind === "notice" || step.kind === "text" && step.protocolError)) {
+  const commentary = trace.outputChannel === "commentary" ? trace.pendingText?.trim() : "";
+  if (!commentary && !trace.steps.some((step) => step.kind === "tool" || step.kind === "notice" || step.kind === "text" && step.protocolError)) {
     return elapsed === undefined && !state && !notices.length ? null : <div className="turn-process turn-process-time" data-turn-status={trace.status}>{label}
       {notices.map(step => <CompactStatus key={step.compaction.id} notice={step.compaction} turnStatus={trace.status} />)}</div>;
   }
@@ -92,6 +94,7 @@ export default function TurnProcess({ trace, sessionId }: { trace: TurnTrace; se
           : <div className="turn-commentary markdown" key={index}><Markdown text={step.text} sessionId={sessionId} /></div>
         : step.kind === "compaction" ? <CompactStatus key={step.compaction.id} notice={step.compaction} turnStatus={trace.status} />
         : <ProcessTool tool={step.tool} sessionId={sessionId} key={step.tool.id || index} />)}
+      {commentary && <div className="turn-commentary markdown"><Markdown text={commentary} sessionId={sessionId} /></div>}
     </div>
   </details>{!open && notices.map(step => <CompactStatus key={step.compaction.id} notice={step.compaction} turnStatus={trace.status} />)}</>;
 }

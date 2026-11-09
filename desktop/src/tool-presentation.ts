@@ -7,7 +7,9 @@ export function toolPresentation(tool: Pick<ToolActivity, "name" | "status" | "i
   const input = tool.input || {}, name = tool.name;
   const done = tool.status === "completed", failed = ["error", "crashed", "interrupted"].includes(tool.status);
   let kind: ToolKind = "tool", action = "调用工具", brief = String(input.description || input.action || name);
-  if (name === "tool_sequence") {
+  if (name === 'ultra_prepare' || name === 'ultra_answer') {
+    kind = 'agent'; action = name === 'ultra_prepare' ? '制定协作计划' : '判断简单任务'; brief = String(input.main_task || '');
+  } else if (name === "tool_sequence") {
     kind = "sequence"; action = "执行工具序列"; brief = `${Array.isArray(input.steps) ? input.steps.length : 0} 个已确定步骤`;
   } else if (name === "media_tool") {
     kind = "image"; action = ({ submit: "提交媒体生成", status: "查询生成任务", cancel: "提交取消请求", capabilities: "查看生成连接", list: "查看生成记录" } as Record<string, string>)[String(input.action)] || "媒体生成";

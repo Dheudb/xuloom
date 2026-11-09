@@ -5,26 +5,58 @@ import httpx
 from bs4 import BeautifulSoup
 if sys.version_info >= (3, 10):
     from ddgs import DDGS
-    from ddgs.exceptions import TimeoutException as SearchTimeout, RatelimitException as SearchRateLimit
 else:
     from duckduckgo_search import DDGS
-    from duckduckgo_search.exceptions import TimeoutException as SearchTimeout, RatelimitException as SearchRateLimit
 from pydantic import BaseModel, Field, model_validator
 from xuloom.tools.base import BaseAgenticTool
 from xuloom.context.tool_results import build_tool_result
+from xuloom.tools.web_network import (network_error, SearchTimeout, SearchRateLimit,
+    search_network, run_ddgs, diagnostic_secrets)
 
 MAX_SEARCH_RESULTS = 50
 MAX_FETCH_BYTES = 5_000_000
+SEARCH_TOTAL_TIMEOUT = 35
+SEARCH_MAX_ATTEMPTS = 2
+SEARCH_RETRY_DELAY = 0.75
 
 
-def network_error(error, metadata):
-    status = error.response.status_code if isinstance(error, httpx.HTTPStatusError) else None
-    code = ("rate_limited" if status == 429 or isinstance(error, SearchRateLimit) else "access_denied" if status in {401, 403} else "http_error" if status is not None else
-            "timeout" if isinstance(error, (TimeoutError, httpx.TimeoutException, SearchTimeout)) else
-            "connection_error" if isinstance(error, httpx.NetworkError) else "provider_error")
-    retryable = status in {408, 425, 429} or status is not None and status >= 500 or code in {"timeout", "connection_error", "rate_limited"}
-    return {**metadata, "reason": type(error).__name__, "code": code,
-            "http_status": status, "retryable": bool(retryable)}
+async def builtin_search(factory, query, limit, options, abort=None):
+    mode, proxies, route = search_network(options.get("network_mode"))
+    secrets = diagnostic_secrets(options, proxies)
+    deadline = asyncio.get_running_loop().time() + SEARCH_TOTAL_TIMEOUT
+    failures = []
+    for attempt in range(1, SEARCH_MAX_ATTEMPTS + 1):
+        if abort is not None and abort.is_set(): raise asyncio.CancelledError()
+        remaining = max(0, deadline - asyncio.get_running_loop().time())
+        try:
+            # One owned synchronous attempt at a time. A deadline/cancellation
+            # stops local waiting; never start a second overlapping DDGS thread.
+            rows = await asyncio.wait_for(asyncio.to_thread(run_ddgs, factory, query, limit,
+                proxies, route, min(8, remaining), legacy=sys.version_info < (3, 10)), timeout=remaining)
+            return rows, {**route, "attempts": attempt, **({"retry_history": failures} if failures else {})}
+        except asyncio.TimeoutError as error:
+            diagnostic = network_error(error, {**route, "attempts": attempt}, secrets)
+            diagnostic.update(code="timeout", retryable=True)
+            diagnostic["retry_skipped"] = "overall_deadline"
+            diagnostic["detail"] = f"DDGS exceeded its {SEARCH_TOTAL_TIMEOUT:g}s overall deadline; no overlapping retry was started."
+            return None, {**diagnostic, "retry_history": failures}
+        except Exception as error:
+            diagnostic = network_error(error, {}, secrets)
+            failures.append({"attempt": attempt, **diagnostic})
+            result = {**route, **diagnostic, "attempts": attempt, "retry_history": failures}
+            delay = max(SEARCH_RETRY_DELAY, diagnostic.get("retry_after_seconds", 0))
+            if not diagnostic["retryable"]: return None, result
+            if attempt >= SEARCH_MAX_ATTEMPTS: return None, {**result, "automatic_retry_exhausted": True}
+            if delay > 3 or deadline - asyncio.get_running_loop().time() <= delay:
+                return None, {**result, "retry_skipped": "cooldown_or_deadline"}
+            if abort is None:
+                await asyncio.sleep(delay)
+            else:
+                try:
+                    await asyncio.wait_for(abort.wait(), timeout=delay)
+                except asyncio.TimeoutError:
+                    pass
+                if abort.is_set(): raise asyncio.CancelledError()
 
 
 def extract_page(text, html):
@@ -66,27 +98,33 @@ IMPORTANT - Use the correct year in search queries:
 
     async def execute(self, query: str, max_results: int = 5) -> dict:
         backend = 'ddgs'
+        settings = {}
         try:
             limit = max(1, min(int(max_results), MAX_SEARCH_RESULTS))
             options = self.context.get('native_search_options')
             if callable(options):
-                backend = options()['profile']['backend']
+                settings = options()
+                backend = settings['profile']['backend']
                 if backend != 'builtin':
                     from xuloom.tools.native_search import execute
                     return await execute(self.context, query, limit)
                 backend = 'ddgs'
             # DDGS is synchronous; its network calls must not block streaming or Stop.
-            results = await asyncio.wait_for(asyncio.to_thread(lambda: list(DDGS(timeout=8).text(query, max_results=limit))), timeout=35)
+            results, diagnostic = await builtin_search(DDGS, query, limit, settings, self.context.get("abort_event"))
+            if results is None:
+                return build_tool_result(ok=False, is_error=True,
+                    content=f"Search service ddgs failed ({diagnostic['reason']}; {diagnostic['code']}; {diagnostic['attempts']} attempt(s)). This is not a missing tool. Inspect the retained diagnostics and connection network settings; no fallback provider was called.",
+                    metadata={"backend": "ddgs", "query": query, **diagnostic})
             results = [r for r in results if isinstance(r, dict) and str(r.get('href', '')).startswith(('https://', 'http://'))][:limit]
             if not results:
-                return build_tool_result(ok=False, is_error=True, content="The built-in web search service returned no usable results. Try a revised query or a configured search MCP. The web search tool exists; local project files are not a substitute for this public-web research.", metadata={"backend": "ddgs", "query": query, "reason": "no_results"})
+                return build_tool_result(ok=False, is_error=True, content="The built-in web search service returned no usable results. Try a revised query or a configured search MCP. The web search tool exists; local project files are not a substitute for this public-web research.", metadata={"backend": "ddgs", "query": query, **diagnostic, "reason": "no_results", "code": "no_results", "retryable": False})
             out = f"Web Search Results for: '{query}'\n" + "="*40 + "\n"
             for r in results:
                 out += f"Title: {str(r.get('title', ''))[:500]}\nURL: {r.get('href')}\nSnippet: {str(r.get('body', ''))[:2500]}\n\n"
-            return build_tool_result(ok=True, content=out, metadata={"backend": "ddgs", "query": query, "result_count": len(results),
+            return build_tool_result(ok=True, content=out, metadata={"backend": "ddgs", "query": query, **diagnostic, "result_count": len(results),
                 "sources_in_content": True, "sources": [{"url": r["href"], "title": str(r.get("title", "")), "kind": "search"} for r in results]})
         except Exception as e:
-            return build_tool_result(ok=False, is_error=True, content=f"Search service {backend} failed ({type(e).__name__}). This is not a missing tool. Check API/model support and network access; no fallback provider was called.", metadata=network_error(e, {"backend": backend, "query": query}))
+            return build_tool_result(ok=False, is_error=True, content=f"Search service {backend} failed ({type(e).__name__}). This is not a missing tool. Check API/model support and network access; no fallback provider was called.", metadata=network_error(e, {"backend": backend, "query": query}, [settings.get("api_key", "")]))
 
     def input_error_hint(self) -> str:
         return 'Use {"query":"your search terms","max_results":15}. max_results must be between 1 and 50; omit it for the default of 5. The provider may return fewer results.'

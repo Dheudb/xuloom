@@ -31,24 +31,28 @@ const server = http.createServer((req, res) => {
       const task = human.findLast(m => m.content.startsWith('ULTRA_'))?.content || '';
       if (task.startsWith('ULTRA_SIMPLE')) {
         simpleCalls++;
-        assert(!body.tool_choice);
+        assert.equal(body.tool_choice,'required');
         const names = body.tools.map(t=>t.function.name);
         assert(!names.includes('collaboration_decision'));
-        assert(['spawn_agent','web_search_tool','web_fetch_tool'].every(name=>names.includes(name)));
-        return reply(res, 'SIMPLE_PASS');
+        assert.deepEqual([...names].sort(),['ultra_answer','ultra_prepare']);
+        return reply(res, null, 'ultra_answer', {answer:'SIMPLE_PASS'});
       }
       if (task.startsWith('ULTRA_COMPLEX')) {
         switch (++calls) {
           case 1:
-            assert(!body.tool_choice);
-            assert(body.tools.some(t=>t.function.name==='spawn_agent'));
-            return reply(res, null, [
-              {name:'spawn_agent',args:{description:'第一来源',prompt:'CHILD_FIRST: check source one'}},
-              {name:'spawn_agent',args:{description:'第二来源',prompt:'CHILD_SECOND: check source two'}}]);
+            assert.equal(body.tool_choice,'required');
+            assert(body.tools.some(t=>t.function.name==='ultra_prepare'));
+            return reply(res, null, 'ultra_prepare', {task_type:'multi_path',main_task:'Organize the main note',evidence:'provided',rationale:'Independent supplied sources',workers:[
+              {description:'第一来源',prompt:'CHILD_FIRST: check source one'},
+              {description:'第二来源',prompt:'CHILD_SECOND: check source two'}]});
           case 2:
             assert(body.tools.some(t => t.function.name === 'spawn_agent'));
             return reply(res, null, 'file_write_tool', { file_path: 'main-evidence.txt', content: 'PARENT_WORK' });
-          case 3: return reply(res, 'PROVISIONAL_MUST_WAIT');
+          case 3:
+            res.writeHead(200, {'Content-Type':'text/event-stream'});
+            res.write('data: '+JSON.stringify({choices:[{index:0,delta:{content:'PROVISIONAL_MUST_WAIT'},finish_reason:null}]})+'\n\n');
+            setTimeout(()=>res.end('data: '+JSON.stringify({choices:[{index:0,delta:{},finish_reason:'stop'}]})+'\n\ndata: [DONE]\n\n'), 1200);
+            return;
           case 4:
             assert(history.includes('EVIDENCE_FIRST') && history.includes('EVIDENCE_SECOND'));
             return reply(res, 'COMPLEX_SYNTHESIS_PASS');
@@ -107,6 +111,8 @@ async function cli() {
     assert.equal(await page.locator('.turn-retry:not(.turn-decision)').count(), 0, 'Simple conversation has no protocol retry');
     const originalId=await page.locator('.session-item.active').getAttribute('data-session-id');
     await send('ULTRA_COMPLEX: Compare two independent evidence sources, organize a main note, and synthesize.');
+    await page.locator('.turn-commentary').filter({hasText:'PROVISIONAL_MUST_WAIT'}).waitFor();
+    assert.equal(await page.locator('.message-text').filter({hasText:'PROVISIONAL_MUST_WAIT'}).count(),0,'Provisional output must stream inside process, never as the final answer');
     await page.getByText('等待 2 个子代理返回结果，全部结束后再汇总。', { exact: true }).waitFor();
     assert.equal(children.length, 2); assert.equal(calls, 3);
     if (await page.getByRole('button', {name:'展开能力面板',exact:true}).count())
@@ -147,10 +153,12 @@ async function cli() {
     await app.close(); app = null; await launch();
     await page.getByText('COMPLEX_SYNTHESIS_PASS', { exact: true }).waitFor();
     await page.locator('.turn-process').last().locator(':scope > summary').click();
-    assert.equal(await page.locator('.turn-process').last().locator('.turn-tool').count(),3);
+    assert((await page.locator('.turn-process').last().innerText()).includes('PROVISIONAL_MUST_WAIT'),'Draft remains in the saved process after restart');
+    assert.equal(await page.locator('.message-text').filter({hasText:'PROVISIONAL_MUST_WAIT'}).count(),0);
+    assert.equal(await page.locator('.turn-process').last().locator('.turn-tool').count(),4);
     assert(!(await page.locator('.conversation').innerText()).includes('"decision"'));
     await capture(); await app.close(); app = null;
     await cli(); assert.equal(simpleCalls, 3); assert.deepEqual(failures, []);
-    console.log('PASS: desktop + CLI Ultra uses direct native tools with no routing gate; simple conversation one request/zero workers; independent workers run alongside main work; wait-all synthesis and live history survive restart. Loopback models only.');
+    console.log('PASS: desktop + CLI native Ultra assessment; simple conversation one request/zero workers; planned workers run alongside main work; wait-all synthesis and live history survive restart. Loopback models only.');
   } finally { if (app) await app.close().catch(() => {}); server.closeAllConnections(); server.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

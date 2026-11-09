@@ -9,6 +9,22 @@ const initial = {
   sessions: [],
   history: [],
 };
+
+test("worker-dependent streaming drafts stay in process until final synthesis", async () => {
+  const { createSession, beginTurn, applyEvent } = await state;
+  let session = beginTurn(createSession(initial), "Task");
+  const trace = {id:"turn",status:"running",steps:[],outputChannel:"commentary",pendingText:""};
+  session = applyEvent(session, {session:"one",type:"turn_trace",trace});
+  session = applyEvent(session, {session:"one",type:"text_delta",channel:"commentary",text:"Preliminary "});
+  session = applyEvent(session, {session:"one",type:"text_delta",channel:"commentary",text:"findings"});
+  assert.equal(session.messages.at(-1).text, "");
+  assert.equal(session.messages.at(-1).trace.pendingText, "Preliminary findings");
+  session = applyEvent(session, {session:"one",type:"turn_trace",trace:{...trace,pendingText:"",steps:[{kind:"text",text:"Preliminary findings"}]}});
+  session = applyEvent(session, {session:"one",type:"turn_trace",trace:{...trace,outputChannel:"answer",pendingText:"Final synthesis"}});
+  assert.equal(session.messages.at(-1).text,"Final synthesis");
+  session = applyEvent(session, {session:"one",type:"final",text:"Final synthesis"});
+  assert.equal(session.messages.at(-1).text,"Final synthesis");
+});
 test("queued input is applied once and late acknowledgements cannot restore it", async () => {
   const { createSession, beginTurn, applyEvent } = await state;
   const input = {id: "additional", text: "change direction"};

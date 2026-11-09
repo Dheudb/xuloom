@@ -13,6 +13,93 @@ from unittest.mock import patch, AsyncMock, Mock
 
 
 class BridgeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_new_chats_inherit_last_explicit_preferences_and_old_chats_keep_theirs(self):
+        from xuloom.core.config import update_config,load_config
+        from xuloom.core.model_catalog import save_connection
+        cfg=save_connection({'model_connections':[]},{'connectionId':'fixture','provider':'openai','model':'one','models':['one','two'],
+            'baseUrl':'https://fixture.invalid/v1','apiKey':'owned-test-key',
+            'modelReasoning':{name:{'adapter':'openai','efforts':['low','high'],'effort':'low'} for name in ('one','two')}})
+        cfg['model_connections'][0]['model_reasoning']['two'].update(adapter='qwen',canDisable=True,thinking='enabled')
+        update_config(lambda _:cfg)
+        first=(await self.bridge.dispatch('sessions.create',{}))['sessionId']
+        await self.bridge.dispatch('initialize',{'sessionId':first})
+        await self.bridge.dispatch('config.select',{'connectionId':'fixture','model':'two'})
+        await self.bridge.dispatch('config.reasoning',{'connectionId':'fixture','model':'two','effort':'high'})
+        await self.bridge.dispatch('config.reasoning',{'connectionId':'fixture','model':'two','thinking':'disabled'})
+        await self.bridge.dispatch('permissions.set',{'mode':'full'})
+        await self.bridge.dispatch('collaboration.set',{'mode':'ultra'})
+        other=DesktopBridge(lambda _:None,self.root)
+        second=(await other.dispatch('sessions.create',{}))['sessionId']
+        value=await other.dispatch('initialize',{'sessionId':second})
+        self.assertEqual((value['config']['model'],value['config']['modelReasoning']['two']['effort'],value['permissionMode'],value['collaborationMode']),
+            ('two','high','full','ultra'))
+        self.assertEqual(value['config']['modelReasoning']['two']['thinking'],'disabled')
+        await other.dispatch('config.select',{'connectionId':'fixture','model':'one'})
+        await other.dispatch('permissions.set',{'mode':'ask'})
+        await other.dispatch('collaboration.set',{'mode':'solo'})
+        before=load_config()['new_session_preferences']
+        restored=DesktopBridge(lambda _:None,self.root)
+        old=await restored.dispatch('initialize',{'sessionId':first,'permissionMode':'full'})
+        self.assertEqual((old['config']['model'],old['config']['modelReasoning']['two']['effort'],old['collaborationMode']),('two','high','ultra'))
+        self.assertEqual(load_config()['new_session_preferences'],before,'Opening history is not an explicit new preference')
+        third=(await restored.dispatch('sessions.create',{}))['sessionId']
+        new=await restored.dispatch('initialize',{'sessionId':third})
+        self.assertEqual((new['config']['model'],new['config']['modelReasoning']['one']['effort'],new['permissionMode'],new['collaborationMode']),
+            ('one','low','ask','solo'))
+        self.assertNotIn('owned-test-key',json.dumps(before))
+        self.assertNotIn('base_url',json.dumps(before))
+        self.assertEqual(load_config()['model_connections'][0]['model'],'one')
+        self.assertIsNone(restored.engine)
+
+    async def test_explicit_remote_permission_overrides_new_chat_preferences(self):
+        from xuloom.core.config import update_config
+        update_config(lambda cfg:{**cfg,'new_session_preferences':{'permissionMode':'ask','collaborationMode':'auto'}})
+        sid=(await self.bridge.dispatch('sessions.create',{}))['sessionId']
+        value=await self.bridge.dispatch('initialize',{'sessionId':sid,'permissionMode':'full'})
+        self.assertEqual(value['permissionMode'],'full')
+
+    async def test_model_and_reasoning_are_persisted_per_session_not_global(self):
+        from xuloom.core.model_catalog import save_connection
+        from xuloom.core.session import SessionManager
+        from xuloom.core.storage import session_directory
+        cfg = save_connection({"model_connections":[]}, {"connectionId":"fixture", "provider":"openai", "model":"one", "models":["one","two"],
+            "baseUrl":"https://fixture.invalid/v1", "apiKey":"local-secret", "modelInputs":{"one":["text"],"two":["text"]},
+            "modelReasoning":{"one":{"adapter":"openai", "efforts":["low","high"], "effort":"low"}}})
+        other = DesktopBridge(lambda event: None, self.root)
+        with patch.dict(os.environ, {"XULOOM_DATA_DIR":str(self.root / 'data')}), patch("xuloom.desktop.bridge.load_config", return_value=cfg), patch("xuloom.desktop.bridge.update_config") as global_write:
+            first_id = (await self.bridge.dispatch("sessions.create", {}))["sessionId"]
+            second_id = (await other.dispatch("sessions.create", {}))["sessionId"]
+            await self.bridge.dispatch("initialize", {"sessionId":first_id})
+            await other.dispatch("initialize", {"sessionId":second_id})
+            await self.bridge.dispatch("config.select", {"connectionId":"fixture","model":"two"})
+            self.assertEqual(other.config()["model"], "one")
+            self.assertEqual(self.bridge.config()["model"], "two")
+            self.assertEqual(cfg["model_connections"][0]["model"], "one")
+            await other.dispatch("config.reasoning", {"connectionId":"fixture","model":"one","effort":"high"})
+            self.assertEqual(other.config()["modelReasoning"]["one"]["effort"], "high")
+            self.assertEqual(cfg["model_connections"][0]["model_reasoning"]["one"]["effort"], "low")
+            await other.dispatch("config.select", {"connectionId":"fixture","model":"two"})
+            await other.dispatch("config.select", {"connectionId":"fixture","model":"one"})
+            self.assertEqual(other.config()["modelReasoning"]["one"]["effort"], "high", "Switching back retains this chat's per-model preference")
+            self.assertEqual(global_write.call_count,4)
+            for call in global_write.call_args_list:
+                changed = call.args[0](cfg)
+                self.assertEqual(changed['model_connections'],cfg['model_connections'])
+                self.assertIn('new_session_preferences',changed)
+            self.assertIsNone(self.bridge.engine)
+            restored = DesktopBridge(lambda event: None, self.root)
+            value = await restored.dispatch("initialize", {"sessionId":first_id})
+            self.assertEqual(value["config"]["model"], "two")
+            value = await restored.dispatch("initialize", {"sessionId":second_id})
+            self.assertEqual(value["config"]["modelReasoning"]["one"]["effort"], "high")
+            checkpoint = (session_directory(self.root)/(first_id+'.json')).read_text(encoding='utf-8')
+            self.assertNotIn('local-secret', checkpoint)
+            with SessionManager(cwd=str(self.root)) as owner:
+                owner.acquire_writer(first_id)
+                with self.assertRaises(Exception):
+                    await self.bridge.dispatch("config.select", {"connectionId":"fixture","model":"one"})
+            self.assertEqual(self.bridge.config()["model"], "two")
+
     async def test_final_trace_save_failure_is_published_before_turn_finished(self):
         from types import SimpleNamespace
         async def submit(text, **kwargs):
@@ -200,6 +287,10 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        config_path = patch('xuloom.core.config.CONFIG_FILE', self.root/'test-config.json')
+        config_path.start();self.addCleanup(config_path.stop)
+        data_path = patch.dict(os.environ,{'XULOOM_DATA_DIR':str(self.root/'data')})
+        data_path.start();self.addCleanup(data_path.stop)
         self.events = []
         self.bridge = DesktopBridge(self.events.append, self.root)
 

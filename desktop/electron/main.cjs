@@ -95,6 +95,7 @@ const engineMethods = new Set([
   "agents.tree",
   "agents.pipeline",
   "config.save",
+  "config.get",
   "config.select",
   "config.reasoning",
   "config.delete",
@@ -337,7 +338,9 @@ async function createSession(project, resumeId) {
     const initial = await transport.request("initialize", {
       sessionId: resumeId,
       permissionMode: row.permissionMode,
+      inheritPreferences: true,
     });
+    if (initial.permissionMode !== row.permissionMode) await updateRow(row, { permissionMode: initial.permissionMode });
     const value = { id, ...initial, scope: row.scope, title: row.title, savedDraft: row.draft || "", savedDraftEditId: row.draftEditId || "", savedAttachments: attachments.list(row, row.draftAttachments || []) };
     // Background schedule/navigation paths can load a transport before the
     // renderer knows the chat. Announce it before any subsequent turn events.
@@ -501,7 +504,7 @@ async function invoke(method, params) {
     }
     return true;
   }
-  if (method === "config.get") return globalConfig().request("config.get");
+  if (method === "config.get" && !params.session) return globalConfig().request("config.get");
   // Browsing is read-only and does not require a conversation or model setup.
   // Installation, testing and OAuth still require their actual owning session.
   if (method === "mcp.market" && !params.session) return globalConfig().request(method, params);
@@ -515,9 +518,9 @@ async function invoke(method, params) {
   if (method === "config.models") return globalConfig().request(method, params);
   if (method === "config.delete") {
     if ([...sessions.values()].some(running)) throw new Error("请先停止运行中的任务，再删除 API 连接");
-    return globalConfig().request(method, params);
+    if (!params.session) return globalConfig().request(method, params);
   }
-  if (method === "config.reasoning" && [...sessions.values()].some(running))
+  if (method === "config.reasoning" && !params.session && [...sessions.values()].some(running))
     throw new Error("请先停止运行中的任务，再更改模型推理设置");
   if (["config.save", "config.select", "config.reasoning"].includes(method) && !params.session)
     return globalConfig().request(method, params);
@@ -551,6 +554,10 @@ async function invoke(method, params) {
   }
   if (method === "session.select") return selectRow(catalog.find(params.id));
   if (method === "session.open" || method === "session.new") {
+    if (method === "session.new") {
+      const previous = sessions.get(activeSessionId);
+      if (previous && !previous.remote) await previous.transport.request("preferences.seed", {});
+    }
     let project = params.path;
     const scope = method === "session.new" && !project ? "standalone" : method === "session.open" ? sessions.get(params.session)?.scope || "project" : "project";
     if (method === "session.new" && !project) {
@@ -561,7 +568,7 @@ async function invoke(method, params) {
     if (scope !== "standalone" && catalog.snapshot().projects.some((entry) => projectKey(entry.path) === projectKey(source.project) && entry.archived))
       throw new Error("请先在设置的已归档会话页面恢复项目");
     if (params.resumeId) return selectRow(catalog.find(sessionKey(source.project, params.resumeId)));
-    const empty = scope !== "standalone" && catalog.list(source.project).find((row) => row.scope === scope && !row.archived && !row.error && !row.draft && !row.draftAttachments.length &&
+    const empty = method !== "session.new" && scope !== "standalone" && catalog.list(source.project).find((row) => row.scope === scope && !row.archived && !row.error && !row.draft && !row.draftAttachments.length &&
       row.title === "新会话" && !running(sessions.get(row.id) || { busy: false, workers: new Map() }) &&
       JSON.parse(fs.readFileSync(catalog.file(row.project, row.sessionId), "utf8")).messages?.length === 0);
     return selectRow(empty || (scope === "standalone" ? catalog.createStandalone(source.project) : catalog.create(source.project)));

@@ -1,5 +1,6 @@
 """Official defaults, account isolation and the actual Responses SDK wire, offline."""
 import copy
+import asyncio
 import json
 from types import SimpleNamespace as NS
 import unittest
@@ -61,7 +62,92 @@ class OfficialResponsesWireTests(unittest.IsolatedAsyncioTestCase):
     asyncSetUp = recovery.RecoveryTests.asyncSetUp
     asyncTearDown = recovery.RecoveryTests.asyncTearDown
 
-    async def test_ultra_uses_normal_responses_without_a_forced_routing_request(self):
+    async def test_luna_high_reasoning_reports_actual_activity_without_exposing_opaque_content(self):
+        await self.engine.client.close()
+        self.engine.primary_model = self.engine.model = 'gpt-6-luna'
+        self.engine.api_base_url = BASE
+        self.engine.reasoning_profile = with_defaults({'provider':'openai', 'models':['gpt-6-luna'], 'base_url':BASE})['model_reasoning']['gpt-6-luna']
+        self.engine.reasoning_profile['effort'] = 'high'
+        self.engine.set_collaboration_mode('auto')
+        requests, events = [], []
+        def handler(request):
+            body = json.loads(request.content); requests.append(body)
+            opaque = {'type':'reasoning', 'id':'rs_owned', 'summary':[], 'encrypted_content':'OPAQUE_CANARY'}
+            answer = {'type':'message', 'id':'msg_owned', 'role':'assistant', 'status':'completed',
+                'content':[{'type':'output_text', 'text':'LOCAL_ANSWER', 'annotations':[]}]}
+            response = {'id':'resp_owned', 'object':'response', 'status':'completed', 'model':body['model'],
+                'output':[opaque, answer], 'usage':{'input_tokens':20, 'output_tokens':15, 'total_tokens':35,
+                    'output_tokens_details':{'reasoning_tokens':10}}}
+            stream = [{'type':'response.output_item.added', 'output_index':0, 'item':opaque},
+                {'type':'response.output_item.done', 'output_index':0, 'item':opaque},
+                {'type':'response.output_text.delta', 'delta':'LOCAL_ANSWER'},
+                {'type':'response.output_item.done', 'output_index':1, 'item':answer},
+                {'type':'response.completed', 'response':response}]
+            data = ''.join('event: '+event['type']+'\ndata: '+json.dumps(event)+'\n\n' for event in stream)
+            return httpx.Response(200, headers={'content-type':'text/event-stream'}, text=data)
+        async def emit(event):
+            events.append(event); self.recorder.accept(event)
+        self.engine.client = AsyncOpenAI(api_key='owned-fixture', base_url=BASE,
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler), trust_env=False))
+        result = await self.engine._run_loop('A fixture question', sys_print_callback=lambda _:None, event_callback=emit)
+        self.assertTrue(result.ok, result)
+        self.assertEqual(len(requests),1)
+        self.assertEqual(requests[0]['reasoning'], {'effort':'high'})
+        self.assertIn('file_read_tool',{t['name'] for t in requests[0]['tools']})
+        self.assertIn('# Collaboration: auto', requests[0]['instructions'])
+        self.assertNotIn('max_tokens', requests[0])
+        metrics = self.recorder.record['modelStreams'][0]
+        self.assertEqual(metrics['status'],'completed')
+        self.assertEqual(metrics['reasoningTokens'],10)
+        self.assertEqual(metrics['reasoningItems'],1)
+        self.assertEqual(metrics['toolChunks'],0)
+        self.assertTrue(any(e['type']=='stream_status' and e['metrics']['status']=='reasoning' for e in events))
+        self.assertNotIn('OPAQUE_CANARY', json.dumps(self.recorder.record))
+        self.assertNotIn('OPAQUE_CANARY', json.dumps(events))
+        self.assertEqual(self.engine.messages[-1]['_responses_output'][0]['encrypted_content'],'OPAQUE_CANARY')
+
+    async def test_native_stream_timeout_retains_partial_text_and_error_status(self):
+        from xuloom.context.responses import receive
+        from xuloom.protocols.stream_watch import StreamInterrupted
+        class Stream:
+            closed = False
+            async def __aiter__(self):
+                yield {'type':'response.output_text.delta','delta':'PARTIAL'}
+                await asyncio.sleep(10)
+            async def close(self): self.closed = True
+        stream = Stream()
+        async def emit(event): self.recorder.accept(event)
+        with patch.object(self.engine.client.responses,'create',AsyncMock(return_value=stream)), patch('xuloom.protocols.stream_watch.stream_limits',return_value=(.1,.02,.01)):
+            with self.assertRaises(StreamInterrupted) as failure:
+                await receive(self.engine,system_prompt='Fixture',api_messages=[],tools_schema=[],turn_count=1,
+                    model_name='fixture',max_tokens=100,event_callback=emit)
+        self.assertEqual(failure.exception.partial_text,'PARTIAL')
+        self.assertEqual(self.recorder.record['modelStreams'][0]['status'],'error')
+        self.assertTrue(stream.closed)
+        self.assertIsNone(self.engine.active_stream)
+
+    async def test_native_user_abort_has_cancelled_status_and_normal_abort_contract(self):
+        from xuloom.context.responses import receive
+        from xuloom.core.model_stream import AbortRequestedError
+        class Stream:
+            closed = False
+            async def __aiter__(self):
+                yield {'type':'response.output_item.added','item':{'type':'reasoning','summary':[]}}
+                await asyncio.sleep(10)
+            async def close(self): self.closed = True
+        stream = Stream()
+        async def emit(event):
+            self.recorder.accept(event)
+            if event['type']=='stream_status' and event['metrics']['status']=='reasoning': self.engine.abort_event.set()
+        with patch.object(self.engine.client.responses,'create',AsyncMock(return_value=stream)):
+            with self.assertRaises(AbortRequestedError):
+                await receive(self.engine,system_prompt='Fixture',api_messages=[],tools_schema=[],turn_count=1,
+                    model_name='fixture',max_tokens=100,event_callback=emit)
+        self.assertEqual(self.recorder.record['modelStreams'][0]['status'],'cancelled')
+        self.assertTrue(stream.closed)
+        self.assertIsNone(self.engine.active_stream)
+
+    async def test_ultra_simple_answer_uses_native_responses_tool_choice_in_one_request(self):
         await self.engine.client.close()
         self.engine.primary_model = self.engine.model = 'gpt-6.1-sol'
         self.engine.api_base_url = BASE
@@ -70,12 +156,12 @@ class OfficialResponsesWireTests(unittest.IsolatedAsyncioTestCase):
         def handler(request):
             self.assertEqual(str(request.url), BASE + '/responses')
             body = json.loads(request.content); requests.append(body)
-            self.assertNotIn('tool_choice', body)
+            self.assertEqual(body['tool_choice'],'required')
             names = {tool['name'] for tool in body['tools']}
-            self.assertTrue({'spawn_agent','web_search_tool','web_fetch_tool'} <= names)
+            self.assertEqual(names,{'ultra_answer','ultra_prepare'})
             self.assertNotIn('collaboration_decision',names)
-            item = {'type':'message','id':'final_message','role':'assistant','status':'completed',
-                'content':[{'type':'output_text','text':'NATIVE_ULTRA','annotations':[]}]}
+            item = {'type':'function_call','id':'simple_call','call_id':'simple_call','status':'completed',
+                'name':'ultra_answer','arguments':json.dumps({'answer':'NATIVE_ULTRA'})}
             response = {'id': 'resp_decision', 'object': 'response', 'status': 'completed', 'model': body['model'],
                 'output': [item], 'usage': {'input_tokens': 10, 'output_tokens': 5, 'total_tokens': 15}}
             data = 'event: response.completed\ndata: ' + json.dumps({'type': 'response.completed', 'response': response}) + '\n\n'

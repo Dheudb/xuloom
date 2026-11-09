@@ -75,6 +75,41 @@ def public_config(cfg):
             "credentialStorage": storage_status(cfg)}
 
 
+def session_config(cfg, selection, *, required=False):
+    """Project a conversation's choice over the shared catalog, never its secrets."""
+    if not selection or not selection.get("model"):
+        return cfg
+    items = connections(cfg)
+    item = next((row for row in items if row["id"] == selection.get("connectionId")), None)
+    model = selection.get("model", "")
+    if not item or model not in item.get("models", []):
+        if required:
+            raise ValueError("此会话的 API 或模型已移除，请为当前会话重新选择模型")
+        item = {"id": selection.get("connectionId", ""), "provider": "openai", "model": model,
+                "models": [model], "api_key": "", "base_url": ""}
+        items = [row for row in items if row["id"] != item["id"]] + [item]
+    else:
+        item = {**item, "model": model}
+        profile = item.get("model_reasoning", {}).get(model)
+        choices = selection.get("reasoning", {}).get(item["id"], {}).get(model, selection)
+        if profile and any(key in choices for key in ("thinking", "effort")):
+            from xuloom.core.reasoning import normalize_profile
+            item["model_reasoning"] = {**item["model_reasoning"], model: normalize_profile(
+                {**profile, **{key: choices[key] for key in ("thinking", "effort") if key in choices}}, item["provider"])}
+    return project_active(dict(cfg), item, [item if row["id"] == item["id"] else row for row in items])
+
+
+def model_selection(cfg, previous=None):
+    import copy
+    active = active_connection(cfg)
+    profile = active.get("model_reasoning", {}).get(active.get("model"), {})
+    choices = {key: profile[key] for key in ("thinking", "effort") if key in profile}
+    reasoning = copy.deepcopy((previous or {}).get("reasoning", {}))
+    reasoning.setdefault(active["id"], {})[active.get("model", "")] = choices
+    return {"connectionId": active["id"], "model": active.get("model", ""),
+            "reasoning": reasoning, **choices}
+
+
 def apply_connection_env(item):
     from xuloom.security.credentials import api_key as checked_key
     provider = item["provider"]

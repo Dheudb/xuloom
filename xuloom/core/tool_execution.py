@@ -174,6 +174,9 @@ async def execute_tool(self, tool_block, sys_print_callback=print, *, turn: int 
     else:
         effective_tools = {}
         try:
+            from xuloom.agents.ultra_execution import required, NAMES
+            if user_turn_id and required(self) and tool_name not in NAMES:
+                raise ValueError('Complete the Ultra assessment with ultra_answer or ultra_prepare before executing work. This call was not executed.')
             effective_tools = self._get_effective_tools()
             if tool_name not in effective_tools:
                 raise KeyError(f"Tool '{tool_name}' is not available in current mode.")
@@ -265,7 +268,11 @@ async def execute_tool(self, tool_block, sys_print_callback=print, *, turn: int 
                             self.in_progress_tools.pop(row.get("tool_use_id"), None)
                 handler_invoked = True
                 from xuloom.security.execution import FILE_TOOLS
-                if tool_name == "tool_sequence":
+                if tool_name in {'ultra_answer','ultra_prepare'}:
+                    from xuloom.agents.ultra_execution import execute
+                    raw_result = await execute(self, tool_name, tool_inputs, turn=turn,
+                        event_callback=event_callback, sys_print_callback=sys_print_callback)
+                elif tool_name == "tool_sequence":
                     from xuloom.tools.tool_sequence import execute_sequence
                     raw_result = await execute_sequence(self, tool_id, **tool_inputs, turn=turn,
                         event_callback=event_callback, sys_print_callback=sys_print_callback)

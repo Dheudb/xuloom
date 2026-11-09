@@ -106,6 +106,7 @@ class TurnRecorder:
             record["files"] = [item for item in record["files"] if os.path.normcase(item["path"]) != identity] + [change]
             return True
         if kind == "text_delta":
+            if event.get("channel") == "commentary": record["outputChannel"] = "commentary"
             if event.get("text"): self.progress("receiving")
             record["pendingText"] += event.get("text", "")
             return False  # A trace containing this delta plus the delta event would duplicate text.
@@ -114,6 +115,7 @@ class TurnRecorder:
                 if kind == "message_start": self.first_resumed_message = False
             else:
                 self.flush()
+            record["outputChannel"] = event.get("channel", "answer")
         elif kind == "message_stop":
             if event.get("stop_reason") == "tool_use":
                 self.flush()
@@ -189,11 +191,12 @@ class TurnRecorder:
                     tool["status"] = "running"
         elif kind == "final":
             self.progress("completed")
+            record["outputChannel"] = "answer"
             record["answer"] = self.answer_prefix + event["text"] if event.get("text") else record["pendingText"]
             record["pendingText"] = ""
         elif kind in {"turn_finished", "turn_error", "turn_cancelled"}:
             if kind != "turn_finished":
-                if kind in {"turn_cancelled", "turn_error"} and record["pendingText"].strip():
+                if kind in {"turn_cancelled", "turn_error"} and record.get("outputChannel") != "commentary" and record["pendingText"].strip():
                     record["answer"] = record["pendingText"]
                     record["pendingText"] = ""
                 self.flush()

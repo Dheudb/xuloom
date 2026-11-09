@@ -310,6 +310,8 @@ class QueryEngine(ModelStream):
         from xuloom.tools.tool_sequence import ToolSequenceTool
         all_tools["media_tool"] = MediaTool()
         all_tools["tool_sequence"] = ToolSequenceTool()
+        from xuloom.agents.ultra_execution import UltraAnswerTool, UltraPrepareTool
+        all_tools.update(ultra_answer=UltraAnswerTool(), ultra_prepare=UltraPrepareTool())
         self.builtin_tool_names = frozenset(all_tools)
         latent_tool_names = {
             "tool_sequence",
@@ -1163,7 +1165,8 @@ class QueryEngine(ModelStream):
 
     def _collaboration_instructions(self) -> str:
         from xuloom.agents.collaboration import instructions
-        return instructions(self.tool_context["collaboration"])
+        from xuloom.agents.ultra_execution import required
+        return instructions(self.tool_context["collaboration"],assessment=required(self))
 
     def _build_tool_prompt_summary(self) -> str:
         from xuloom.core.continuation import PROTOCOL
@@ -1227,7 +1230,7 @@ class QueryEngine(ModelStream):
         if self.coordinator_mode:
             return {
                 name: tool for name, tool in tools.items()
-                if name in self.COORDINATOR_ALLOWED_TOOLS
+                if name in self.COORDINATOR_ALLOWED_TOOLS or name in {'ultra_answer','ultra_prepare'}
             }
         if self.plan_manager.get_mode() == "plan":
             return {
@@ -2502,6 +2505,7 @@ class QueryEngine(ModelStream):
             self.tool_context["file_changes"] = metadata.get("file_changes", [])
             self.tool_context["workspace_moves"] = metadata.get("workspace_moves", [])
             self.turn_traces = metadata.get("turn_traces", [])
+            self.model_selection = metadata.get("model_selection")
             model_runtime = metadata.get("model_runtime", {}) or {}
             # Checkpoints describe past execution; they cannot redirect this
             # instance's current credentials to another endpoint/provider.
@@ -2646,6 +2650,7 @@ class QueryEngine(ModelStream):
             "pipelines": copy.deepcopy(self.tool_context.get("pipelines", {})),
             "delegation": self.tool_context.get("delegation", {}),
             "turn_traces": self.turn_traces,
+            "model_selection": getattr(self, "model_selection", None),
             "team": self.team_manager.export_state(),
             "ultraplan": self.ultraplan_manager.export_state(),
             "coordinator_mode": self.coordinator_mode,
@@ -3235,6 +3240,20 @@ class QueryEngine(ModelStream):
     async def _stream_model_response(
         self, **kwargs,
     ):
+        # A draft generated before outstanding evidence is collected is process
+        # commentary, even when the provider ends that model message normally.
+        workers = self.tool_context["subagent_tasks"]
+        from xuloom.agents.ultra_execution import required as ultra_required
+        provisional = ultra_required(self) or any(not task.done() for task in workers.tasks.values()) or bool(set(workers.results) - workers.delivered)
+        callback = kwargs.get("event_callback")
+        if provisional and callable(callback):
+            async def commentary(event):
+                if event.get("type") in {"message_start", "text_delta"}:
+                    event = {**event, "channel": "commentary"}
+                result = callback(event)
+                if inspect.isawaitable(result):
+                    await result
+            kwargs["event_callback"] = commentary
         if self.tool_context.get("external_backend"):
             from xuloom.agents.external.runtime import sample
             return await sample(self, **kwargs)
@@ -3586,6 +3605,10 @@ class QueryEngine(ModelStream):
                 })
                 
                 content_as_dicts = [self._block_to_dict(b) for b in response.content]
+                from xuloom.agents.ultra_execution import required as ultra_required
+                if ultra_required(self) and response.stop_reason != 'tool_use':
+                    raise ToolProtocolError('Ultra requires ultra_answer for a simple task or ultra_prepare for substantive work before a final response.',
+                        code='ultra_assessment_missing', raw_text='\n'.join(b.get('text','') for b in content_as_dicts if b.get('type')=='text'))
                 content_as_dicts = [b for b in content_as_dicts if b is not None]
                 assistant_message = create_assistant_message(
                     content_as_dicts,
@@ -3648,6 +3671,19 @@ class QueryEngine(ModelStream):
                         protocol_retries += 1
                     else:
                         input_failures = 0
+
+                    assessment = self.tool_context.get('collaboration_run', {}).get('assessment', {})
+                    if assessment.get('kind') == 'direct' and any(b.get('name')=='ultra_answer' for b in content_as_dicts) and not any(item.get('is_error') for item in tool_results):
+                        # The simple answer was produced in the assessment request;
+                        # reuse the normal finalization/StopHook path without another model call.
+                        content_as_dicts = [{'type':'text','text':assessment['answer']}]
+                        response.stop_reason = 'end_turn'
+                        assistant_message = create_assistant_message(content_as_dicts, model=loop_state['active_model'], stop_reason='end_turn')
+                        self.messages.append(assistant_message)
+                        self._sync_message_context()
+                        await self._emit_stream_event(event_callback, {'type':'message_start','turn':turn_count})
+                        await self._emit_stream_event(event_callback, {'type':'text_delta','turn':turn_count,'text':assessment['answer']})
+                        await self._emit_stream_event(event_callback, {'type':'message_stop','turn':turn_count,'stop_reason':'end_turn'})
                     
                     # Diagnostics exist only after a language-server tool was explicitly used.
                     if hasattr(self, 'lsp_manager'):
@@ -3671,7 +3707,7 @@ class QueryEngine(ModelStream):
                         stop_reason="tool_use",
                     )
                     
-                elif response.stop_reason == "max_tokens":
+                if response.stop_reason == "max_tokens":
                     if streaming_tool_entries:
                         await self._cancel_streaming_tool_tasks(streaming_tool_entries)
                     loop_state["max_tokens_recovery_attempts"] += 1
@@ -3714,7 +3750,7 @@ class QueryEngine(ModelStream):
                         f"[dim yellow]↳ Continuing after max_tokens stop ({transition_reason}, budget={loop_state['max_tokens']}).[/dim yellow]"
                     )
                     continue
-                else:
+                elif response.stop_reason != "tool_use":
                     if streaming_tool_entries:
                         await self._cancel_streaming_tool_tasks(streaming_tool_entries)
                     # Normal completion without Tool calls => Return final answer

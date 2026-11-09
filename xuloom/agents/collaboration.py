@@ -56,16 +56,19 @@ def require_delegation(context):
         raise ValueError("Solo 独立模式禁止委派。请用户切换到 Auto 或 Ultra；完全访问不会解除此限制。")
 
 
-def instructions(profile):
+def instructions(profile, *, assessment=False):
     mode = profile["mode"]
     principle = {
         "solo": "Complete work yourself. Do not spawn or resume subagents. If the user explicitly requests parallel workers, explain Solo is selected and ask them to switch the collaboration menu; do not switch it yourself.",
         "auto": "Delegate clearly independent work when benefits exceed coordination cost; answer simple tasks directly.",
-        "ultra": "Proactive Multi-agent delegation is active. Use subagents when parallel work would materially improve speed or quality. "
-            "Delegate concrete independent tasks, keep the critical path and synthesis yourself, and work alongside agents. "
-            "Use available tools to inspect evidence needed by the task; distinguish findings from unverified suggestions. "
-            "Simple tasks can be answered directly; do not invent workers to meet a quota.",
+        "ultra": "Proactive Multi-agent delegation is active. "
+            "Familiarity with a subject is not external evidence. Request search when evidence/current facts are needed; "
+            "give workers distinct independent tasks and continue the main work yourself. "
+            "Use sequential only for dependent work; never invent workers to meet a quota. Collect results before synthesis.",
     }[mode]
+    if mode == 'ultra' and assessment:
+        principle += (' First use ultra_answer only for genuinely simple, self-contained tasks; '
+            'use ultra_prepare for research, substantial comparisons and multiple substantive ideas or approaches.')
     return (f"# Collaboration: {mode}\n{principle}\n"
             "Give self-contained assignments and avoid duplicate work. "
             "Runtime queues workers FIFO; no manual concurrency batching. Auto/Ultra change initiative, not quantities or permissions.")

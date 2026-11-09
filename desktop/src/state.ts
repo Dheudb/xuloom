@@ -83,7 +83,7 @@ export function applyEvent(
       if (index < 0) return session;
       return { ...session, busy: true, error: "", streamIndex: index,
         messages: session.messages.map((message, at) => at === index
-          ? { ...message, trace: event.trace, text: event.trace.pendingText || event.trace.answer || "" } : message) };
+          ? { ...message, trace: event.trace, text: event.trace.outputChannel === "commentary" ? "" : event.trace.pendingText || event.trace.answer || "" } : message) };
     }
     case "command_status":
       return { ...session, commands: { ...session.commands, [event.command.id]: event.command } };
@@ -101,14 +101,16 @@ export function applyEvent(
       };
     case "turn_trace":
       return session.streamIndex === null ? session : { ...session, messages: session.messages.map((message, index) =>
-        index === session.streamIndex ? { ...message, trace: event.trace, text: event.trace.answer || event.trace.pendingText || "" }
+        index === session.streamIndex ? { ...message, trace: event.trace, text: event.trace.outputChannel === "commentary" ? "" : event.trace.answer || event.trace.pendingText || "" }
           : index === session.streamIndex! - 1 && event.trace.userMessageId ? { ...message, id: event.trace.userMessageId } : message) };
     case "text_delta":
     case "final": {
       if (session.streamIndex === null) return session;
       const messages = session.messages.map((message, index) =>
         index === session.streamIndex
-          ? {
+          ? event.type === "text_delta" && event.channel === "commentary" && message.trace ? {
+              ...message, text: "", trace: { ...message.trace, outputChannel: "commentary" as const, pendingText: (message.trace.pendingText || "") + (event.text || "") },
+            } : {
               ...message,
               text:
                 event.type === "final"

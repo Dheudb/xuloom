@@ -56,6 +56,8 @@ class ModelStream:
                 }
                 if tools_schema:
                     create_kwargs["tools"] = tools_schema
+                from xuloom.agents.ultra_execution import required
+                if required(self): create_kwargs.update(tool_choice='required', parallel_tool_calls=False)
                 profile = self.reasoning_profile if model_name == self.primary_model else configured_profile(self.model_provider, model_name, self.api_base_url)
                 if profile is not None:
                     create_kwargs.update(request_options(profile, self.model_provider,
@@ -296,6 +298,10 @@ class ModelStream:
                 "max_tokens": max_tokens,
             }
             profile = self.reasoning_profile if model_name == self.primary_model else configured_profile(self.model_provider, model_name, self.api_base_url)
+            from xuloom.agents.ultra_execution import required
+            # Some Claude models reject forced tool use; others skip thinking
+            # under it. Keep thinking intact and enforce assessment in the loop.
+            if required(self): stream_kwargs['tool_choice'] = {'type':'auto','disable_parallel_tool_use':True}
             if profile is not None:
                 stream_kwargs.update(request_options(profile, self.model_provider,
                     effort_override=self.reasoning_effort if model_name == self.primary_model else None, max_tokens=max_tokens))

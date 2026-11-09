@@ -57,6 +57,16 @@ xuloom search-config --backend builtin
 
 原生搜索仍受原有工作区系统隔离限制。显式连接角色的连接／模型和搜索契约固定在原有执行回执中，Key 可轮换；继承主会话的子代理同时继承其搜索设置。已冻结的旧连接回执没有搜索契约时，保持内置搜索语义。
 
+## 内置搜索的网络与诊断
+
+DDGS 使用当前执行连接的网络模式：直连明确绕过环境和系统代理；系统代理按 HTTP/HTTPS、ALL_PROXY 和 NO_PROXY 配置路由，也读取系统提供的代理配置。DDGS_PROXY 不再覆盖连接的选择。每个搜索实例配置自己的底层客户端，不修改进程环境变量，模型 API Key 不发给搜索网站或代理。
+
+失败结果保留 `reason`、`detail`、`code`、`http_status`、`retryable` 和实际网络模式；异常详情中的代理密码、Key、URL 查询参数及片段在返回前脱敏。底层 HTTP 错误保留状态和 Retry-After，不保留响应正文或 Cookie。
+
+同一查询最多尝试两次，总等待上限仍为 35 秒。超时、DNS、连接中断、限流、服务端故障及未分类的 DDGS 服务异常可有限重试；权限、代理认证、证书、参数错误与空结果不重复请求。较长的 Retry-After 直接返回冷却时间，不提前重试。成功后的元数据仍保留此前的失败和尝试次数；不会自动切换到其他搜索后端。
+
+停止或总超时后不再启动新的重试；同步 DDGS 请求本身可能仍需等待库的网络超时结束。这些处理不增加模型 Prompt 或模型请求。
+
 协议依据：[OpenAI](https://developers.openai.com/api/docs/guides/tools-web-search)、[Anthropic](https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool)、[DeepSeek](https://api-docs.deepseek.com/guides/search/)、[通义千问](https://help.aliyun.com/zh/model-studio/web-search)。本地协议替身通过不代表远端账号已开通、第三方网关支持或真实检索质量已验收。
 
 ## 本地验证范围

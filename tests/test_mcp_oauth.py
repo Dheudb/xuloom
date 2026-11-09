@@ -505,7 +505,7 @@ class CallbackTests(unittest.IsolatedAsyncioTestCase):
             env={**os.environ,"HOME":str(root/"home"),"USERPROFILE":str(root/"home"),"XULOOM_CONFIG_DIR":str(root/"config"),"XULOOM_DATA_DIR":str(root/"data"),"XULOOM_SKILLS_PATHS":""}
             for options in [["--client-id","","--issuer","","--redirect-uri",""],["--client-secret-env",""]]:
                 result=subprocess.run([sys.executable,"-m","xuloom","mcp","add","owned","--cwd",str(root/"project"),"--url","https://resource.example/mcp","--oauth",*options,"--json"],
-                    env=env,cwd=str(Path(__file__).resolve().parents[1]),capture_output=True,text=True,timeout=20)
+                    env=env,cwd=str(Path(__file__).resolve().parents[1]),capture_output=True,text=True,encoding='utf-8',timeout=20)
                 self.assertNotEqual(result.returncode,0)
                 self.assertFalse(json.loads(result.stdout)["result"]["ok"])
                 self.assertFalse((root/"project"/".xuloom"/"mcp_servers.json").exists())

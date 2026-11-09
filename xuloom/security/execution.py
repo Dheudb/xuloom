@@ -11,7 +11,7 @@ import tempfile
 import uuid
 
 FILE_TOOLS = frozenset({"file_read_tool", "file_write_tool", "file_edit_tool", "glob_tool", "grep_tool", "notebook_edit_tool"})
-CONTROL_TOOLS = frozenset({"tool_sequence", "agent_tool", "spawn_agent", "ask_user_question_tool", "todo_write_tool", "plan_tool", "goal_report_tool",
+CONTROL_TOOLS = frozenset({"ultra_answer", "ultra_prepare", "tool_sequence", "agent_tool", "spawn_agent", "ask_user_question_tool", "todo_write_tool", "plan_tool", "goal_report_tool",
     "goal_tool", "schedule_tool", "brief_tool", "tool_search_tool", "skill_tool", "send_message_tool",
     "team_create_tool", "team_delete_tool", "enter_plan_mode", "exit_plan_mode"})
 PROCESS_TOOLS = frozenset({"command_tool", "repl_tool"})

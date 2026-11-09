@@ -4,6 +4,24 @@ from xuloom.desktop.turns import TurnRecorder, conversation_history
 
 
 class TurnTests(unittest.TestCase):
+    def test_waiting_worker_draft_streams_as_process_and_survives_restore(self):
+        r = TurnRecorder()
+        r.record["userMessageId"] = "question"
+        r.accept({"type": "message_start", "channel": "commentary"})
+        r.accept({"type": "text_delta", "channel": "commentary", "text": "Preliminary findings; awaiting evidence."})
+        self.assertEqual(r.record["outputChannel"], "commentary")
+        self.assertEqual(r.record["answer"], "")
+        r.accept({"type": "subagents_waiting", "count": 2, "message": "Waiting for workers"})
+        self.assertEqual(r.record["pendingText"], "")
+        self.assertEqual(r.record["steps"][0]["text"], "Preliminary findings; awaiting evidence.")
+        r.accept({"type": "message_start"})
+        r.accept({"type": "text_delta", "text": "Evidence-backed synthesis"})
+        r.accept({"type": "final", "text": "Evidence-backed synthesis"})
+        r.accept({"type": "turn_finished"})
+        restored = conversation_history([{"role": "user", "_uuid": "question", "content": "Task"}], [r.record])
+        self.assertEqual(restored[-1]["text"], "Evidence-backed synthesis")
+        self.assertEqual(restored[-1]["trace"]["steps"][0]["text"], "Preliminary findings; awaiting evidence.")
+
     def test_ultra_decision_is_one_persisted_notice_without_raw_answer_text(self):
         r = TurnRecorder()
         r.accept({"type":"collaboration_decision", "id":"q", "status":"running"})

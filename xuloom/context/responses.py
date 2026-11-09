@@ -8,7 +8,7 @@ from xuloom.context.compaction import ContextLimitError, route
 from xuloom.core.messages import create_user_message, get_msg_uuid
 from xuloom.core.output_limits import model_reservation
 from xuloom.protocols.dsml import parse_tool_arguments
-from xuloom.protocols.stream_watch import StreamWatch, StreamInterrupted
+from xuloom.protocols.stream_watch import StreamWatch, StreamAborted, StreamInterrupted
 
 
 def plain(value):
@@ -130,6 +130,8 @@ async def receive(engine, *, system_prompt, api_messages, tools_schema, turn_cou
     tools = [{"type": "function", "strict": False, **tool.get("function", tool)} for tool in tools_schema]
     options = dict(model=model_name, instructions=system_prompt, input=inputs(engine, engine._get_messages_after_compact_boundary()), tools=tools,
         stream=True, store=False, max_output_tokens=max_tokens, include=["reasoning.encrypted_content"])
+    from xuloom.agents.ultra_execution import required
+    if required(engine): options.update(tool_choice='required', parallel_tool_calls=False)
     if engine.reasoning_profile:
         from xuloom.core.reasoning import request_options
         if engine.reasoning_profile["adapter"] != "openai": raise ContextLimitError("Responses requires declared OpenAI reasoning controls")
@@ -137,13 +139,16 @@ async def receive(engine, *, system_prompt, api_messages, tools_schema, turn_cou
         if effort: options["reasoning"] = {"effort": effort}
     elif engine.reasoning_effort: options["reasoning"] = {"effort": engine.reasoning_effort}
     async def emit(event): await engine._emit_stream_event(event_callback, event)
-    async def stream_status(value): await emit({"type": "model_stream", "turn": turn_count, **value})
+    async def stream_status(value): await emit({"type": "stream_status", "turn": turn_count, "metrics": value})
     watch = StreamWatch(engine.abort_event, stream_status)
     visible = []
     response, stream = None, None
     try:
+        await watch.status("waiting", force=True)
         stream = await watch.wait(engine.client.responses.create(**options))
         engine.active_stream = stream
+        watch.metrics["connectedMs"] = watch.ms()
+        await watch.status("connected", force=True)
         await emit({"type": "message_start", "turn": turn_count})
         iterator = stream.__aiter__()
         while True:
@@ -151,10 +156,16 @@ async def receive(engine, *, system_prompt, api_messages, tools_schema, turn_cou
             except StopAsyncIteration: break
             item = dump(event)
             kind = item.get("type")
+            output_item = item.get("item") or {}
+            # An opaque reasoning item proves activity, not access to its contents.
+            reasoning_started = kind == "response.output_item.added" and output_item.get("type") == "reasoning"
+            tool_done = kind == "response.output_item.done" and output_item.get("type") == "function_call"
+            finished = (item.get("response") or {}) if kind == "response.completed" else {}
             delta = SimpleNamespace(content=item.get("delta") if kind == "response.output_text.delta" else None,
-                reasoning_content=item.get("delta") if kind == "response.reasoning_summary_text.delta" else None,
-                tool_calls=[item] if kind in {"response.function_call_arguments.delta", "response.output_item.done"} else [])
-            await watch.chunk(SimpleNamespace(choices=[SimpleNamespace(delta=delta, finish_reason="stop" if kind == "response.completed" else None)]))
+                reasoning_content=item.get("delta") if kind == "response.reasoning_summary_text.delta" else reasoning_started,
+                tool_calls=[item] if kind == "response.function_call_arguments.delta" or tool_done else [])
+            finish_reason = ("tool_calls" if any(row.get("type") == "function_call" for row in finished.get("output", [])) else "stop") if finished else None
+            await watch.chunk(SimpleNamespace(choices=[SimpleNamespace(delta=delta, finish_reason=finish_reason)]))
             if kind == "response.output_text.delta":
                 text = item.get("delta", "")
                 visible.append(text)
@@ -181,12 +192,30 @@ async def receive(engine, *, system_prompt, api_messages, tools_schema, turn_cou
             elif item["type"] != "reasoning": raise ContextLimitError("Unexpected Responses output type")
         if not content: raise ContextLimitError("Responses returned no visible answer or callable tool; history retained")
         usage = response.get("usage") or {}
+        watch.metrics["reasoningItems"] = sum(item["type"] == "reasoning" for item in output)
+        reasoning_tokens = (usage.get("output_tokens_details") or {}).get("reasoning_tokens")
+        if type(reasoning_tokens) is int and reasoning_tokens >= 0:
+            watch.metrics["reasoningTokens"] = reasoning_tokens
         stop = "tool_use" if any(item["type"] == "function_call" for item in output) else "end_turn"
+        await watch.status("completed", force=True)
         await emit({"type": "message_stop", "turn": turn_count, "stop_reason": stop})
         return SimpleNamespace(content=content, stop_reason=stop, responses_output=output,
             usage=engine._make_usage_block(input_tokens=usage.get("input_tokens", 0), output_tokens=usage.get("output_tokens", 0))), [], False
+    except StreamAborted:
+        await watch.status("cancelled", force=True)
+        from xuloom.core.model_stream import AbortRequestedError
+        raise AbortRequestedError("Abort requested while receiving model stream.") from None
+    except asyncio.CancelledError:
+        await watch.status("cancelled", force=True)
+        raise
     except StreamInterrupted as error:
         error.partial_text = "".join(visible)
+        watch.metrics["error"] = str(error)
+        await watch.status("error", force=True)
+        raise
+    except Exception as error:
+        watch.metrics["error"] = type(error).__name__
+        await watch.status("error", force=True)
         raise
     finally:
         engine.active_stream = None

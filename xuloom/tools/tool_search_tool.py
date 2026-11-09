@@ -35,6 +35,8 @@ class ToolSearchTool(BaseAgenticTool):
         activate = activate or []
         query_lower = (query or "").strip().lower()
         active_tools = self.context.get("engine_available_tools", {}) or {}
+        from xuloom.agents.ultra_execution import NAMES
+        active_tools = {name:tool for name,tool in active_tools.items() if name not in NAMES}
         latent_tools = self.context.get("latent_tools_registry", {}) or {}
         activate_tools = self.context.get("activate_tools")
         current_names = self.context.get("model_tool_names")

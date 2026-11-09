@@ -67,8 +67,9 @@ export type ModelConnection = Omit<ModelConfig, "connections"> & { connectionId:
 export type CompactionNotice = { id: string; status: "running" | "completed" | "failed" | "cancelled" | "interrupted"; before?: number; after?: number; elapsedMs?: number };
 export type RetryNotice = { status: string; reason?: string; title?: string; message: string; attempt?: number; limit?: number; detail?: string; diagnostic?: string };
 export type TurnTrace = {
+  outputChannel?: "answer" | "commentary";
   runtimeStatus?: string;
-  modelStreams?: { turn: number; status: string; elapsedMs?: number; connectedMs?: number; firstChunkMs?: number; firstTextMs?: number; lastProgressMs?: number; textChars?: number; reasoningChunks?: number; finishReason?: string; error?: string }[];
+  modelStreams?: { turn: number; status: string; elapsedMs?: number; connectedMs?: number; firstChunkMs?: number; firstTextMs?: number; lastProgressMs?: number; textChars?: number; reasoningChunks?: number; reasoningItems?: number; reasoningTokens?: number; finishReason?: string; error?: string }[];
   userMessageId?: string;
   files?: FileChange[];
   id: string;
