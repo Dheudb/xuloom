@@ -10,7 +10,7 @@ setup(
     url="https://github.com/Dheudb/xuloom",
     license="MIT",
     packages=find_packages(include=["xuloom", "xuloom.*"]),
-    package_data={"xuloom.skills": ["builtin/*/SKILL.md", "builtin/*/agents/*.md"]},
+    package_data={"xuloom": ["py.typed"], "xuloom.skills": ["builtin/*/SKILL.md", "builtin/*/agents/*.md"]},
     python_requires=">=3.9",
     install_requires=[
         "anthropic>=0.40.0",

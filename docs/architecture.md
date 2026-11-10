@@ -4,6 +4,9 @@
 xuloom/
   main.py             CLI 与终端交互入口
   core/               引擎循环、配置、消息、会话与生命周期钩子
+    engine.py         QueryEngine：构造、连接切换、生命周期与公开入口
+    engine_config.py  EngineConfig：全部构造参数与环境变量默认值
+    engine_parts/     组成 QueryEngine 的职责模块（见下文）
   desktop/            桌面 JSON-lines RPC、审批和任务生命周期
   context/            提示词、附件、文件状态与工具结果
   memory/             上下文压缩、Token 估计和会话记忆
@@ -23,6 +26,24 @@ tests/                Python 单元/集成测试和本地协议测试服务
 examples/             可导入的 Skill 与代理示例
 docs/                 使用与开发文档
 ```
+
+## QueryEngine 的组成
+
+`QueryEngine` 由 `xuloom/core/engine_parts/` 中的职责模块组合而成，每个模块只负责一类状态：
+
+| 模块 | 职责 |
+|---|---|
+| `loop.py` | 回合循环。`_run_loop` 只做编排，阶段方法分别是 `_begin_run`（门禁、Skill、用户消息、恢复）、`_drain_inbound_messages`、`_build_turn_request`、`_run_tool_phase`、`_recover_max_tokens`、`_finish_turn`、`_handle_turn_exception`（含 `_repair_tool_protocol`、`_recover_context_overflow`） |
+| `tools.py` | 工具注册、能力事件、并发批次、Hook 调用、子代理收尾 |
+| `messages.py` | 与供应商无关的消息整形和历史清理 |
+| `context.py` | 压缩边界、提示缓存、附件、记忆文件 |
+| `persistence.py` | 会话加载、元数据、保存、父子状态传递 |
+| `reasoning.py` | 思考/推理配置 |
+| `modes.py` | 协作、Plan、Coordinator 模式和 Ultraplan |
+| `auto_commit.py` | Git 自动提交提案与单文件撤销 |
+| `status.py` | CLI/桌面使用的运行状态摘要 |
+
+内置工具集合在 `xuloom/tools/builtin.py`（`default_tools()` 与 `LATENT_TOOL_NAMES`）。阶段方法以 `_` 开头，属于内部实现，可以随版本调整。
 
 ## 一次桌面任务
 

@@ -13,12 +13,23 @@ class BaseAgenticTool(ABC):
     name: str = ""
     description: str = ""
     input_schema: Type[BaseModel] = BaseModel
-    context: Dict[str, Any] = {}
     is_read_only: bool = False
     risk_level: str = "high"
     # Trusted declarations, never guessed from model or MCP argument names.
     # True means an omitted directory defaults to the engine workspace.
     workspace_paths: Dict[str, bool] = {}
+
+    @property
+    def context(self) -> Dict[str, Any]:
+        """Engine-provided runtime context; each tool instance owns its own binding."""
+        value = self.__dict__.get("_context")
+        if value is None:
+            value = self.__dict__["_context"] = {}
+        return value
+
+    @context.setter
+    def context(self, value: Dict[str, Any]):
+        self.__dict__["_context"] = value
 
     def prepare_input(self, values):
         values = dict(values)
@@ -126,5 +137,5 @@ class BaseAgenticTool(ABC):
             if self.name == "command_tool":
                 # Control receipts must stay JSON. Their cwd already records workspace routing.
                 return raw_res
-            return res_str + "\\n" + raw_res
+            return res_str + "\n" + raw_res
         return raw_res

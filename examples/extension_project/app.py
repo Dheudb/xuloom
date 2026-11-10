@@ -4,8 +4,7 @@ import asyncio
 import json
 import os
 from pydantic import BaseModel
-from xuloom.core.engine import QueryEngine
-from xuloom.tools.base import BaseAgenticTool
+from xuloom import BaseAgenticTool, EngineConfig, QueryEngine
 
 
 class EvidenceInput(BaseModel):
@@ -24,9 +23,10 @@ class EvidenceTool(BaseAgenticTool):
 
 
 async def execute(args):
-    async with QueryEngine(model=args.model, model_provider='openai', api_base_url=args.base_url,
-        api_key=os.environ.get('EXAMPLE_API_KEY', ''), cwd=os.getcwd(), network_mode='direct') as engine:
-        engine.register_tool(EvidenceTool())
+    config = EngineConfig(model=args.model, model_provider='openai', api_base_url=args.base_url,
+        api_key=os.environ.get('EXAMPLE_API_KEY', ''), cwd=os.getcwd(), network_mode='direct',
+        extra_tools=[EvidenceTool()])
+    async with QueryEngine(config) as engine:
         engine.set_event_handler(lambda event: print(json.dumps(event, ensure_ascii=False, default=str), flush=True))
         if args.session and not engine.load_session(args.session):
             raise ValueError('Cannot load the requested session')
