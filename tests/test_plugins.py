@@ -69,7 +69,8 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
     def config(self, **changes):
         return EngineConfig(model="llama", model_provider="ollama", api_base_url=self.base, api_key="unused",
                             cwd=str(self.root / "work"), network_mode="direct", collaboration_mode="solo",
-                            approval_policy=ApprovalPolicy("full"), load_enabled_plugins=True).replace(**changes)
+                            approval_policy=ApprovalPolicy("full"), load_enabled_plugins=True,
+                            bundled_plugins=False).replace(**changes)
 
     async def test_directory_plugin_supplies_adapter_tool_hook_and_skill(self):
         self.install_example()
@@ -105,8 +106,10 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         async with QueryEngine(self.config(model_provider="openai", api_base_url="http://127.0.0.1:9/v1")) as engine:
             self.assertEqual(engine.plugins, [])
             self.assertNotIn("system_info", engine.available_tools)
-        self.assertEqual([row["name"] for row in available_plugins()], ["ollama-native"])
-        self.assertFalse(available_plugins()[0]["enabled"])
+        rows = {row["name"]: row for row in available_plugins()}
+        self.assertEqual(set(rows), {"media", "ollama-native"})
+        self.assertFalse(rows["ollama-native"]["enabled"])
+        self.assertTrue(rows["media"]["enabled"] and rows["media"]["bundled"])
 
     async def test_broken_enabled_plugin_is_reported_without_blocking_the_engine(self):
         broken = self.home / ".xuloom" / "plugins" / "broken"
@@ -234,7 +237,7 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         enabled = run("enable", "ollama-native")
         self.assertEqual(enabled.returncode, 0, enabled.stderr)
         listed = json.loads(run("list").stdout.strip().splitlines()[-1])["result"]
-        self.assertEqual(listed["plugins"][0]["enabled"], True)
+        self.assertTrue({row["name"]: row for row in listed["plugins"]}["ollama-native"]["enabled"])
         self.assertNotEqual(run("enable", "not-installed").returncode, 0)
 
 

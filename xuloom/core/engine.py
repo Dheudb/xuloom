@@ -124,18 +124,16 @@ class QueryEngine(
             raise
 
     def _load_plugins(self, config: EngineConfig):
-        """Load explicit plugins (errors raise) and, when asked, the user's enabled plugins (errors are recorded)."""
-        from xuloom.plugins import enabled_plugin_names, load_plugins
+        """Load explicit plugins (errors raise), then bundled and user-enabled plugins (errors are recorded)."""
+        from xuloom.plugins import LoadedPlugin, default_plugin_names, load_plugins
         loaded = load_plugins(config.plugins, strict=True)
-        if config.load_enabled_plugins:
-            explicit = {item.name for item in loaded}
-            try:
-                names = [name for name in enabled_plugin_names() if name not in explicit]
-            except Exception as error:
-                from xuloom.plugins import LoadedPlugin
-                return loaded + [LoadedPlugin("plugins.json", "", None, None, f"{type(error).__name__}: {error}")]
-            loaded += load_plugins(names, strict=False)
-        return loaded
+        explicit = {item.name for item in loaded}
+        try:
+            names = default_plugin_names(bundled=config.bundled_plugins, user=config.load_enabled_plugins,
+                                         exclude=explicit | set(config.disabled_plugins))
+        except Exception as error:
+            return loaded + [LoadedPlugin("plugins.json", "", None, None, f"{type(error).__name__}: {error}")]
+        return loaded + load_plugins(names, strict=False)
 
     def _apply_plugins(self):
         """Install plugin tools, hooks and Skill/Subagent directories, one plugin at a time, all-or-nothing."""
@@ -146,8 +144,10 @@ class QueryEngine(
                 continue
             tools, hooks, roots = [], [], []
             try:
-                for tool in plugin.api.tools:
-                    tools.append(self.register_tool(tool))
+                for tool, latent in plugin.api.tools:
+                    if tool.name in self.config.disabled_tools:
+                        continue  # the host's disabled_tools also covers plugin tools
+                    tools.append(self.register_tool(tool, latent=latent))
                 for event, callback, tool_filter, modes in plugin.api.hooks:
                     hooks.append(self.hook_manager.register(event, callback, tools=tool_filter, modes=modes))
                 for registry in (skills, agents):
@@ -158,6 +158,7 @@ class QueryEngine(
             except Exception as error:
                 for name in tools:
                     self.available_tools.pop(name, None)
+                    self.latent_tools.pop(name, None)
                     self.activated_tools.discard(name)
                 for handle in hooks:
                     self.hook_manager.unregister(handle)

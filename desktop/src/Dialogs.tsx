@@ -45,6 +45,16 @@ export function SettingsDialog({
 }) {
   const [tab, setTab] = useState("model");
   const dialogRef = useRef<HTMLElement>(null);
+  // Pages backed by plugins appear only while their plugin is loaded (e.g. media → 生成模型).
+  const [pluginMethods, setPluginMethods] = useState<string[]>([]);
+  useEffect(() => {
+    let active = true;
+    window.xuloom.invoke<{ methods?: { name: string }[] }>("plugins.rpc", {})
+      .then((result) => { if (active) setPluginMethods((result?.methods || []).map((item) => item.name)); })
+      .catch(() => { if (active) setPluginMethods([]); });
+    return () => { active = false; };
+  }, []);
+  const mediaAvailable = pluginMethods.includes("media.connections");
   const [directory, setDirectory] = useState(defaultDirectory);
   const [directoryBusy, setDirectoryBusy] = useState(false);
   const [directorySaved, setDirectorySaved] = useState(false);
@@ -135,13 +145,13 @@ export function SettingsDialog({
               const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
               buttons[event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (index + (event.key === "ArrowUp" ? -1 : 1) + buttons.length) % buttons.length]?.click();
             }}>
-            {[{ id: "readiness", label: "任务准备", icon: Check }, { id: "model", label: "模型连接", icon: KeyRound }, { id: "media", label: "生成模型", icon: ImagePlus }, { id: "skills", label: "Skills", icon: Puzzle }, { id: "agents", label: "Subagents", icon: Bot }, { id: "mcp", label: "MCP 服务", icon: Plug }, { id: "remote", label: "SSH 远程", icon: Server }, { id: "workspace", label: "工作区", icon: FolderOpen }, { id: "archives", label: "已归档会话", icon: Archive }].map(({ id, label, icon: Icon }) =>
+            {[{ id: "readiness", label: "任务准备", icon: Check }, { id: "model", label: "模型连接", icon: KeyRound }, { id: "media", label: "生成模型", icon: ImagePlus }, { id: "skills", label: "Skills", icon: Puzzle }, { id: "agents", label: "Subagents", icon: Bot }, { id: "mcp", label: "MCP 服务", icon: Plug }, { id: "remote", label: "SSH 远程", icon: Server }, { id: "workspace", label: "工作区", icon: FolderOpen }, { id: "archives", label: "已归档会话", icon: Archive }].filter(({ id }) => id !== "media" || mediaAvailable).map(({ id, label, icon: Icon }) =>
               <button key={id} role="tab" id={"settings-tab-" + id} aria-selected={tab === id} aria-controls={"settings-panel-" + id} tabIndex={tab === id ? 0 : -1}
                 onClick={(event) => { setTab(id); setError(""); event.currentTarget.focus(); }}><Icon size={16} />{label}</button>)}
           </nav>
           <div className={"settings-content" + (tab === "model" ? " model-settings-content" : "")}>
         {tab === 'readiness' && <div role="tabpanel" id="settings-panel-readiness" aria-labelledby="settings-tab-readiness"><TaskReadiness invoke={extensions?.invoke || ((method,params)=>window.xuloom.invoke(method,params))} /></div>}
-        {tab === "media" && <div role="tabpanel" id="settings-panel-media" aria-labelledby="settings-tab-media"><MediaSettings invoke={extensions?.invoke || ((method, params) => window.xuloom.invoke(method, params))} busy={extensions?.busy} hasSession={!!extensions} control={mediaControl} /></div>}
+        {tab === "media" && mediaAvailable && <div role="tabpanel" id="settings-panel-media" aria-labelledby="settings-tab-media"><MediaSettings invoke={extensions?.invoke || ((method, params) => window.xuloom.invoke(method, params))} busy={extensions?.busy} hasSession={!!extensions} control={mediaControl} /></div>}
         {tab === "remote" && <div role="tabpanel" id="settings-panel-remote" aria-labelledby="settings-tab-remote"><RemoteSettings navigationAction={workspaceAction} open={async (id, sessionId) => { await workspaceAction("remote.open", { id, sessionId }); close(); }} /></div>}
         {["skills", "agents", "mcp"].includes(tab) && <div role="tabpanel" id={"settings-panel-" + tab} aria-labelledby={"settings-tab-" + tab}>
           {tab === "mcp" ? <><h3>MCP 服务</h3><p>连接外部工具。支持本地 stdio 与远程 Streamable HTTP，可浏览市场、自定义服务、测试连接及启停。</p><p>{extensions ? "配置保存在当前工作区的 .xuloom/mcp_servers.json，与 CLI 共用。" : "可以直接浏览市场；安装和管理服务前，选择或新建一个会话即可，无需配置模型或打开代码仓库。"}</p><button onClick={openMcp}>打开 MCP 管理</button></> : !extensions ? <p>请先新建或打开一个会话，再管理扩展；无需配置模型或打开代码仓库。</p> : <ExtensionSettings key={tab} kind={tab as "skills" | "agents"} {...extensions} />}

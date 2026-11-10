@@ -11,7 +11,7 @@ import uuid
 
 from xuloom.core.storage import atomic_json
 from xuloom.desktop.attachments import attachment_directory, attachment_item, jpeg_image, IMAGE_EXTENSIONS
-from xuloom.media.preview import version, read_range
+from xuloom.features.media_preview import version, read_range
 
 CHUNK = 262144
 

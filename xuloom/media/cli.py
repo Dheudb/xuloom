@@ -9,7 +9,11 @@ from xuloom.media import config, jobs
 
 
 def add_parser(sub):
-    parent = sub.add_parser("media", help="Configure generation APIs and inspect durable media receipts")
+    """Compatibility helper; the bundled media plugin registers the command through ``configure``."""
+    configure(sub.add_parser("media", help="Configure generation APIs and inspect durable media receipts"))
+
+
+def configure(parent):
     actions = parent.add_subparsers(dest="action", required=True)
     for action in ("connections", "save", "remove", "jobs", "status", "cancel"):
         item = actions.add_parser(action)
@@ -69,13 +73,10 @@ async def dispatch(args, emit):
         return {"jobs": jobs.listing({"session_cwd": os.path.abspath(args.cwd), "session_id": args.session})}
     if args.action in {"status", "cancel"}:
         from xuloom.cli import open_engine
-        import uuid
+        from xuloom.media.plugin import run_control
         engine = await open_engine(args, emit)
         try:
-            engine.activate_tools(["media_tool"])
-            receipt = await engine._execute_tool_wrapper({"id": "media-control-" + uuid.uuid4().hex, "name": "media_tool",
-                "input": {"action": args.action, "job_id": args.job_id, "wait_ms": args.wait_ms}}, lambda _: None)
-            record = jobs.public(jobs.load(engine.tool_context, args.job_id))
+            receipt, record = await run_control(engine, args.action, args.job_id, args.wait_ms)
             needed = bool(getattr(engine, "_noninteractive_approval_required", False))
             return {"ok": not receipt["is_error"], "reason": "approval_required" if needed else "failed" if receipt["is_error"] else "completed",
                 "job": record, "generation_completed": record["phase"] == "downloaded"}

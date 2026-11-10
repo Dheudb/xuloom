@@ -18,8 +18,11 @@ function fixture(options={}) {
    if(method==='schedule.due')return due;
    if(method==='attachments.list')return {items:(params?.ids||[]).map(id=>({id,name:'remote.txt',available:true,state:'ready',kind:'file',size:3,path:'/remote/history/'+id}))};
    if(method==='attachments.import'&&options.import)return options.import(method,params);
+   if(method==='plugins.rpc'&&options.remotePlugins===null)throw new Error('Unknown method: plugins.rpc');
+   if(method==='plugins.rpc'&&options.remotePlugins)return {methods:options.remotePlugins};
    return {started:true};
-  }})};
+  }}),
+  ...(options.localPlugin?{pluginMethod:options.localPlugin}:{})};
  const work=remoteWorkspaces(context);
  return {work,context,sessions,calls,disposed,profile,saved:()=>saved,setSaved:value=>{saved=value;},setDispose:work=>{disposeWork=work;},active:()=>active,setFailure:()=>{failPermission=true;},setDue:value=>{due=value;}};
 }
@@ -136,4 +139,30 @@ test('archive clears selection, active work prevents workspace close, due messag
  assert.equal(result.value.activeId,'');assert.equal(f.active(),undefined);
  await f.work.tickSchedules();
  assert.equal(f.calls.filter(row=>row.method==='schedule.deliver').length,1);
+});
+
+test('SSH plugin methods come from the remote host and are cached per connection',async()=>{
+ const localPlugin=async method=>method==='local-only.run'?{operation:false,settings:false}:null;
+ const f=fixture({localPlugin,remotePlugins:[{name:'echo-fixture.echo'},{name:'remote-only.run',operation:true},{name:'files.read',operation:true}]});
+ const {value}=await f.work.handle('remote.open',{id:'lab'});
+ assert.deepEqual((await f.work.handle('echo-fixture.echo',{session:value.id,text:'hi'})).value,{started:true});
+ assert(f.calls.some(row=>row.method==='echo-fixture.echo'&&row.params.text==='hi'&&!('session' in row.params)));
+ await assert.rejects(f.work.handle('local-only.run',{session:value.id}),/不支持的远端操作/,'the local plugin list must not grant remote methods');
+ const listed=(await f.work.handle('plugins.rpc',{session:value.id})).value.methods.map(item=>item.name);
+ assert.deepEqual(listed,['echo-fixture.echo','remote-only.run'],'built-in names cannot be shadowed');
+ await f.work.handle('remote-only.run',{session:value.id});
+ assert.equal(f.sessions.get(value.id).busy,true,'operation methods mark the remote conversation busy');
+ await assert.rejects(f.work.handle('prompt',{session:value.id,text:'second'}),/运行中的任务/);
+ assert.equal(f.calls.filter(row=>row.method==='plugins.rpc').length,1,'fetched once per connection');
+ f.sessions.delete(value.id);await f.work.handle('session.select',{id:value.id});
+ await f.work.handle('echo-fixture.echo',{session:value.id});
+ assert.equal(f.calls.filter(row=>row.method==='plugins.rpc').length,2,'a new connection fetches its own list');
+});
+
+test('older SSH hosts without plugins.rpc keep built-in methods and refuse plugin methods',async()=>{
+ const f=fixture({remotePlugins:null,localPlugin:async()=>({operation:false,settings:false})});
+ const {value}=await f.work.handle('remote.open',{id:'lab'});
+ await assert.rejects(f.work.handle('echo-fixture.echo',{session:value.id}),/不支持的远端操作/);
+ assert.deepEqual((await f.work.handle('plugins.rpc',{session:value.id})).value,{methods:[]});
+ assert.deepEqual((await f.work.handle('files.read',{session:value.id,path:'a.txt'})).value,{started:true});
 });

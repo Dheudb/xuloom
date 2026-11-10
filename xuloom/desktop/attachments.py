@@ -6,7 +6,7 @@ import os
 import re
 from pathlib import Path
 from xuloom.core.storage import history_root, data_directory
-from xuloom.media.preview import version
+from xuloom.features.media_preview import version
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
 

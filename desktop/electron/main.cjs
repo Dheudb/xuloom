@@ -77,8 +77,6 @@ const engineMethods = new Set([
   "files.htmlInfo", "files.htmlChunk",
   "attachments.list", "attachments.info", "attachments.read", "attachments.preview",
   "media.read",
-  "media.connections", "media.save", "media.remove", "media.jobs", "media.control",
-  "media.models", "media.saveModel", "media.removeModel",
   "files.undo",
   "files.list",
   "git.status",
@@ -111,6 +109,11 @@ const engineMethods = new Set([
   "capabilities.example",
   "capabilities.create",
 ]);
+// Methods served by bundled/enabled Python plugins (e.g. media.*); built-ins always win.
+const pluginMethods = require("./plugin-methods.cjs").createPluginMethods({
+  request: (method, params) => globalConfig().request(method, params), builtin: engineMethods,
+});
+const pluginMethod = pluginMethods.lookup;
 const remote = require("./remote-workspace.cjs").remoteWorkspaces({
   settings, saveSettings, sessions, send, broadcast: broadcastCatalog, dispose: disposeSession, running,
   active: () => activeSessionId, activate: value => { activeSessionId = value; }, saveWorkspace,
@@ -509,8 +512,10 @@ async function invoke(method, params) {
   // Installation, testing and OAuth still require their actual owning session.
   if (method === "mcp.market" && !params.session) return globalConfig().request(method, params);
   if (method === "task.readiness" && !params.session) return globalConfig().request(method, params);
-  if (["media.connections", "media.save", "media.remove", "media.models", "media.saveModel", "media.removeModel"].includes(method) && !params.session) {
-    if (!["media.connections", "media.models"].includes(method) && [...sessions.values()].some(running)) throw new Error("请先停止运行中的任务，再修改生成模型");
+  if (method === "plugins.rpc") return { methods: await pluginMethods.list() };
+  const plugin = await pluginMethod(method);
+  if (plugin && !params.session) {
+    if (plugin.settings && [...sessions.values()].some(running)) throw new Error("请先停止运行中的任务，再修改这项设置");
     return globalConfig().request(method, params);
   }
   if (["remote.profiles", "remote.models", "remote.save", "remote.remove", "remote.check"].includes(method))
@@ -768,7 +773,7 @@ async function invoke(method, params) {
       path: result.filePaths[0],
     });
   }
-  if (!engineMethods.has(method)) throw new Error("不支持的操作");
+  if (!engineMethods.has(method) && !plugin) throw new Error("不支持的操作");
   const { session: _session, ...payload } = params;
   if (method === "context.compact") {
     if (running(source) || source.attachmentImport) throw new Error("请等待当前任务结束后压缩上下文");
@@ -776,7 +781,7 @@ async function invoke(method, params) {
     try { return await source.transport.request(method, payload); }
     finally { source.busy = false; }
   }
-  if (method === "prompt" || method === "prompt.resume" || method === "media.control") {
+  if (method === "prompt" || method === "prompt.resume" || plugin?.operation) {
     if (source.busy || source.attachmentImport) throw new Error("此会话已有运行中的任务或附件正在添加");
     source.busy = true;
     const row = catalog.find(params.session);

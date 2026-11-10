@@ -43,7 +43,10 @@ let app, page, clipboardBefore;
  await page.getByText(/无效的 Xuloom 聊天链接/).first().waitFor();
  await page.getByRole('combobox',{name:'选择模型'}).selectOption(JSON.stringify(['remote-models','remote-b']));
  await page.getByRole('combobox',{name:'访问权限'}).selectOption('full');
- await page.getByRole('textbox',{name:'任务输入'}).fill('write report');await page.getByRole('textbox',{name:'任务输入'}).press('Enter');
+ // Model and permission changes are confirmed over SSH; sending stays disabled until then.
+ await page.getByRole('textbox',{name:'任务输入'}).fill('write report');
+ await page.waitForFunction(()=>!document.querySelector('.send-button:not(.stop)')?.disabled);
+ await page.getByRole('textbox',{name:'任务输入'}).press('Enter');
  await page.getByText('REMOTE_REPLY_remote-b',{exact:true}).waitFor();
  assert(fs.readFileSync(path.join(info.remote,'generated.md'),'utf8').includes('REMOTE_WRITTEN_ARTIFACT'));
  await page.getByRole('button',{name:'展开能力面板',exact:true}).click();

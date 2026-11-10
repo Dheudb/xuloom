@@ -3,7 +3,7 @@ import os
 from pathlib import Path, PurePosixPath
 
 from xuloom.features.file_changes import preview_path
-from xuloom.media.preview import read_range, version
+from xuloom.features.media_preview import read_range, version
 
 LIMIT = 30 * 1024 * 1024
 TYPES = {

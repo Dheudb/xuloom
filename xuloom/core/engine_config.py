@@ -141,7 +141,11 @@ class EngineConfig:
     plugins: Tuple[Any, ...] = ()
     """Plugin objects, modules, ``register(api)`` functions or installed plugin names (see :mod:`xuloom.plugins`)."""
     load_enabled_plugins: bool = False
-    """Also load the plugins enabled in ``~/.xuloom/plugins.json`` (the CLI and desktop app set this)."""
+    """Also apply ``~/.xuloom/plugins.json``: the user's enabled plugins and disabled bundled ones (the CLI and desktop app set this)."""
+    bundled_plugins: bool = True
+    """Load the plugins shipped with Xuloom (``xuloom.plugins.BUNDLED_PLUGINS``, e.g. ``media``)."""
+    disabled_plugins: FrozenSet[str] = frozenset()
+    """Plugin names this engine must not load from the bundled or enabled lists."""
 
     def __post_init__(self):
         if self.reasoning_effort is not None and self.reasoning_effort not in EFFORTS:
@@ -151,6 +155,7 @@ class EngineConfig:
         object.__setattr__(self, "extra_tools", tuple(self.extra_tools or ()))
         object.__setattr__(self, "disabled_tools", frozenset(self.disabled_tools or ()))
         object.__setattr__(self, "plugins", tuple(self.plugins or ()))
+        object.__setattr__(self, "disabled_plugins", frozenset(self.disabled_plugins or ()))
 
     @classmethod
     def field_names(cls) -> FrozenSet[str]:
@@ -187,6 +192,7 @@ class EngineConfig:
         hidden = {"api_key", "approval_policy", "extra_tools", "plugins"}
         data = {item.name: getattr(self, item.name) for item in dataclasses.fields(self) if item.name not in hidden}
         data["disabled_tools"] = sorted(self.disabled_tools)
+        data["disabled_plugins"] = sorted(self.disabled_plugins)
         data["extra_tools"] = [getattr(tool, "name", type(tool).__name__) for tool in self.extra_tools]
         data["plugins"] = [item if isinstance(item, str) else str(getattr(item, "NAME", None) or getattr(item, "name", None)
                            or getattr(item, "__name__", type(item).__name__)) for item in self.plugins]

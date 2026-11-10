@@ -27,12 +27,15 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Callable, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
-__all__ = ["PluginAPI", "LoadedPlugin", "PluginError", "load_plugins", "available_plugins",
-           "enabled_plugin_names", "set_plugin_enabled", "plugins_home", "ENTRY_POINT_GROUP"]
+__all__ = ["PluginAPI", "RpcContext", "LoadedPlugin", "PluginError", "load_plugins", "available_plugins",
+           "enabled_plugin_names", "disabled_plugin_names", "set_plugin_enabled", "default_plugin_names",
+           "plugins_home", "BUNDLED_PLUGINS", "ENTRY_POINT_GROUP"]
 
 ENTRY_POINT_GROUP = "xuloom.plugins"
+#: Plugins shipped with Xuloom. They are on by default; users may disable them.
+BUNDLED_PLUGINS = {"media": "xuloom.media.plugin"}
 _NAME = re.compile(r"[a-z][a-z0-9_-]{0,63}")
 _logger = logging.getLogger("xuloom.plugins")
 
@@ -51,13 +54,53 @@ class PluginAPI:
         self.skill_dirs: List[Path] = []
         self.agent_dirs: List[Path] = []
         self.adapters: List[str] = []
+        self.cli_commands: Dict[str, tuple] = {}
+        self.rpc_methods: Dict[str, Callable] = {}
+        self.rpc_options: Dict[str, dict] = {}
 
-    def add_tool(self, tool) -> None:
-        """Add a trusted ``BaseAgenticTool`` instance (create a new one per call to ``register``)."""
+    def add_tool(self, tool, *, latent: bool = False) -> None:
+        """Add a trusted ``BaseAgenticTool`` instance (create a new one per call to ``register``).
+
+        ``latent=True`` installs the tool hidden: the model finds and activates it
+        through ``tool_search_tool``, which keeps rarely used tools out of every request.
+        """
         from xuloom.tools.base import BaseAgenticTool
         if not isinstance(tool, BaseAgenticTool):
             raise TypeError("Plugin tools must be BaseAgenticTool instances")
-        self.tools.append(tool)
+        self.tools.append((tool, bool(latent)))
+
+    def add_cli_command(self, name: str, configure: Callable, handler: Callable, *, help: str = "") -> None:
+        """Add ``xuloom <name> ...`` to the non-interactive CLI.
+
+        ``configure(parser)`` adds arguments to an ``argparse`` sub-parser;
+        ``async handler(args, emit)`` returns a JSON-serialisable dict (``text``
+        is printed without ``--json``; ``ok``/``reason`` set the exit status).
+        """
+        if not _NAME.fullmatch(name or ""):
+            raise PluginError("CLI command names use lowercase letters, digits, '-' or '_'")
+        if not callable(configure) or not callable(handler):
+            raise TypeError("configure and handler must be callable")
+        if name in self.cli_commands:
+            raise PluginError(f"CLI command {name!r} is added twice")
+        self.cli_commands[name] = (configure, handler, help)
+
+    def add_rpc_method(self, name: str, handler: Callable, *, operation: bool = False, settings: bool = False) -> None:
+        """Serve a desktop RPC method ``"<prefix>.<action>"`` with ``async handler(params, context)``.
+
+        ``context`` is a :class:`RpcContext`. Built-in methods always take precedence.
+        ``operation=True`` marks methods that start a long operation in the
+        conversation (the app then treats the conversation as busy);
+        ``settings=True`` marks methods that change app-wide settings (the app
+        refuses them while any conversation is running).
+        """
+        if not re.fullmatch(r"[a-z][a-z0-9_-]*\.[A-Za-z][A-Za-z0-9_]*", name or ""):
+            raise PluginError("RPC methods are named '<prefix>.<action>'")
+        if not callable(handler):
+            raise TypeError("RPC handler must be callable")
+        if name in self.rpc_methods:
+            raise PluginError(f"RPC method {name!r} is added twice")
+        self.rpc_methods[name] = handler
+        self.rpc_options[name] = {"operation": bool(operation), "settings": bool(settings)}
 
     def add_hook(self, event: str, callback: Callable, *, tools: Optional[Iterable[str]] = None,
                  modes: Optional[Iterable[str]] = None) -> None:
@@ -100,6 +143,31 @@ class PluginAPI:
         self.agent_dirs.append(_existing_dir(directory))
 
 
+class RpcContext:
+    """What a desktop RPC handler of a plugin may use (provided by the desktop bridge)."""
+
+    #: Workspace directory of the window.
+    cwd: str = ""
+    #: Current conversation ID, or ``None`` before one is opened.
+    session_id: Optional[str] = None
+
+    def require_idle(self) -> None:
+        """Raise ``ValueError`` while a task, worker or upload is running."""
+        raise NotImplementedError
+
+    async def engine(self, *, write: bool = False):
+        """The window's QueryEngine (created on demand; ``write=True`` takes the session writer)."""
+        raise NotImplementedError
+
+    def emit(self, event: dict) -> None:
+        """Send an event to the desktop UI."""
+        raise NotImplementedError
+
+    def start_operation(self, name: str, work: Callable[[], Any]) -> None:
+        """Run ``await work()`` as the window's current operation (stoppable from the UI)."""
+        raise NotImplementedError
+
+
 @dataclass
 class LoadedPlugin:
     name: str
@@ -132,26 +200,59 @@ def plugins_home(home: Optional[Path] = None) -> Path:
     return Path(home or Path.home()) / ".xuloom"
 
 
-def enabled_plugin_names(home: Optional[Path] = None) -> List[str]:
+def _read_plugin_settings(home: Optional[Path]) -> dict:
     path = plugins_home(home) / "plugins.json"
     if not path.exists():
-        return []
+        return {"enabled": [], "disabled": []}
     data = json.loads(path.read_text(encoding="utf-8"))
-    names = data.get("enabled", []) if isinstance(data, dict) else None
-    if not isinstance(names, list) or not all(isinstance(item, str) and _NAME.fullmatch(item) for item in names):
-        raise PluginError(f"{path} must contain {{\"enabled\": [plugin names]}}")
-    return list(dict.fromkeys(names))
+    if not isinstance(data, dict):
+        raise PluginError(f"{path} must be a JSON object")
+    result = {}
+    for key in ("enabled", "disabled"):
+        names = data.get(key, [])
+        if not isinstance(names, list) or not all(isinstance(item, str) and _NAME.fullmatch(item) for item in names):
+            raise PluginError(f"{path}: \"{key}\" must be a list of plugin names")
+        result[key] = list(dict.fromkeys(names))
+    return result
+
+
+def enabled_plugin_names(home: Optional[Path] = None) -> List[str]:
+    """Installed (non-bundled) plugins the user enabled."""
+    return [name for name in _read_plugin_settings(home)["enabled"] if name not in BUNDLED_PLUGINS]
+
+
+def disabled_plugin_names(home: Optional[Path] = None) -> List[str]:
+    """Bundled plugins the user turned off."""
+    return [name for name in _read_plugin_settings(home)["disabled"] if name in BUNDLED_PLUGINS]
+
+
+def default_plugin_names(home: Optional[Path] = None, *, bundled: bool = True, user: bool = True,
+                         exclude: Iterable[str] = ()) -> List[str]:
+    """Names an app session loads: bundled plugins (unless disabled) then the user's enabled plugins."""
+    skip = set(exclude)
+    names = []
+    if bundled:
+        disabled = set(disabled_plugin_names(home)) if user else set()
+        names += [name for name in BUNDLED_PLUGINS if name not in disabled]
+    if user:
+        names += enabled_plugin_names(home)
+    return [name for name in dict.fromkeys(names) if name not in skip]
 
 
 def set_plugin_enabled(name: str, enabled: bool, home: Optional[Path] = None) -> List[str]:
+    """Enable/disable a plugin for new sessions; returns the plugins that will load by default."""
     if not _NAME.fullmatch(name or ""):
         raise PluginError("Plugin names use lowercase letters, digits, '-' or '_'")
-    names = [item for item in enabled_plugin_names(home) if item != name] + ([name] if enabled else [])
+    settings = _read_plugin_settings(home)
+    if name in BUNDLED_PLUGINS:
+        settings["disabled"] = [item for item in settings["disabled"] if item != name] + ([] if enabled else [name])
+    else:
+        settings["enabled"] = [item for item in settings["enabled"] if item != name] + ([name] if enabled else [])
     path = plugins_home(home) / "plugins.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     from xuloom.core.storage import atomic_json
-    atomic_json(path, {"enabled": names})
-    return names
+    atomic_json(path, {"enabled": settings["enabled"], "disabled": settings["disabled"]})
+    return default_plugin_names(home)
 
 
 def _entry_points():
@@ -163,9 +264,9 @@ def _entry_points():
 
 
 def available_plugins(home: Optional[Path] = None) -> List[dict]:
-    """Installed plugins (entry points and ``~/.xuloom/plugins/<name>``) with their enabled state."""
-    enabled = set(enabled_plugin_names(home))
-    rows = {}
+    """Bundled and installed plugins (entry points, ``~/.xuloom/plugins/<name>``) with their state."""
+    enabled = set(default_plugin_names(home))
+    rows = {name: {"name": name, "source": "bundled:" + module, "bundled": True} for name, module in BUNDLED_PLUGINS.items()}
     for point in _entry_points():
         rows.setdefault(point.name, {"name": point.name, "source": "package:" + point.value})
     root = plugins_home(home) / "plugins"
@@ -179,6 +280,8 @@ def available_plugins(home: Optional[Path] = None) -> List[dict]:
 
 
 def _resolve_name(name: str, home: Optional[Path]):
+    if name in BUNDLED_PLUGINS:
+        return importlib.import_module(BUNDLED_PLUGINS[name]), "bundled:" + BUNDLED_PLUGINS[name]
     for point in _entry_points():
         if point.name == name:
             return point.load(), "package:" + point.value

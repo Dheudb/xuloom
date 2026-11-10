@@ -2,6 +2,9 @@
 const crypto = require("node:crypto");
 const path = require("node:path");
 const { remoteKey: keyOf, remoteId } = require("./chat-links.cjs");
+const { createPluginMethods } = require("./plugin-methods.cjs");
+// Remote methods handled here or forwarded as built-ins; plugins can never shadow them.
+const REMOTE_BUILTINS = ["permissions.set", "config.get", "config.models"];
 const object = value => !!value && typeof value === "object" && !Array.isArray(value);
 const flags = value => ["open", "collapsed", "pinned", "archived"].every(key => !(key in value) || typeof value[key] === "boolean");
 const attachmentIds = value => Array.isArray(value) && value.length <= 10 && value.every(id => typeof id === "string" && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(id));
@@ -126,6 +129,19 @@ function remoteWorkspaces(context) {
       return { ...initial, id, title: row.title, scope: "project", remote: sessions.get(id).remote, savedDraft: row.draft, savedDraftEditId: row.draftEditId, savedAttachments, activeId: id, catalog: broadcast() };
     } catch (error) { await pipe.close().catch(() => {}); throw error; }
   }
+  // Plugin methods of an SSH conversation are whatever that remote host loaded,
+  // fetched from its own "plugins.rpc" once per connection (a reconnect creates a
+  // new source and fetches again). Hosts older than "plugins.rpc" serve none.
+  function remotePlugins(source) {
+    if (!source.pluginMethods) {
+      const builtin = new Set([...context.methods, ...REMOTE_BUILTINS]);
+      source.pluginMethods = createPluginMethods({ builtin, request: async (method, params) => {
+        try { return await source.transport.request(method, params); }
+        catch (error) { if (/Unknown method: plugins\.rpc/.test(error?.message || "")) return { methods: [] }; throw error; }
+      } });
+    }
+    return source.pluginMethods;
+  }
   async function withPipe(row, work) {
     const pipe = transport({ id: row.binding.id, binding: row.binding, machine: row.machine }, () => {});
     try { await pipe.request("remote.connection"); return await work(pipe); } finally { await pipe.close(); }
@@ -238,6 +254,9 @@ function remoteWorkspaces(context) {
       finally { source.attachmentImport = undefined; broadcast(); }
     }
     const { session, ...payload } = params;
+    if (method === "plugins.rpc") return { handled: true, value: { methods: await remotePlugins(source).list() } };
+    const plugin = await remotePlugins(source).lookup(method);
+    if (plugin?.settings && running(source)) throw new Error("请先停止远端运行中的任务，再修改这项设置");
     if (method === "attachments.list" && !Object.prototype.hasOwnProperty.call(payload, "ids")) payload.ids = find(session).draftAttachments || [];
     if (method === "permissions.set") {
       if (!["ask", "full"].includes(params.mode)) throw new Error("权限模式无效");
@@ -253,7 +272,7 @@ function remoteWorkspaces(context) {
       try { return { handled: true, value: await source.transport.request(method, payload) }; }
       finally { source.busy = false; }
     }
-    if (method === "prompt" || method === "prompt.resume" || method === "media.control") {
+    if (method === "prompt" || method === "prompt.resume" || plugin?.operation) {
       if (source.busy || source.attachmentImport) throw new Error("远端会话已有运行中的任务或附件传输");
       if (params.attachments?.length && !source.remote.attachments) throw new Error("请先更新远端 Xuloom；未提交带附件的任务");
       source.busy = true;
@@ -263,7 +282,7 @@ function remoteWorkspaces(context) {
         broadcast(); return { handled: true, value };
       } catch (error) { source.busy = false; throw error; }
     }
-    if (!context.methods.has(method) && !["permissions.set", "config.get", "config.models"].includes(method)) throw new Error("不支持的远端操作");
+    if (!context.methods.has(method) && !plugin && !REMOTE_BUILTINS.includes(method)) throw new Error("不支持的远端操作");
     return { handled: true, value: await source.transport.request(method, payload) };
   }
   async function tickSchedules() {

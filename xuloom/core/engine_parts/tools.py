@@ -21,7 +21,10 @@ class ToolOrchestrationMixin:
 
     def activate_tools(self, tool_names):
         activated = []
+        disabled = getattr(getattr(self, "config", None), "disabled_tools", frozenset())
         for name in tool_names or []:
+            if name in disabled:
+                continue
             accept = self.tool_context.get("activate_tool_filter")
             if accept and not accept(name, self.latent_tools.get(name) or self.available_tools.get(name)):
                 self.activated_tools.discard(name)
@@ -58,8 +61,12 @@ class ToolOrchestrationMixin:
         self.activate_tools(self.activated_tools.intersection(tools))
         return set(tools)
 
-    def register_tool(self, tool):
-        """Register one trusted Python tool before a turn; never replace native tools."""
+    def register_tool(self, tool, *, latent: bool = False):
+        """Register one trusted Python tool before a turn; never replace native tools.
+
+        ``latent=True`` keeps the tool hidden until the model activates it with
+        ``tool_search_tool`` (or the host calls :meth:`activate_tools`).
+        """
         from xuloom.tools.base import BaseAgenticTool
         self._assert_open()
         if self.has_active_turn():
@@ -72,6 +79,9 @@ class ToolOrchestrationMixin:
         if tool.name in self.available_tools or tool.name in self.latent_tools:
             raise ValueError("Tool name already registered: " + tool.name)
         tool.context = self.tool_context
+        if latent:
+            self.latent_tools[tool.name] = tool
+            return tool.name
         self.available_tools[tool.name] = tool
         self.activated_tools.add(tool.name)
         return tool.name

@@ -36,7 +36,6 @@ __all__ = ["default_tools", "LATENT_TOOL_NAMES"]
 
 LATENT_TOOL_NAMES = frozenset({
     "tool_sequence",
-    "media_tool",
     "goal_report_tool",
     "schedule_tool",
     "browser_tool",
@@ -85,10 +84,8 @@ def default_tools() -> dict:
         "enter_plan_mode": EnterPlanModeTool(),
         "exit_plan_mode": ExitPlanModeTool(),
     }
-    from xuloom.tools.media_tool import MediaTool
     from xuloom.tools.tool_sequence import ToolSequenceTool
     from xuloom.agents.ultra_execution import UltraAnswerTool, UltraPrepareTool
-    tools["media_tool"] = MediaTool()
     tools["tool_sequence"] = ToolSequenceTool()
     tools.update(ultra_answer=UltraAnswerTool(), ultra_prepare=UltraPrepareTool())
     return tools

@@ -12,7 +12,8 @@ xuloom/
   memory/             上下文压缩、Token 估计和会话记忆
   tools/              文件、命令、规划、网页和浏览器等工具
   models/             ModelAdapter 接口、注册表与内置 openai/anthropic 适配器
-  plugins/            插件加载、启用列表与 PluginAPI
+  plugins/            插件加载、启用列表、PluginAPI 与内置插件清单
+  media/              内置插件 media：生成工具、CLI 命令与桌面 RPC，全部经 PluginAPI 注册
   skills/             Skill 发现、校验、资源访问和加载
   agents/             子代理定义、执行、后台任务与团队协调
   protocols/          MCP 配置/市场/连接，以及 LSP 管理

@@ -12,6 +12,7 @@ from xuloom.core.config import load_config_into_env
 from xuloom.core.reasoning import EFFORTS
 from xuloom.core.session import SessionManager
 from xuloom.core.session_lock import SessionBusyError, SessionConflictError
+from xuloom.cli_commands import BUILTIN_COMMANDS, mark_command_failed, plugin_commands
 from xuloom.features import goals, schedules
 from xuloom.security.permissions import ApprovalPolicy
 
@@ -61,8 +62,6 @@ def parser():
     cleanup.add_argument("--cwd", default=os.getcwd())
     cleanup.add_argument("--id", help="Retry the specified saved cleanup record; omitted lists pending records")
     cleanup.add_argument("--json", action="store_true")
-    from xuloom.media.cli import add_parser as add_media_parser
-    add_media_parser(sub)
     plugins = sub.add_parser("plugins", help="List, enable or disable installed plugins; no model request")
     plugins.add_argument("action", choices=("list", "enable", "disable"))
     plugins.add_argument("name", nargs="?")
@@ -134,7 +133,22 @@ def parser():
                 item.add_argument("--request-id", help="Stable deduplication identity for an authorized follow-up")
     from xuloom.remote.cli import add_parser as add_remote_parser
     add_remote_parser(sub)
+    for name, (configure, _, help_text) in plugin_commands().items():
+        if name in sub.choices:  # built-in commands always win
+            continue
+        item = sub.add_parser(name, help=help_text or "Provided by a plugin")
+        try:
+            configure(item)
+            if "--json" not in item._option_string_actions:
+                # Common option supplied by the framework; plugins may define their own.
+                item.add_argument("--json", action="store_true", help="JSON events and one final receipt on stdout")
+        except Exception as error:
+            # One broken plugin command must not break the other commands.
+            sub._name_parser_map.pop(name, None)
+            sub._choices_actions[:] = [action for action in sub._choices_actions if getattr(action, "dest", None) != name]
+            mark_command_failed(name, error)
     return p
+
 
 
 async def stream(engine, prompt, skills, emit, *, resume=False):
@@ -361,9 +375,9 @@ async def dispatch(args, emit):
         from xuloom.features.agent_history import inspect
         return {"ok": True, "reason": "completed", "transcript": await inspect(args.cwd, args.session,
             agent_id=args.agent, cursor=args.cursor, limit=args.limit)}
-    if args.command == "media":
-        from xuloom.media.cli import dispatch as media_dispatch
-        return {"ok": True, "reason": "completed", **await media_dispatch(args, emit)}
+    if args.command not in BUILTIN_COMMANDS and args.command in plugin_commands():
+        _, handler, _ = plugin_commands()[args.command]
+        return {"ok": True, "reason": "completed", **await handler(args, emit)}
     if args.command == "summary":
         from xuloom.features.session_summary import read_summary
         return {"ok": True, "reason": "completed", "summary": read_summary(args.cwd, args.session, turn_id=args.turn, all_turns=args.all)}
@@ -509,7 +523,7 @@ def main(argv):
             stream.reconfigure(encoding="utf-8")
     args = parser().parse_args(argv)
     if args.command == "remote" and args.action == "chat":
-        if args.json: parser().error("remote chat is interactive; use remote exec --json for JSONL")
+        if getattr(args, "json", False): parser().error("remote chat is interactive; use remote exec --json for JSONL")
         from xuloom.remote.terminal import interactive_chat
         from xuloom.remote.config import resolve
         try:
@@ -520,8 +534,9 @@ def main(argv):
         except (ValueError, OSError) as error:
             print(str(error), file=sys.stderr); return 1
     wire = sys.stdout
+    as_json = bool(getattr(args, "json", False))
     async def emit(event):
-        if args.json:
+        if as_json:
             wire.write(json.dumps(event, ensure_ascii=False, default=str) + "\n"); wire.flush()
     try:
         with redirect_stdout(sys.stderr): result = asyncio.run(dispatch(args, emit))
@@ -535,8 +550,8 @@ def main(argv):
     if not result.get("ok", False):
         from xuloom.core.run_result import failure_help
         result["help"] = failure_help(result.get("reason", "unknown"))
-    if args.json: wire.write(json.dumps({"type": "final", "result": result}, ensure_ascii=False, default=str) + "\n")
+    if as_json: wire.write(json.dumps({"type": "final", "result": result}, ensure_ascii=False, default=str) + "\n")
     else: wire.write(str(result.get("text") or json.dumps(result, ensure_ascii=False, default=str)) + "\n")
-    if not args.json and result.get("help"): wire.write(result["help"]["message"] + "\n")
+    if not as_json and result.get("help"): wire.write(result["help"]["message"] + "\n")
     wire.flush()
     return EXIT_CODES.get(result["reason"], 1 if not result.get("ok") else 0)

@@ -52,6 +52,27 @@ def pipe_reader(fd):
     return read
 
 
+class _PluginRpcContext:
+    """The desktop bridge as seen by a plugin RPC handler (see xuloom.plugins.RpcContext)."""
+
+    def __init__(self, bridge):
+        self._bridge = bridge
+        self.cwd = str(bridge.cwd)
+        self.session_id = bridge.engine.session_id if bridge.engine else bridge.resume_id
+
+    def require_idle(self):
+        self._bridge.require_idle()
+
+    async def engine(self, *, write=False):
+        return await self._bridge.ensure_engine(write=write)
+
+    def emit(self, event):
+        self._bridge.emit(event)
+
+    def start_operation(self, name, work):
+        self._bridge.turn_task = asyncio.create_task(work())
+
+
 class DesktopBridge:
     def __init__(self, emit, cwd=None):
         self.output = emit
@@ -639,35 +660,6 @@ class DesktopBridge:
             return resolve_link(params.get("url"), require_openable=True)
         if method == "config.get":
             return self.config()
-        if method in {"media.connections", "media.save", "media.remove", "media.models", "media.saveModel", "media.removeModel"}:
-            from xuloom.media import config as media_config
-            if method == "media.connections":
-                return {"connections": media_config.public_connections()}
-            if method == "media.models":
-                return {"models": media_config.public_models()}
-            self.require_idle()
-            if method == "media.saveModel":
-                return {"models": await asyncio.to_thread(media_config.save_model, params.get("model"))}
-            if method == "media.removeModel":
-                if params.get("confirm") is not True: raise ValueError("请确认移除生成模型")
-                return {"models": await asyncio.to_thread(media_config.remove_model, params.get("connectionId"), params.get("modelId"))}
-            if method == "media.remove" and params.get("confirm") is not True:
-                raise ValueError("请确认移除媒体连接；这不会取消供应商已有任务")
-            rows = await asyncio.to_thread(media_config.save, params.get("connection")) if method == "media.save" else await asyncio.to_thread(media_config.remove, params.get("id"))
-            return {"connections": rows}
-        if method == "media.jobs":
-            from xuloom.media.jobs import listing
-            sid = self.engine.session_id if self.engine else self.resume_id
-            return {"jobs": await asyncio.to_thread(listing, {"session_cwd": str(self.cwd), "session_id": sid}) if sid else []}
-        if method == "media.control":
-            self.require_idle()
-            if params.get("action") not in {"status", "cancel"} or not (self.engine or self.resume_id):
-                raise ValueError("请打开已有会话，并选择查询或取消已有媒体任务")
-            engine = await self.ensure_engine(write=True)
-            from xuloom.media.jobs import load
-            load(engine.tool_context, params.get("jobId"))
-            self.turn_task = asyncio.create_task(self.media_control(engine, params["action"], params["jobId"]))
-            return {"started": True}
         if method == "collaboration.get":
             return {"collaborationMode": self.collaboration_mode}
         if method == "execution.cleanup":
@@ -891,7 +883,7 @@ class DesktopBridge:
             return await asyncio.to_thread(html_preview.read, self.cwd, params.get("path"), self.file_changes,
                 params.get("asset"), params.get("version"), params.get("offset", 0), params.get("length", 262144))
         if method in {"files.mediaInfo", "files.mediaChunk"}:
-            from xuloom.media import preview
+            from xuloom.features import media_preview as preview
             if method == "files.mediaInfo":
                 return await asyncio.to_thread(preview.info, self.cwd, params.get("path"), self.file_changes)
             return await asyncio.to_thread(preview.read, self.cwd, params.get("path"), self.file_changes,
@@ -1143,7 +1135,29 @@ class DesktopBridge:
             return self.config()
         if method == "changes":
             return await git_changes(self.cwd)
+        if method == "plugins.rpc":
+            # The desktop app extends its method allowlist from this list.
+            return {"methods": [{"name": name, **options} for name, (_, options) in sorted(self.plugin_rpc_methods().items())]}
+        entry = self.plugin_rpc_methods().get(method)
+        if entry is not None:
+            return await entry[0](params, _PluginRpcContext(self))
         raise ValueError("Unknown method: " + method)
+
+    def plugin_rpc_methods(self):
+        """RPC methods contributed by bundled and enabled plugins (built-in methods always win)."""
+        if getattr(self, "_plugin_rpc", None) is None:
+            from xuloom.plugins import default_plugin_names, load_plugins
+            methods = {}
+            try:
+                for plugin in load_plugins(default_plugin_names(), strict=False):
+                    if plugin.ok:
+                        for name, handler in plugin.api.rpc_methods.items():
+                            methods.setdefault(name, (handler, plugin.api.rpc_options[name]))
+                        plugin.rollback_adapters()  # the bridge only needs RPC methods; engines register adapters
+            except Exception as error:
+                self.emit({"type": "operation_error", "message": f"插件配置无法读取：{error}"})
+            self._plugin_rpc = methods
+        return self._plugin_rpc
 
     async def pipeline_control(self, engine, params):
         self.emit({"type": "operation_started", "operation": "pipeline"})
@@ -1157,24 +1171,6 @@ class DesktopBridge:
             self.emit({"type": "operation_error", "message": str(error)})
         finally:
             self.emit({"type": "operation_finished", "operation": "pipeline"})
-
-    async def media_control(self, engine, action, identity):
-        self.emit({"type": "operation_started", "operation": "media", "jobId": identity})
-        try:
-            engine.activate_tools(["media_tool"])
-            receipt = await engine._execute_tool_wrapper({"id": "media-control-" + uuid.uuid4().hex, "name": "media_tool",
-                "input": {"action": action, "job_id": identity, "wait_ms": 0}}, lambda _: None)
-            from xuloom.media.jobs import load, public
-            record = public(load(engine.tool_context, identity))
-            self.emit({"type": "media_job_changed", "job": record})
-            if receipt["is_error"]:
-                self.emit({"type": "operation_error", "message": record.get("error") or "媒体操作未执行；请检查权限与已有任务记录。"})
-        except asyncio.CancelledError:
-            self.emit({"type": "operation_error", "message": "已停止本机操作；供应商任务可能仍在运行，可继续查询或请求取消。"})
-        except Exception as error:
-            self.emit({"type": "operation_error", "message": str(error)})
-        finally:
-            self.emit({"type": "operation_finished", "operation": "media"})
 
     async def goal_turn(self, engine):
         from xuloom.features import goals
