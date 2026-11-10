@@ -509,7 +509,8 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
         tui.pending_auto_commit = False
 
     from xuloom.security.permissions import ApprovalPolicy
-    engine = QueryEngine(permission_handler=permission_prompt, approval_policy=ApprovalPolicy("full" if auto_approve else "ask"), execution_mode=execution_mode, cwd=working_directory)
+    engine = QueryEngine(permission_handler=permission_prompt, approval_policy=ApprovalPolicy("full" if auto_approve else "ask"), execution_mode=execution_mode, cwd=working_directory,
+                         load_enabled_plugins=True)
 
     def require_idle_session():
         if (any(not task.done() for task in engine.tool_context["subagent_tasks"].tasks.values())
@@ -521,7 +522,8 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
         nonlocal engine
         policy, cwd, collaboration, isolation = engine.permission_manager.approval_policy, engine.session_cwd, engine.collaboration_mode, engine.execution_sandbox.mode
         await engine.aclose()
-        engine = QueryEngine(permission_handler=permission_prompt, approval_policy=policy, cwd=cwd, collaboration_mode=collaboration, execution_mode=isolation)
+        engine = QueryEngine(permission_handler=permission_prompt, approval_policy=policy, cwd=cwd, collaboration_mode=collaboration, execution_mode=isolation,
+                             load_enabled_plugins=True)
         await engine.start_protocols(sys_print=agent_events_callback)
 
     if not engine.is_configured:
@@ -958,7 +960,7 @@ def main():
     # The bundled isolated interpreter ignores PYTHONIOENCODING/PYTHONUTF8.
     for stream in (sys.stdin, sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"): stream.reconfigure(encoding="utf-8")
-    if len(sys.argv) > 1 and sys.argv[1] in {"exec", "goal", "schedule", "pipeline", "git-status", "chat-link", "summary", "transcript", "media", "remote", "sandbox-cleanup", "credentials", "mcp", "search-config", "context", "scaling"}:
+    if len(sys.argv) > 1 and sys.argv[1] in {"exec", "goal", "schedule", "pipeline", "plugins", "git-status", "chat-link", "summary", "transcript", "media", "remote", "sandbox-cleanup", "credentials", "mcp", "search-config", "context", "scaling"}:
         from xuloom.cli import main as noninteractive
         raise SystemExit(noninteractive(sys.argv[1:]))
     import argparse

@@ -307,7 +307,8 @@ class DesktopBridge:
     def _create_engine(self):
         from xuloom.core.engine import QueryEngine
         return QueryEngine(cwd=str(self.cwd), permission_handler=self.permission, approval_policy=self.approval_policy,
-                           collaboration_mode=self.collaboration_mode, execution_mode=self.execution_mode)
+                           collaboration_mode=self.collaboration_mode, execution_mode=self.execution_mode,
+                           load_enabled_plugins=True)
 
     def _configure_engine(self, engine):
         """Execution hosts may constrain their role before any model request."""

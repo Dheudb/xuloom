@@ -88,6 +88,12 @@ class SessionPersistenceMixin:
             self._sync_message_context()
             return False
 
+        public = {k: v for k, v in record.items() if k not in {"role_definition", "pending_messages", "dispatch", "api_base_url"}}
+        if not replaced:
+            self._dispatch_hook_soon("SubagentStart", self._hook_payload("SubagentStart", subagent=copy.deepcopy(public)))
+        if record.get("status") in {"completed", "cancelled", "crashed", "failed"} and not any(
+                item.get("agent_id") == agent_id and item.get("status") == record.get("status") for item in previous):
+            self._dispatch_hook_soon("SubagentStop", self._hook_payload("SubagentStop", subagent=copy.deepcopy(public)))
         callback = self.tool_context.get("capability_event")
         if callback and saved:
             callback({"type": "subagent_status", "agent": {k: v for k, v in record.items() if k not in {"role_definition", "pending_messages", "dispatch", "api_base_url"}}})

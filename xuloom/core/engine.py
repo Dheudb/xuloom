@@ -7,6 +7,8 @@ import asyncio
 import copy
 import os
 import uuid
+import inspect
+import logging
 from typing import Optional
 from xuloom.agents.registry import AgentRegistry
 from xuloom.agents.tasks import SubagentTasks
@@ -44,6 +46,7 @@ from xuloom.security.permissions import PermissionManager
 from xuloom.security.sandbox import SandboxManager
 from xuloom.security.security_classifier import AutoSecurityClassifier
 from xuloom.skills.registry import SkillRegistry
+from xuloom.models.registry import client_adapter
 from xuloom.core.engine_config import (
     EngineConfig,
     environment_api_key,
@@ -55,6 +58,7 @@ from xuloom.tools.builtin import LATENT_TOOL_NAMES, default_tools
 from xuloom.tools.lsp_tool import LspTool
 from xuloom.utils.shell_tasks import ShellTaskManager
 from xuloom.utils.vcr import VCRManager
+_engine_logger = logging.getLogger("xuloom.core.engine")
 __all__ = ["QueryEngine", "EngineConfig", "AbortRequestedError", "RunResult", "PersistenceError"]
 
 from xuloom.core.engine_parts import (
@@ -95,18 +99,107 @@ class QueryEngine(
         """
         if config is not None and not isinstance(config, EngineConfig):
             raise TypeError("QueryEngine expects an EngineConfig; pass other settings as keyword options")
-        config = (config or EngineConfig()).replace(**options).resolved()
-        self.config = config
-        self._init_model_runtime(config)
-        self.agent_id = config.agent_id or str(uuid.uuid4())
-        self.parent_agent_id = config.parent_agent_id
-        self.agent_depth = config.agent_depth
-        self.agent_role = config.agent_role
-        self._init_managers(config, permission_handler)
-        self._init_tools(config)
-        self._init_tool_context(permission_handler)
-        for tool in config.extra_tools:
-            self.register_tool(tool)
+        config = (config or EngineConfig()).replace(**options)
+        # Plugins load first: they may register the model adapter named by the config.
+        self.plugins = self._load_plugins(config)
+        try:
+            config = config.resolved()
+            self.config = config
+            self._init_model_runtime(config)
+            self.agent_id = config.agent_id or str(uuid.uuid4())
+            self.parent_agent_id = config.parent_agent_id
+            self.agent_depth = config.agent_depth
+            self.agent_role = config.agent_role
+            self._init_managers(config, permission_handler)
+            self._init_tools(config)
+            self._init_tool_context(permission_handler)
+            for tool in config.extra_tools:
+                self.register_tool(tool)
+            self._apply_plugins()
+        except BaseException:
+            # A failed construction leaves no plugin adapters or open clients behind.
+            for plugin in reversed(self.plugins):
+                plugin.rollback_adapters()
+            self._discard_model_clients()
+            raise
+
+    def _load_plugins(self, config: EngineConfig):
+        """Load explicit plugins (errors raise) and, when asked, the user's enabled plugins (errors are recorded)."""
+        from xuloom.plugins import enabled_plugin_names, load_plugins
+        loaded = load_plugins(config.plugins, strict=True)
+        if config.load_enabled_plugins:
+            explicit = {item.name for item in loaded}
+            try:
+                names = [name for name in enabled_plugin_names() if name not in explicit]
+            except Exception as error:
+                from xuloom.plugins import LoadedPlugin
+                return loaded + [LoadedPlugin("plugins.json", "", None, None, f"{type(error).__name__}: {error}")]
+            loaded += load_plugins(names, strict=False)
+        return loaded
+
+    def _apply_plugins(self):
+        """Install plugin tools, hooks and Skill/Subagent directories, one plugin at a time, all-or-nothing."""
+        skills = self.tool_context["skill_registry"]
+        agents = self.tool_context["agent_registry"].skills
+        for plugin in self.plugins:
+            if not plugin.ok:
+                continue
+            tools, hooks, roots = [], [], []
+            try:
+                for tool in plugin.api.tools:
+                    tools.append(self.register_tool(tool))
+                for event, callback, tool_filter, modes in plugin.api.hooks:
+                    hooks.append(self.hook_manager.register(event, callback, tools=tool_filter, modes=modes))
+                for registry in (skills, agents):
+                    for kind, directories in (("skills", plugin.api.skill_dirs), ("agents", plugin.api.agent_dirs)):
+                        for directory in directories:
+                            registry.plugin_roots[kind].append(directory)
+                            roots.append((registry.plugin_roots[kind], directory))
+            except Exception as error:
+                for name in tools:
+                    self.available_tools.pop(name, None)
+                    self.activated_tools.discard(name)
+                for handle in hooks:
+                    self.hook_manager.unregister(handle)
+                for bucket, directory in roots:
+                    bucket.remove(directory)
+                plugin.rollback_adapters()
+                if plugin.source == "object":
+                    raise
+                plugin.error = f"{type(error).__name__}: {error}"
+                _engine_logger.warning("Plugin %s was not applied: %s", plugin.name, plugin.error)
+                if any(client_adapter(client) in plugin.api.adapters for client in self._model_clients()):
+                    # The model itself comes from the failed plugin: never run it without the
+                    # rest of the plugin (e.g. its protective hooks).
+                    from xuloom.plugins import PluginError
+                    raise PluginError(f"Plugin {plugin.name!r} provides this engine's model adapter "
+                                      f"but failed to load: {plugin.error}") from error
+        # Workers inherit the same plugin set without re-reading the user's enabled list.
+        self.tool_context["plugin_specs"] = tuple(plugin.spec for plugin in self.plugins if plugin.ok)
+
+    def _model_clients(self):
+        clients = [getattr(self, "client", None), getattr(getattr(self, "compactor", None), "client", None)]
+        clients += list(getattr(self, "_retired_model_clients", []))
+        return [client for client in clients if client is not None]
+
+    def _discard_model_clients(self):
+        """Close clients of an engine whose construction failed (no aclose() will follow)."""
+        from xuloom.models.registry import unbind_client
+        for client in self._model_clients():
+            try:
+                closing = client.close()
+                if inspect.isawaitable(closing):
+                    try:
+                        asyncio.get_running_loop().create_task(closing)
+                    except RuntimeError:
+                        asyncio.run(closing)
+            except Exception:
+                pass
+            unbind_client(client)
+
+    @property
+    def plugin_errors(self):
+        return {plugin.name: plugin.error for plugin in self.plugins if not plugin.ok}
 
     def _init_model_runtime(self, config: EngineConfig):
         """Bind the model connection, reasoning profile and thinking defaults."""
@@ -460,6 +553,11 @@ class QueryEngine(
         return create_model_client(provider=self.model_provider, model=self.primary_model,
             api_base_url=self.api_base_url, api_key=self._api_key, network_mode=self.network_mode, request_owner=self._request_owner)
 
+    def _model_adapter(self):
+        """The adapter that created this engine's client (fixed for the client's lifetime)."""
+        from xuloom.models.registry import client_adapter, get_adapter
+        return client_adapter(self.client) or get_adapter(self.model_provider)
+
     def _request_owner(self):
         return getattr(self, "tool_context", {}).get("delegation", {}).get("owner_session_id") or self.session_id
 
@@ -553,6 +651,12 @@ class QueryEngine(
         await asyncio.shield(task)
 
     async def _close(self):
+        if self.hook_manager.has_callbacks("SessionEnd") or self.hook_manager.has_configured("SessionEnd"):
+            await self._dispatch_hook("SessionEnd", self._hook_payload("SessionEnd"), queue_context=False)
+        # Observe-only hooks fired from synchronous code finish before resources go away.
+        pending_hooks = [task for task in self.__dict__.get("_hook_tasks", ()) if not task.done()]
+        if pending_hooks:
+            await asyncio.gather(*pending_hooks, return_exceptions=True)
         goal_task = getattr(self, "_goal_task", None)
         if goal_task is not None and not goal_task.done() and goal_task is not asyncio.current_task():
             if self.goal and self.goal["status"] == "active":
@@ -579,6 +683,9 @@ class QueryEngine(
             if getattr(self, "mcp_bridge", None):
                 cleanup.append(self.mcp_bridge.cleanup())
         failures.extend(await asyncio.gather(*cleanup, return_exceptions=True))
+        from xuloom.models.registry import unbind_client
+        for client in self._model_clients():
+            unbind_client(client)
         for failure in failures:
             if isinstance(failure, BaseException):
                 raise failure

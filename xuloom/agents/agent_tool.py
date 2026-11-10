@@ -280,6 +280,7 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
             collaboration_mode="solo",
             execution_mode=getattr(self.context.get("execution_sandbox"), "mode", "host"),
             model_contract=connection_binding["contract"] if connection_binding is not None else inherited_contract,
+            plugins=self.context.get("plugin_specs", ()),
             **options,
         )
         if same_model and self.context.get("reasoning_profile") is not None:

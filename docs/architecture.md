@@ -11,6 +11,8 @@ xuloom/
   context/            提示词、附件、文件状态与工具结果
   memory/             上下文压缩、Token 估计和会话记忆
   tools/              文件、命令、规划、网页和浏览器等工具
+  models/             ModelAdapter 接口、注册表与内置 openai/anthropic 适配器
+  plugins/            插件加载、启用列表与 PluginAPI
   skills/             Skill 发现、校验、资源访问和加载
   agents/             子代理定义、执行、后台任务与团队协调
   protocols/          MCP 配置/市场/连接，以及 LSP 管理

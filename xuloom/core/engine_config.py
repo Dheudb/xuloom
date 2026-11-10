@@ -37,10 +37,16 @@ __all__ = [
 
 def resolve_model_provider(provider: Optional[str] = None, model: Optional[str] = None,
                            environ: Mapping[str, str] = os.environ) -> str:
-    """Return the wire protocol (``"openai"``/``"anthropic"``) or ``""`` when unknown."""
+    """Return the model adapter name (``"openai"``, ``"anthropic"`` or a registered one), or ``""``."""
     resolved = str(provider or environ.get("XULOOM_MODEL_PROVIDER", "") or "").strip().lower()
     if resolved in {"anthropic", "openai"}:
         return resolved
+    if resolved:
+        from xuloom.models.registry import get_adapter
+        if get_adapter(resolved) is not None:
+            return resolved
+        if provider:
+            raise ValueError(f"Unknown model provider {resolved!r}: register its ModelAdapter or enable its plugin")
     model_name = str(model or "").strip().lower()
     if model_name.startswith(("gpt-", "o1", "o3", "o4")):
         return "openai"
@@ -90,7 +96,7 @@ class EngineConfig:
     model: Optional[str] = None
     """Primary model ID. Env fallback: ``OPENAI_MODEL`` / ``ANTHROPIC_MODEL``."""
     model_provider: Optional[str] = None
-    """Wire protocol: ``"openai"`` (Chat Completions compatible) or ``"anthropic"``."""
+    """Model adapter: ``"openai"`` (Chat Completions compatible), ``"anthropic"`` or a registered adapter name."""
     api_base_url: Optional[str] = None
     """API root. Env fallback: ``<PROVIDER>_BASE_URL``."""
     api_key: Optional[str] = field(default=None, repr=False)
@@ -131,6 +137,12 @@ class EngineConfig:
     disabled_tools: FrozenSet[str] = frozenset()
     """Built-in tool names that this engine must not offer to the model."""
 
+    # --- Plugins ----------------------------------------------------------
+    plugins: Tuple[Any, ...] = ()
+    """Plugin objects, modules, ``register(api)`` functions or installed plugin names (see :mod:`xuloom.plugins`)."""
+    load_enabled_plugins: bool = False
+    """Also load the plugins enabled in ``~/.xuloom/plugins.json`` (the CLI and desktop app set this)."""
+
     def __post_init__(self):
         if self.reasoning_effort is not None and self.reasoning_effort not in EFFORTS:
             raise ValueError("Unsupported reasoning_effort")
@@ -138,6 +150,7 @@ class EngineConfig:
             raise ValueError("agent_depth must be a non-negative integer")
         object.__setattr__(self, "extra_tools", tuple(self.extra_tools or ()))
         object.__setattr__(self, "disabled_tools", frozenset(self.disabled_tools or ()))
+        object.__setattr__(self, "plugins", tuple(self.plugins or ()))
 
     @classmethod
     def field_names(cls) -> FrozenSet[str]:
@@ -171,9 +184,11 @@ class EngineConfig:
 
     def to_public_dict(self) -> dict:
         """Settings without credentials or live objects, for logs and diagnostics."""
-        hidden = {"api_key", "approval_policy", "extra_tools"}
+        hidden = {"api_key", "approval_policy", "extra_tools", "plugins"}
         data = {item.name: getattr(self, item.name) for item in dataclasses.fields(self) if item.name not in hidden}
         data["disabled_tools"] = sorted(self.disabled_tools)
         data["extra_tools"] = [getattr(tool, "name", type(tool).__name__) for tool in self.extra_tools]
+        data["plugins"] = [item if isinstance(item, str) else str(getattr(item, "NAME", None) or getattr(item, "name", None)
+                           or getattr(item, "__name__", type(item).__name__)) for item in self.plugins]
         data["has_api_key"] = bool(self.api_key)
         return data

@@ -193,6 +193,13 @@ async def _safe_llm_call(client, model, provider, messages, max_tokens, _retried
     (common with local models), retries once at half the value.
     """
     try:
+        from xuloom.models.registry import client_adapter, get_adapter
+        adapter = client_adapter(client) or get_adapter(provider)
+        if adapter is not None and not adapter.native:
+            text, reported = await adapter.complete_text(client, model=model, messages=messages, max_tokens=max_tokens)
+            usage.append({"input_tokens": int(reported.get("input_tokens", 0) or 0),
+                          "output_tokens": int(reported.get("output_tokens", 0) or 0)})
+            return str(text or "")
         if provider == "openai":
             from xuloom.core.model_specs import official
             if official(provider, model, str(getattr(client, 'base_url', ''))):

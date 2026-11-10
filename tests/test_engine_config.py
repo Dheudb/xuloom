@@ -59,7 +59,8 @@ class EngineConfigTests(unittest.TestCase):
 
     def test_top_level_package_exports_public_api(self):
         for name in ("QueryEngine", "EngineConfig", "BaseAgenticTool", "RunResult", "AbortRequestedError",
-                     "PersistenceError", "ApprovalPolicy", "default_tools"):
+                     "PersistenceError", "ApprovalPolicy", "default_tools", "ModelAdapter", "ToolCall",
+                     "model_response", "register_adapter", "PluginAPI", "HOOK_EVENTS"):
             self.assertIn(name, xuloom.__all__)
             self.assertIsNotNone(getattr(xuloom, name))
         with self.assertRaises(AttributeError):

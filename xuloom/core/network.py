@@ -101,22 +101,25 @@ def openai_credentials(api_key, client_type):
 
 
 def create_model_client(*, provider, model, api_base_url, api_key, network_mode, request_owner=None):
-    """One explicit client factory for generation and context compression."""
+    """One explicit client factory for generation and context compression.
+
+    The provider names a registered :class:`xuloom.models.ModelAdapter`; an
+    empty provider keeps the historical Anthropic default.
+    """
     if not model:
         return None  # Unconfigured sessions need neither an SDK nor a connection.
+    from xuloom.models.registry import get_adapter
+    adapter = get_adapter(provider or "anthropic")
+    if adapter is None:
+        raise ValueError("Unsupported model provider")
     from xuloom.security.credentials import api_key as checked_key
     key = checked_key(api_key or ("not-configured" if not model else ""))
     from xuloom.core.request_flow import RequestFlow, connection_id
-    default_url = "https://api.openai.com/v1" if provider == "openai" else "https://api.anthropic.com"
-    flow = RequestFlow(connection_id(api_base_url or default_url, key), lambda: load_config(decrypt_secrets=False).get("model_request_limits"))
-    if provider == "openai":
-        from openai import AsyncOpenAI, DefaultAsyncHttpxClient
-        return AsyncOpenAI(base_url=api_base_url or "https://api.openai.com/v1",
-            http_client=model_http_client(DefaultAsyncHttpxClient, network_mode=network_mode, flow=flow, request_owner=request_owner),
-            **openai_credentials(key, AsyncOpenAI))
-    if provider in {"anthropic", ""}:
-        from anthropic import AsyncAnthropic, DefaultAsyncHttpxClient
-        return AsyncAnthropic(base_url=api_base_url or "https://api.anthropic.com",
-            http_client=model_http_client(DefaultAsyncHttpxClient, network_mode=network_mode, flow=flow, request_owner=request_owner),
-            **anthropic_credentials(key))
-    raise ValueError("Unsupported model provider")
+    flow = RequestFlow(connection_id(api_base_url or adapter.default_base_url, key), lambda: load_config(decrypt_secrets=False).get("model_request_limits"))
+    client_type = adapter.sdk_http_client_type() if hasattr(adapter, "sdk_http_client_type") else None
+    http_client = model_http_client(client_type, network_mode=network_mode, flow=flow, request_owner=request_owner)
+    if client_type is None:
+        # Plain HTTP adapters get the default timeout instead of an SDK's own.
+        http_client.timeout = httpx.Timeout(600, connect=10)
+    from xuloom.models.registry import bind_client
+    return bind_client(adapter.create_client(model=model, api_base_url=api_base_url, api_key=key, http_client=http_client), adapter)

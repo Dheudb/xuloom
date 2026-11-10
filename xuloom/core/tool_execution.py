@@ -126,6 +126,23 @@ async def execute_tool(self, tool_block, sys_print_callback=print, *, turn: int 
         )
         before_tool_prefix += "\n\n"
     tool_inputs = copy.deepcopy(before_tool_decision.updated_input or tool_inputs)
+    if before_tool_decision.behavior != "reject" and self.hook_manager.has_callbacks("BeforeToolUse"):
+        # Python hooks fail closed: an exception rejects the call instead of running it unchecked.
+        hooked = await self.hook_manager.run_callbacks("BeforeToolUse", self._hook_payload(
+            "BeforeToolUse", tool_name=tool_name, tool_use_id=tool_id, tool_input=tool_inputs), fail_closed=True)
+        if hooked.context:
+            before_tool_prefix += "".join(f"[Hook:BeforeToolUse] {text}\n" for text in hooked.context) + "\n"
+        if hooked.updated_input is not None:
+            before_tool_decision.history = list(before_tool_decision.history or []) + [{
+                "hook_index": "callback", "behavior": hooked.decision, "tool_name": tool_name, "tool_use_id": tool_id,
+                "rendered": "", "input_changed": hooked.updated_input != tool_inputs, "updated_input": copy.deepcopy(hooked.updated_input)}]
+            tool_inputs = copy.deepcopy(hooked.updated_input)
+        if hooked.decision == "reject":
+            before_tool_decision.behavior = "reject"
+            before_tool_decision.reason = hooked.reason or f"Tool '{tool_name}' rejected by BeforeToolUse hook."
+            before_tool_decision.history = list(before_tool_decision.history or []) + [{
+                "hook_index": "callback", "behavior": "reject", "tool_name": tool_name, "tool_use_id": tool_id,
+                "rendered": before_tool_decision.reason, "input_changed": False, "updated_input": None}]
 
     if before_tool_decision.history:
         await self._record_loop_transition(
@@ -377,6 +394,10 @@ async def execute_tool(self, tool_block, sys_print_callback=print, *, turn: int 
     sys_print_callback(f"    [dim]{tool_name} -> {status}[/dim]")
     if callable(result_callback) and not receipt["is_error"]:
         result_callback(copy.deepcopy(raw_result))
+    if self.hook_manager.has_callbacks("AfterToolUse") or self.hook_manager.has_configured("AfterToolUse"):
+        await self._dispatch_hook("AfterToolUse", self._hook_payload(
+            "AfterToolUse", tool_name=tool_name, tool_use_id=tool_id, tool_input=copy.deepcopy(tool_inputs),
+            status=status, is_error=receipt["is_error"], result_preview=str(res_text)[:4000]))
     return receipt
 
 

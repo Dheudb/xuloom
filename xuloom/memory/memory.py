@@ -53,6 +53,10 @@ class MemoryCompactor:
         ).strip().lower()
         if resolved in {"openai", "anthropic"}:
             return resolved
+        if resolved:
+            from xuloom.models.registry import get_adapter
+            if get_adapter(resolved) is not None:
+                return resolved
         model_name = str(model or "").strip().lower()
         if model_name.startswith(("gpt-", "o1", "o3", "o4")):
             return "openai"

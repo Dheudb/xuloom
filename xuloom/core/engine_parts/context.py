@@ -273,7 +273,10 @@ class ContextManagementMixin:
 
     async def _apply_layered_compaction_if_needed(self, sys_print_callback=print, *, force=False, aggressive=False, focus="", event_callback=None):
         from xuloom.context.compaction import compact
-        return await compact(self, sys_print_callback, force=force, aggressive=aggressive, focus=focus, event_callback=event_callback)
+        compacted = await compact(self, sys_print_callback, force=force, aggressive=aggressive, focus=focus, event_callback=event_callback)
+        if compacted:
+            await self._dispatch_hook("PostCompact", self._hook_payload("PostCompact", aggressive=aggressive, focus=focus))
+        return compacted
 
     POST_COMPACT_MAX_FILES = 5
     POST_COMPACT_TOKEN_BUDGET = 50_000
@@ -344,6 +347,9 @@ class ContextManagementMixin:
         return True
 
     def _is_context_overflow_error(self, error: Exception) -> bool:
+        adapter = self._model_adapter()
+        if adapter is not None and not adapter.native and adapter.is_context_overflow_error(error):
+            return True
         rendered = str(error).lower()
         markers = [
             "prompt is too long",

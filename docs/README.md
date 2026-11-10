@@ -8,6 +8,7 @@
 | [模型连接](models.md) / [凭据](credentials.md) | 支持协议、Key、代理与能力声明 |
 | [Skills 与子代理](capabilities.md) / [MCP](mcp.md) | 配置、发现、角色与工具连接 |
 | [框架接口](framework.md) / [开发者扩展](extensions.md) | 公开程序入口、工具注册、事件、取消与恢复 |
+| [插件](plugins.md) / [生命周期 Hook](hooks.md) / [模型适配器](model-adapters.md) | 打包扩展、在固定节点介入任务、接入任意模型 API |
 | [目标与调度](goals-and-schedules.md) / [条件跟进](followups.md) | 持续任务、定时消息及已有回执驱动的继续 |
 | [上下文与记忆](memory-and-compaction.md) | 压缩、归档、来源与调用开销 |
 | [工具续跑](tool-sequences.md) / [原生续跑](native-continuations.md) | 已确定步骤的条件推进与中断边界 |

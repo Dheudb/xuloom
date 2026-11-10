@@ -178,6 +178,63 @@ class ToolOrchestrationMixin:
     async def _execute_tool_batches(self, tool_calls, sys_print_callback=print, *, turn: int = 0, event_callback=None):
         return await execute_tool_batches(self, tool_calls, sys_print_callback, turn=turn, event_callback=event_callback)
 
+    def add_hook(self, event: str, callback, *, tools=None, modes=None):
+        """Register a Python lifecycle hook; returns a handle for :meth:`remove_hook`.
+
+        Events are listed in ``xuloom.core.hooks.HOOK_EVENTS``. ``callback(payload)``
+        may be sync or async and returns ``None`` or a dict with ``decision``,
+        ``reason``, ``context`` and (BeforeToolUse) ``updated_input``.
+        """
+        return self.hook_manager.register(event, callback, tools=tools, modes=modes)
+
+    def remove_hook(self, handle):
+        self.hook_manager.unregister(handle)
+
+    def _hook_payload(self, event: str, **extra) -> dict:
+        payload = {"event": event, "session_id": self.session_id, "agent_id": self.agent_id,
+                   "agent_role": self.agent_role, "cwd": self.session_cwd, "mode": self.get_mode()}
+        payload.update(extra)
+        return payload
+
+    async def _dispatch_hook(self, event: str, payload: dict, *, queue_context: bool = True):
+        """Run configured hooks and callbacks for ``event``; never raises.
+
+        Returned ``context`` is queued for the next model request unless the
+        caller places it itself (``queue_context=False``).
+        """
+        from xuloom.core.hooks import HookOutcome
+        try:
+            outcome = await self.hook_manager.dispatch(event, payload)
+        except Exception as error:
+            _logger.warning("Hook dispatch for %s failed: %s", event, type(error).__name__)
+            return HookOutcome()
+        if queue_context:
+            self._queue_hook_context(event, outcome)
+        return outcome
+
+    def _dispatch_hook_soon(self, event: str, payload: dict):
+        """Fire an observe-only hook from synchronous code without waiting for it."""
+        if not self.hook_manager.has_callbacks(event) and not self.hook_manager.has_configured(event):
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        tasks = self.__dict__.setdefault("_hook_tasks", set())
+        task = loop.create_task(self._dispatch_hook(event, payload))
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
+
+    def _queue_hook_context(self, event: str, outcome):
+        if outcome is not None and outcome.context:
+            self.__dict__.setdefault("_pending_hook_context", []).append((event, list(outcome.context)))
+
+    def _flush_hook_context(self):
+        pending = self.__dict__.get("_pending_hook_context") or []
+        self._pending_hook_context = []
+        for event, outputs in pending:
+            self._append_hook_messages(event, outputs)
+
     def _run_hooks(self, event: str, payload: dict) -> list:
         try:
             return self.hook_manager.execute(event, payload)

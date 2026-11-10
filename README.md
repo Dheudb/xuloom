@@ -4,7 +4,7 @@
 
 [English](README.en.md) · [下载 Windows 版](https://github.com/Dheudb/xuloom/releases) · [完整文档](docs/README.md)
 
-当前支持范围、默认开销与实验功能以[当前能力表](docs/current-capabilities.md)为准。[历史验收](docs/history/README.md)只适用于记录中的版本和环境；本机构建的源码提交、构建号与验证范围可在“设置 → 工作区 → 程序版本与验证”查看。
+当前支持范围、默认开销与实验功能以[当前能力表](docs/current-capabilities.md)为准。开发者扩展入口：[插件](docs/plugins.md)、[生命周期 Hook](docs/hooks.md)、[模型适配器](docs/model-adapters.md)、[程序接口](docs/extensions.md)。[历史验收](docs/history/README.md)只适用于记录中的版本和环境；本机构建的源码提交、构建号与验证范围可在“设置 → 工作区 → 程序版本与验证”查看。
 
 ## 先用起来
 

@@ -27,6 +27,8 @@ class SkillRegistry:
         self.cwd = Path(cwd or os.getcwd()).resolve()
         self.home = Path(home or Path.home()).resolve()
         self.settings_path = configuration_file(self.cwd, "capabilities.json")
+        # Directories contributed by loaded plugins, kept in memory only.
+        self.plugin_roots = {"skills": [], "agents": []}
 
     def settings(self):
         if not self.settings_path.exists():
@@ -48,6 +50,7 @@ class SkillRegistry:
         settings = self.settings()
         roots = [(self.cwd / name / kind, "project") for name in (".xuloom", ".agents", ".claude")]
         roots += [(Path(p).expanduser().resolve(), "imported") for p in settings.get("skill_roots" if kind == "skills" else "agent_roots", [])]
+        roots += [(Path(p), "plugin") for p in getattr(self, "plugin_roots", {}).get(kind, [])]
         if kind == "skills":
             roots += [(Path(p).expanduser().resolve(), "environment") for p in os.environ.get("XULOOM_SKILLS_PATHS", "").split(os.pathsep) if p]
         roots += [(self.home / name / kind, "global") for name in (".xuloom", ".agents", ".claude")]

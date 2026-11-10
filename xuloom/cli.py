@@ -63,6 +63,10 @@ def parser():
     cleanup.add_argument("--json", action="store_true")
     from xuloom.media.cli import add_parser as add_media_parser
     add_media_parser(sub)
+    plugins = sub.add_parser("plugins", help="List, enable or disable installed plugins; no model request")
+    plugins.add_argument("action", choices=("list", "enable", "disable"))
+    plugins.add_argument("name", nargs="?")
+    plugins.add_argument("--json", action="store_true")
     status = sub.add_parser("git-status", help="Read repository/branch without a model request")
     status.add_argument("--cwd", default=os.getcwd())
     status.add_argument("--json", action="store_true")
@@ -185,7 +189,8 @@ async def open_engine(args, emit, *, read_only=False):
             "message": "Non-interactive execution cannot approve this action; no stdin prompt was opened"})
         engine.abort_event.set()
         return "deny"
-    engine = QueryEngine(cwd=str(cwd), permission_handler=approval, approval_policy=ApprovalPolicy(args.permission))
+    engine = QueryEngine(cwd=str(cwd), permission_handler=approval, approval_policy=ApprovalPolicy(args.permission),
+                         load_enabled_plugins=True)
     async def question(questions):
         engine._noninteractive_question_required = True
         await emit({"type": "input_required", "questions": questions})
@@ -383,6 +388,19 @@ async def dispatch(args, emit):
             finally: await bridge.close()
         return {"ok": True, "reason": "completed", "url": url, "chat": row,
                 **({"text": url} if not args.resolve else {})}
+    if args.command == "plugins":
+        from xuloom.plugins import available_plugins, set_plugin_enabled
+        if args.action == "list":
+            rows = available_plugins()
+            return {"ok": True, "reason": "completed", "plugins": rows,
+                    "text": "\n".join(f"{'*' if row['enabled'] else ' '} {row['name']}  {row.get('source') or '(not installed)'}" for row in rows) or "No plugins installed."}
+        if not args.name:
+            raise ValueError("Plugin name is required")
+        if args.action == "enable" and args.name not in {row["name"] for row in available_plugins()}:
+            raise ValueError(f"Plugin {args.name!r} is not installed")
+        enabled = set_plugin_enabled(args.name, args.action == "enable")
+        return {"ok": True, "reason": "completed", "enabled": enabled,
+                "text": f"{args.name} {'enabled' if args.action == 'enable' else 'disabled'}; applies to new sessions."}
     if args.command == "git-status":
         from xuloom.features.workspace_files import git_status
         return {"ok": True, "reason": "completed", "git": await git_status(args.cwd)}

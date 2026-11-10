@@ -4,11 +4,14 @@ import json
 import os
 import copy
 import sys
-from dataclasses import dataclass
-from typing import Dict, List, Optional
+import inspect
+import logging
+from dataclasses import dataclass, field
+from typing import Callable, Dict, Iterable, List, Optional
 from xuloom.branding import configuration_file
 
 HOOK_EXECUTION_TIMEOUT_S = 120
+_logger = logging.getLogger("xuloom.core.hooks")
 
 
 class _SafeFormatDict(dict):
@@ -45,6 +48,44 @@ class PostSamplingHookResult:
     outputs: List[Dict[str, object]]
 
 
+# Lifecycle events. Key: event name used in hooks.json and engine.add_hook().
+# Value: (description, decisions the event honours besides observing/adding context).
+HOOK_EVENTS = {
+    "SessionStart": ("First run of a session, before the first model request.", ()),
+    "UserPromptSubmit": ("A new user task is about to be sent; may add context or block it.", ("block",)),
+    "BeforeToolUse": ("Before a tool executes; may reject the call or rewrite its input.", ("reject", "updated_input")),
+    "AfterToolUse": ("After a tool result is saved; may add context for the next model request.", ()),
+    "PostSampling": ("After the final answer of a turn is sampled (alias of PostSamplingHook).", ()),
+    "Stop": ("Before a final answer is accepted; may block or request a retry (alias of StopHook).", ("block", "retry")),
+    "TurnEnd": ("After a turn completed successfully.", ()),
+    "TurnError": ("A turn ended with an error or was cancelled.", ()),
+    "PreCompact": ("Before context compaction runs.", ()),
+    "PostCompact": ("After context compaction changed the history.", ()),
+    "SubagentStart": ("A worker/subagent record was created.", ()),
+    "SubagentStop": ("A worker/subagent reached a terminal status.", ()),
+    "SessionEnd": ("The engine is closing.", ()),
+}
+# Historical configuration keys kept as aliases.
+HOOK_EVENT_ALIASES = {"StopHook": "Stop", "PostSamplingHook": "PostSampling"}
+
+
+@dataclass
+class HookOutcome:
+    """Merged result of all hooks for one event."""
+    decision: str = "allow"           # allow | block | retry | reject
+    reason: str = ""
+    context: List[str] = field(default_factory=list)
+    updated_input: Optional[Dict[str, object]] = None
+
+
+@dataclass
+class _Registration:
+    event: str
+    callback: Callable
+    tools: Optional[frozenset] = None
+    modes: Optional[frozenset] = None
+
+
 class HookManager:
     """
     Lifecycle hooks with shell command execution support.
@@ -62,6 +103,123 @@ class HookManager:
     def __init__(self, config_path=None, *, cwd=None):
         self.cwd = os.path.abspath(cwd or os.getcwd())
         self.config_path = os.path.abspath(os.path.join(self.cwd, os.fspath(config_path))) if config_path else str(configuration_file(self.cwd, "hooks.json"))
+        self._callbacks: List[_Registration] = []
+
+    # ── Python callbacks ────────────────────────────────────────────────
+
+    def register(self, event: str, callback: Callable, *, tools: Optional[Iterable[str]] = None,
+                 modes: Optional[Iterable[str]] = None) -> _Registration:
+        """Register a Python hook. ``callback(payload)`` may be sync or async.
+
+        Return ``None`` to observe, or a dict with any of ``decision``
+        (``"block"``, ``"retry"``, ``"reject"``), ``reason``, ``context`` (text
+        added for the model) and, for BeforeToolUse, ``updated_input``.
+        """
+        event = HOOK_EVENT_ALIASES.get(event, event)
+        if event not in HOOK_EVENTS:
+            raise ValueError("Unknown hook event: " + str(event) + ". Known: " + ", ".join(HOOK_EVENTS))
+        if not callable(callback):
+            raise TypeError("Hook callback must be callable")
+        registration = _Registration(event, callback, frozenset(tools) if tools else None, frozenset(modes) if modes else None)
+        self._callbacks.append(registration)
+        return registration
+
+    def unregister(self, registration: _Registration) -> None:
+        self._callbacks = [item for item in self._callbacks if item is not registration]
+
+    def has_callbacks(self, event: str) -> bool:
+        return any(item.event == event for item in self._callbacks)
+
+    def has_configured(self, event: str) -> bool:
+        try:
+            return bool(self._load_config().get(event))
+        except Exception:
+            return False
+
+    async def run_callbacks(self, event: str, payload: Dict[str, object], *, fail_closed: bool = False) -> HookOutcome:
+        """Run Python callbacks for ``event`` in registration order and merge their answers."""
+        outcome = HookOutcome()
+        allowed = set(HOOK_EVENTS[event][1])
+        current_input = copy.deepcopy(payload.get("tool_input")) if "updated_input" in allowed else None
+        for registration in list(self._callbacks):
+            if registration.event != event:
+                continue
+            if registration.tools and str(payload.get("tool_name", "")) not in registration.tools:
+                continue
+            if registration.modes and str(payload.get("mode", "")) not in registration.modes:
+                continue
+            view = copy.deepcopy(dict(payload))
+            if current_input is not None:
+                view["tool_input"] = copy.deepcopy(current_input)
+            try:
+                answer = registration.callback(view)
+                if inspect.isawaitable(answer):
+                    answer = await answer
+            except Exception as error:
+                _logger.warning("Hook callback for %s failed: %s", event, type(error).__name__)
+                if fail_closed:
+                    return HookOutcome("reject", f"{event} hook failed ({type(error).__name__}); the action was not run.",
+                                       outcome.context, current_input)
+                continue
+            if answer is None:
+                continue
+            if not isinstance(answer, dict):
+                _logger.warning("Hook callback for %s returned %s; expected dict or None", event, type(answer).__name__)
+                continue
+            text = answer.get("context")
+            if text:
+                outcome.context.append(str(text))
+            if "updated_input" in allowed and isinstance(answer.get("updated_input"), dict):
+                current_input = copy.deepcopy(answer["updated_input"])
+                outcome.updated_input = current_input
+            decision = str(answer.get("decision", "allow") or "allow").strip().lower()
+            decision = {"deny": "reject", "approve": "allow", "continue": "allow"}.get(decision, decision)
+            if decision in allowed and decision != "updated_input":
+                if outcome.decision == "allow" or decision in {"block", "reject"}:
+                    outcome.decision, outcome.reason = decision, str(answer.get("reason", "") or "")
+                if decision in {"block", "reject"}:
+                    break
+        return outcome
+
+    async def dispatch(self, event: str, payload: Dict[str, object]) -> HookOutcome:
+        """Run configured (template/command) hooks and Python callbacks for a generic event."""
+        outcome = HookOutcome()
+        allowed = set(HOOK_EVENTS[event][1])
+        try:
+            config = self._load_config()
+        except Exception:
+            config = {}
+        for hook in config.get(event, []):
+            try:
+                if not self._hook_matches(hook, payload):
+                    continue
+                if str(hook.get("type", "template")).strip().lower() == "command":
+                    result = await self._exec_command_hook(hook, payload)
+                    data = result.json_output or {}
+                    text = data.get("context") or data.get("additionalContext")
+                    if text:
+                        outcome.context.append(str(text))
+                    decision = str(data.get("decision", "") or "").lower()
+                    if result.exit_code == 2 and not decision:
+                        decision = "block"
+                    if decision in allowed and outcome.decision == "allow":
+                        outcome.decision = decision
+                        outcome.reason = str(data.get("reason", "") or result.stderr.strip() or result.stdout.strip())
+                else:
+                    template = str(hook.get("content", "")).strip()
+                    rendered = self._render_template(template, payload) if template else ""
+                    behavior = str(hook.get("behavior", "observe") or "observe").strip().lower()
+                    if behavior in allowed and outcome.decision == "allow":
+                        outcome.decision, outcome.reason = behavior, rendered
+                    elif rendered:
+                        outcome.context.append(rendered)
+            except Exception:
+                continue
+        callbacks = await self.run_callbacks(event, payload)
+        outcome.context.extend(callbacks.context)
+        if outcome.decision == "allow" and callbacks.decision != "allow":
+            outcome.decision, outcome.reason = callbacks.decision, callbacks.reason
+        return outcome
 
     def execute(self, event: str, payload: Dict[str, object]) -> List[str]:
         try:
@@ -443,6 +601,10 @@ class HookManager:
             payload = json.load(f)
         if not isinstance(payload, dict):
             return {}
+        for legacy, current in HOOK_EVENT_ALIASES.items():
+            # Both spellings are accepted; legacy keys run first.
+            merged = list(payload.get(legacy, []) or []) + list(payload.get(current, []) or [])
+            payload[legacy] = payload[current] = merged
         return payload
 
     def _hook_matches(self, hook: Dict[str, object], payload: Dict[str, object]) -> bool:

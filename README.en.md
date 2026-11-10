@@ -144,6 +144,6 @@ Media generation supports configured fal Queue endpoints for images, image edits
 
 [MIT](LICENSE)
 
-Current support boundaries: [capability matrix](docs/current-capabilities.md). Public embedding API: [extensions](docs/extensions.md). Packaged build provenance and scoped validation are available in Settings → Workspace; historical checks do not certify a later build.
+Current support boundaries: [capability matrix](docs/current-capabilities.md). Public embedding API: [extensions](docs/extensions.md); [plugins](docs/plugins.md), [lifecycle hooks](docs/hooks.md) and [model adapters](docs/model-adapters.md). Packaged build provenance and scoped validation are available in Settings → Workspace; historical checks do not certify a later build.
 
 Windows packaging excludes explicit development-only resources while retaining all runtime libraries, locales, certificates and licenses. Python, MCP, PDF and image support remain bundled. See [packaging boundaries](docs/packaging-size.md).

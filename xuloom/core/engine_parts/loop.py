@@ -1,4 +1,5 @@
 """The model/tool turn loop, loop state, budgets, structured output and stop hooks."""
+import asyncio
 import copy
 import inspect
 import json
@@ -20,6 +21,17 @@ from xuloom.protocols.stream_watch import StreamInterrupted
 
 # Sentinel returned by loop phases: start the next loop iteration.
 _CONTINUE = object()
+
+
+async def _drain_cancelled(tasks):
+    """Wait until cancelled tasks have finished, even if the caller is being cancelled itself."""
+    waiter = asyncio.gather(*tasks, return_exceptions=True)
+    try:
+        await asyncio.shield(waiter)
+    except asyncio.CancelledError:
+        # Finish cleanup first, then let the caller's cancellation continue.
+        await asyncio.wait({waiter})
+        raise
 
 
 class TurnLoopMixin:
@@ -58,6 +70,12 @@ class TurnLoopMixin:
             "final_answer": final_answer,
             "session_token_usage": dict(self.session_token_usage),
         })
+        if self.hook_manager.has_callbacks("PostSampling"):
+            observed = await self.hook_manager.run_callbacks("PostSampling", self._hook_payload(
+                "PostSampling", turn=turn, final_answer=final_answer, session_token_usage=dict(self.session_token_usage)))
+            for text in observed.context:
+                result.outputs.append({"hook_index": len(result.outputs) + 1, "behavior": "observe",
+                                       "severity": "info", "rendered": text})
         if not result.outputs:
             return
 
@@ -349,6 +367,9 @@ class TurnLoopMixin:
         return remaining
 
     def _is_model_fallback_error(self, error: Exception) -> bool:
+        adapter = self._model_adapter()
+        if adapter is not None and not adapter.native and adapter.is_transient_error(error):
+            return True
         # Inspect only SDKs already loaded by the selected connection.
         for name in ("anthropic", "openai"):
             sdk = sys.modules.get(name)
@@ -396,7 +417,10 @@ class TurnLoopMixin:
         async with model_reservation(self, kwargs["max_tokens"]) as grant:
             kwargs["max_tokens"] = grant["maximum"]
             from xuloom.core.model_specs import official
-            if policy(self)["backend"] == "openai-responses" or official(self.model_provider, kwargs['model_name'], self.api_base_url):
+            adapter = self._model_adapter()
+            if adapter is not None and not adapter.native:
+                response, entries, fallback = await self._receive_adapter_response(adapter, **kwargs)
+            elif policy(self)["backend"] == "openai-responses" or official(self.model_provider, kwargs['model_name'], self.api_base_url):
                 from xuloom.context.responses import receive
                 response, entries, fallback = await receive(self, **kwargs)
             else:
@@ -407,6 +431,58 @@ class TurnLoopMixin:
             calibrate(self, kwargs, usage)
             grant["reported"] = int(self._serialize_response_usage(response).get("output_tokens", 0) or 0)
             return response, entries, fallback
+
+    async def _receive_adapter_response(self, adapter, *, system_prompt, api_messages, tools_schema, turn_count,
+                                        model_name, max_tokens, thinking_config=None, sys_print_callback=print,
+                                        event_callback=None):
+        """Run one turn through a registered (non-native) ModelAdapter.
+
+        Tool calls are executed by the loop after the response, so no streaming
+        tool entries are returned.
+        """
+        from xuloom.models.adapter import ModelRequest, STOP_REASONS
+        self.tool_context["request_model"] = model_name
+
+        streamed = []
+
+        async def emit(event):
+            if event.get("type") == "text_delta":
+                streamed.append(True)
+            await self._emit_stream_event(event_callback, event)
+
+        request = ModelRequest(client=self.client, model=model_name, system_prompt=system_prompt,
+                               messages=api_messages, tools=tools_schema, max_tokens=max_tokens, turn=turn_count,
+                               thinking=thinking_config if self._thinking_config_explicit else None,
+                               reasoning_effort=self.reasoning_effort if model_name == self.primary_model else None,
+                               _emit=emit, _engine=self)
+        await emit({"type": "model_status", "status": "waiting", "turn": turn_count})
+        await emit({"type": "message_start", "turn": turn_count})
+        task = asyncio.ensure_future(adapter.stream_turn(request))
+        abort = asyncio.ensure_future(self.abort_event.wait())
+        try:
+            done, _ = await asyncio.wait({task, abort}, return_when=asyncio.FIRST_COMPLETED)
+            if task not in done:
+                raise AbortRequestedError("Abort requested while waiting for the model adapter.")
+            response = task.result()
+        finally:
+            # Every exit path (stop request, outer cancellation, errors) ends the
+            # adapter call too; an orphaned request must not keep running.
+            pending = [item for item in (task, abort) if not item.done()]
+            for item in pending:
+                item.cancel()
+            if pending:
+                await _drain_cancelled(pending)
+        if getattr(response, "stop_reason", None) not in STOP_REASONS or not isinstance(getattr(response, "content", None), list):
+            raise TypeError(f"Model adapter {adapter.name!r} must return xuloom.models.model_response(...)")
+        if not streamed:
+            text = "".join(getattr(block, "text", "") for block in response.content if getattr(block, "type", "") == "text")
+            if text:
+                await emit({"type": "text_delta", "turn": turn_count, "text": text})
+        for block in response.content:
+            if getattr(block, "type", "") == "tool_use":
+                await emit({"type": "tool_scheduled", "turn": turn_count, "tool_name": block.name, "tool_use_id": block.id})
+        await emit({"type": "message_stop", "turn": turn_count, "stop_reason": response.stop_reason})
+        return response, [], False
 
     # ------------------------------------------------------------------
     # Turn loop. `_run_loop` orchestrates; each phase lives in its own method
@@ -643,12 +719,19 @@ class TurnLoopMixin:
                 "Cancelled questions or approvals are not answers or authorization; ask again if still needed.",
                 is_meta=True, is_continuation=True, origin="resume_control"))
         else:
+            prompt_hook = await self._dispatch_hook("UserPromptSubmit", self._hook_payload(
+                "UserPromptSubmit", prompt=user_input if display_text is None else display_text,
+                attachments=len(attachments or []), selected_skills=list(selected_skills or [])), queue_context=False)
+            if prompt_hook.decision == "block":
+                return finish_run(self, "已被 UserPromptSubmit Hook 拦截：" + (prompt_hook.reason or "未说明原因"),
+                                  'hook_blocked'), None, None
             user_msg = create_user_message(input_blocks if input_blocks is not None else user_input, origin="human")
             if attachments:
                 user_msg["_attachments"] = attachments
             if display_text is not None:
                 user_msg["_display_text"] = display_text
             self.messages.append(user_msg)
+            self._append_hook_messages("UserPromptSubmit", prompt_hook.context)
         if self.active_turn_trace is not None:
             self.active_turn_trace["userMessageId"] = get_msg_uuid(user_msg)
         self._sync_message_context()
@@ -656,13 +739,8 @@ class TurnLoopMixin:
         if not hasattr(self, "session_started"):
             self.session_started = False
         if not self.session_started:
-            session_start_outputs = self._run_hooks("SessionStart", {
-                "cwd": self.session_cwd,
-                "mode": self.get_mode(),
-                "agent_id": self.agent_id,
-                "agent_role": self.agent_role,
-            })
-            self._append_hook_messages("SessionStart", session_start_outputs)
+            session_start = await self._dispatch_hook("SessionStart", self._hook_payload("SessionStart"), queue_context=False)
+            self._append_hook_messages("SessionStart", session_start.context)
             self.session_started = True
             self.persist_session_state()
 
@@ -738,6 +816,7 @@ class TurnLoopMixin:
 
     async def _build_turn_request(self, loop_state, turn_count, tools_schema, remaining_output_budget, event_callback):
         """Assemble system prompt, API messages and thinking config for one model request."""
+        self._flush_hook_context()
         self._inject_turn_attachments(turn_count)
         # Archive oversized results before request assembly.
         from xuloom.agents import ultra_decision
@@ -818,6 +897,7 @@ class TurnLoopMixin:
         )
         self.messages.append(tool_result_msg)
         ultra_decision.receipts_saved(self, tool_results)
+        self._flush_hook_context()
         self._sync_message_context()
         if any(item.get("_input_error") for item in tool_results):
             counters["input_failures"] += 1
@@ -1010,6 +1090,12 @@ class TurnLoopMixin:
             "session_token_usage": dict(self.session_token_usage),
         }
         stop_hook_decision = await self.hook_manager.evaluate_stop_hooks_async(dict(hook_payload))
+        if stop_hook_decision.behavior == "allow" and self.hook_manager.has_callbacks("Stop"):
+            from xuloom.core.hooks import StopHookDecision
+            stop_callbacks = await self.hook_manager.run_callbacks("Stop", self._hook_payload("Stop", **hook_payload))
+            self._queue_hook_context("Stop", stop_callbacks)
+            if stop_callbacks.decision in {"block", "retry"}:
+                stop_hook_decision = StopHookDecision(stop_callbacks.decision, stop_callbacks.reason)
         if stop_hook_decision.behavior in {"block", "retry"}:
             loop_state["stop_hook_retries"] += 1
             self.messages.append(create_user_message(
@@ -1032,8 +1118,8 @@ class TurnLoopMixin:
                 "[dim yellow]↳ StopHook blocked the current answer; retrying with feedback.[/dim yellow]"
             )
             return _CONTINUE
-        turn_end_outputs = self._run_hooks("TurnEnd", dict(hook_payload))
-        self._append_hook_messages("TurnEnd", turn_end_outputs)
+        turn_end = await self._dispatch_hook("TurnEnd", self._hook_payload("TurnEnd", **hook_payload), queue_context=False)
+        self._append_hook_messages("TurnEnd", turn_end.context)
         await self._apply_post_sampling_hooks(
             final_answer=final_answer,
             turn=turn_count,
@@ -1089,6 +1175,9 @@ class TurnLoopMixin:
     async def _handle_turn_exception(self, e, assistant_message, request, tools_schema, loop_state, counters,
                                      turn_count, sys_print_callback, event_callback):
         """Map a turn failure to recovery (`_CONTINUE`) or a terminal RunResult."""
+        await self._dispatch_hook("TurnError", self._hook_payload(
+            "TurnError", turn=turn_count, error_type=type(e).__name__,
+            cancelled=isinstance(e, AbortRequestedError)))
         from xuloom.agents.external.runtime import ExternalExecutionError
         from xuloom.core.output_limits import ModelBudgetError
         if isinstance(e, (ExternalExecutionError, ModelBudgetError)):

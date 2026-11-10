@@ -281,6 +281,10 @@ async def compact(engine, log=print, *, force=False, aggressive=False, focus="",
         before = measure(engine, messages, system, tools, thinking)
         if not force and before < spec["inputBudget"]: return False
         notice_id = uuid.uuid4().hex
+        dispatch = getattr(engine, "_dispatch_hook", None)
+        if dispatch is not None:
+            await dispatch("PreCompact", engine._hook_payload("PreCompact", tokens_before=before, force=force,
+                                                             aggressive=aggressive, focus=focus))
         await notify("running", before=before)
         path = archive(engine, original)
         if spec["backend"] == "openai-responses":
