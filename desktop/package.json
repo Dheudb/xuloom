@@ -1,6 +1,6 @@
 {
   "name": "xuloom-desktop",
-  "version": "0.1.44",
+  "version": "0.1.45",
   "private": true,
   "type": "module",
   "description": "Xuloom desktop workbench",
