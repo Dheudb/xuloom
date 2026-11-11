@@ -104,6 +104,14 @@ class HookManager:
         self.cwd = os.path.abspath(cwd or os.getcwd())
         self.config_path = os.path.abspath(os.path.join(self.cwd, os.fspath(config_path))) if config_path else str(configuration_file(self.cwd, "hooks.json"))
         self._callbacks: List[_Registration] = []
+        self._reported: set = set()
+
+    def _report(self, what: str, error: BaseException) -> None:
+        """Log a hook configuration/evaluation failure once per distinct message."""
+        message = f"{what}: {type(error).__name__}: {error}"
+        if message not in self._reported:
+            self._reported.add(message)
+            _logger.warning("Hook %s", message)
 
     # ── Python callbacks ────────────────────────────────────────────────
 
@@ -133,8 +141,11 @@ class HookManager:
     def has_configured(self, event: str) -> bool:
         try:
             return bool(self._load_config().get(event))
-        except Exception:
-            return False
+        except Exception as error:
+            # Unreadable hooks.json: let the dispatcher run so the failure is reported (and,
+            # for BeforeToolUse, the tool call is rejected) instead of silently skipping hooks.
+            self._report(f"configuration {self.config_path} is unreadable", error)
+            return True
 
     async def run_callbacks(self, event: str, payload: Dict[str, object], *, fail_closed: bool = False) -> HookOutcome:
         """Run Python callbacks for ``event`` in registration order and merge their answers."""
@@ -187,7 +198,8 @@ class HookManager:
         allowed = set(HOOK_EVENTS[event][1])
         try:
             config = self._load_config()
-        except Exception:
+        except Exception as error:
+            self._report(f"configuration {self.config_path} is unreadable; {event} hooks were skipped", error)
             config = {}
         for hook in config.get(event, []):
             try:
@@ -213,7 +225,8 @@ class HookManager:
                         outcome.decision, outcome.reason = behavior, rendered
                     elif rendered:
                         outcome.context.append(rendered)
-            except Exception:
+            except Exception as error:
+                self._report(f"{event} hook from {self.config_path} failed and was skipped", error)
                 continue
         callbacks = await self.run_callbacks(event, payload)
         outcome.context.extend(callbacks.context)
@@ -224,7 +237,8 @@ class HookManager:
     def execute(self, event: str, payload: Dict[str, object]) -> List[str]:
         try:
             config = self._load_config()
-        except Exception:
+        except Exception as error:
+            self._report(f"configuration {self.config_path} is unreadable; {event} hooks were skipped", error)
             return []
 
         rendered_outputs = []
@@ -240,7 +254,8 @@ class HookManager:
                 rendered = template.format_map(_SafeFormatDict(self._stringify_payload(payload))).strip()
                 if rendered:
                     rendered_outputs.append(rendered)
-            except Exception:
+            except Exception as error:
+                self._report(f"{event} hook from {self.config_path} failed and was skipped", error)
                 continue
 
         return rendered_outputs
@@ -249,7 +264,8 @@ class HookManager:
         """Evaluate StopHooks, supporting both template and command hooks."""
         try:
             config = self._load_config()
-        except Exception:
+        except Exception as error:
+            self._report(f"configuration {self.config_path} is unreadable; Stop hooks were skipped", error)
             return StopHookDecision("allow", "")
 
         blocking_reasons = []
@@ -283,7 +299,8 @@ class HookManager:
                         blocking_reasons.append(rendered or "Blocked by stop hook.")
                     elif behavior == "retry":
                         retry_reasons.append(rendered or "Retry requested by stop hook.")
-            except Exception:
+            except Exception as error:
+                self._report(f"Stop hook from {self.config_path} failed and was skipped", error)
                 continue
 
         if blocking_reasons:
@@ -296,7 +313,8 @@ class HookManager:
         """Sync fallback — only evaluates template hooks (no command execution)."""
         try:
             config = self._load_config()
-        except Exception:
+        except Exception as error:
+            self._report(f"configuration {self.config_path} is unreadable; Stop hooks were skipped", error)
             return StopHookDecision("allow", "")
 
         blocking_reasons = []
@@ -323,7 +341,8 @@ class HookManager:
                     blocking_reasons.append(rendered or "Blocked by stop hook.")
                 elif behavior == "retry":
                     retry_reasons.append(rendered or "Retry requested by stop hook.")
-            except Exception:
+            except Exception as error:
+                self._report(f"Stop hook from {self.config_path} failed and was skipped", error)
                 continue
 
         if blocking_reasons:
@@ -335,11 +354,15 @@ class HookManager:
     def evaluate_before_tool_hooks(self, payload: Dict[str, object]) -> BeforeToolUseDecision:
         try:
             config = self._load_config()
-        except Exception:
+        except Exception as error:
+            # Fail closed: an unreadable hooks.json may contain rules that reject this call.
+            self._report(f"configuration {self.config_path} is unreadable; tool calls are rejected until it is fixed", error)
             return BeforeToolUseDecision(
-                behavior="allow",
+                behavior="reject",
                 outputs=[],
                 updated_input=copy.deepcopy(payload.get("tool_input", {}) or {}),
+                reason=(f"Hook configuration {self.config_path} could not be read ({type(error).__name__}); "
+                        "BeforeToolUse rules cannot be checked, so the tool was not run. Fix or remove the file."),
                 history=[],
             )
 
@@ -410,8 +433,16 @@ class HookManager:
                         reason=rendered or "Rejected by BeforeToolUse hook.",
                         history=history,
                     )
-            except Exception:
-                continue
+            except Exception as error:
+                # Fail closed, like Python BeforeToolUse callbacks: a broken rule must not let the call through.
+                self._report(f"BeforeToolUse hook #{index} from {self.config_path} failed", error)
+                return BeforeToolUseDecision(
+                    behavior="reject",
+                    outputs=rendered_outputs,
+                    updated_input=current_input,
+                    reason=f"BeforeToolUse hook #{index} failed ({type(error).__name__}); the tool was not run.",
+                    history=history,
+                )
 
         return BeforeToolUseDecision(
             behavior="allow",
@@ -423,7 +454,8 @@ class HookManager:
     def evaluate_post_sampling_hooks(self, payload: Dict[str, object]) -> PostSamplingHookResult:
         try:
             config = self._load_config()
-        except Exception:
+        except Exception as error:
+            self._report(f"configuration {self.config_path} is unreadable; PostSampling hooks were skipped", error)
             return PostSamplingHookResult(outputs=[])
 
         outputs = []
@@ -446,7 +478,8 @@ class HookManager:
                     "severity": str(hook.get("severity", "info") or "info").strip().lower(),
                     "rendered": rendered,
                 })
-            except Exception:
+            except Exception as error:
+                self._report(f"PostSampling hook #{index} from {self.config_path} failed and was skipped", error)
                 continue
 
         return PostSamplingHookResult(outputs=outputs)

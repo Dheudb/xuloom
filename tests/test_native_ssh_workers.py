@@ -1,7 +1,6 @@
 """Native AgentTool/FIFO to actual encrypted loopback SSH and HTTP model streams."""
 import asyncio
 import json
-from pathlib import Path
 import shutil
 import unittest
 from unittest.mock import patch

@@ -1,16 +1,12 @@
 import re
 import asyncio
-import sys
 import httpx
 from bs4 import BeautifulSoup
-if sys.version_info >= (3, 10):
-    from ddgs import DDGS
-else:
-    from duckduckgo_search import DDGS
+from ddgs import DDGS
 from pydantic import BaseModel, Field, model_validator
 from xuloom.tools.base import BaseAgenticTool
 from xuloom.context.tool_results import build_tool_result
-from xuloom.tools.web_network import (network_error, SearchTimeout, SearchRateLimit,
+from xuloom.tools.web_network import (network_error, SearchTimeout, SearchRateLimit,  # noqa: F401 - re-exported for callers
     search_network, run_ddgs, diagnostic_secrets)
 
 MAX_SEARCH_RESULTS = 50
@@ -32,7 +28,7 @@ async def builtin_search(factory, query, limit, options, abort=None):
             # One owned synchronous attempt at a time. A deadline/cancellation
             # stops local waiting; never start a second overlapping DDGS thread.
             rows = await asyncio.wait_for(asyncio.to_thread(run_ddgs, factory, query, limit,
-                proxies, route, min(8, remaining), legacy=sys.version_info < (3, 10)), timeout=remaining)
+                proxies, route, min(8, remaining)), timeout=remaining)
             return rows, {**route, "attempts": attempt, **({"retry_history": failures} if failures else {})}
         except asyncio.TimeoutError as error:
             diagnostic = network_error(error, {**route, "attempts": attempt}, secrets)

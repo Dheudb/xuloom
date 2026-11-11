@@ -5,7 +5,6 @@ from pathlib import Path
 import tempfile
 from urllib.parse import urljoin
 
-from PIL import Image
 
 from xuloom.media.queue import client, download_url
 

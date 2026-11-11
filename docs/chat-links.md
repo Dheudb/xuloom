@@ -58,4 +58,4 @@ Python 接口为 `xuloom.features.chat_links.chat_link(cwd, session_id)` 和 `re
 
 该阶段最终验证：Python 3.12 串行全量 446 项（445 通过、1 跳过），桌面逻辑 61 项及前端构建通过。源码本机链接和 SSH 桌面 E2E 均通过；原 EXE 的 SSH 桌面 E2E、以包内 Python 为远端/正式 CLI 的加密检查 19 项通过。本地构建 `20261101-134005`，136 个 Python/技能文件和桌面资源与源码一致，九项公开内置 Skill 不包含私人 Taiyi，运行时没有加入 Paramiko，稳定 EXE 字节未变。此开发阶段尚未同步 GitHub/Release。
 
-后续已完成导航恢复检查并公开 [v0.1.2](https://github.com/Dheudb/xuloom/releases/tag/v0.1.2)，源码提交 `2942c53`、本地构建 `20261101-142836`。最新验证结果与早期失败记录见 [审查记录](developer-base-audit.md#ssh损坏导航的离线恢复)。
+后续已完成导航恢复检查并公开 [v0.1.2](https://github.com/Dheudb/xuloom/releases/tag/v0.1.2)，源码提交 `2942c53`、本地构建 `20261101-142836`。最新验证结果与早期失败记录见 [审查记录](history/developer-base-audit.md#ssh损坏导航的离线恢复)。

@@ -1,3 +1,4 @@
+import logging
 import copy
 import fnmatch
 import inspect
@@ -662,8 +663,11 @@ class PermissionManager:
             return None
         try:
             return classifier.classify(request)
-        except Exception:
-            return None
+        except Exception as error:
+            # A failed safety check must not count as "no objection": ask the user instead.
+            logging.getLogger("xuloom.permissions").warning("Security classifier failed: %s: %s", type(error).__name__, error)
+            return PermissionDecision("ask", f"Automatic security classifier failed ({type(error).__name__}); approval required.",
+                                      source="classifier_error")
 
     def _should_escalate_denial(self, tool_name: str) -> bool:
         return int(self.consecutive_denials.get(tool_name, 0) or 0) >= self.denial_escalation_threshold

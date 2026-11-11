@@ -8,7 +8,6 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
-from xuloom.agents.registry import AgentRegistry
 from xuloom.core.engine import QueryEngine
 from xuloom.core.messages import create_user_message, create_assistant_message
 from xuloom.memory.memory import MemoryCompactor

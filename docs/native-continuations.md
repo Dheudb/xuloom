@@ -59,4 +59,4 @@ App、交互 CLI、非交互 CLI 及使用该引擎的原生子代理共用此�
 
 参考 [HarnessMM 论文第 4 节](https://arxiv.org/html/2610.32813v1#S4)及[原生接入说明](https://github.com/YuhuaJiang2002/HarnessMM/blob/c8f19947e59feaa8103c05155bd79ef3eb084730/docs/INTEGRATION.md)。本轮实现原生图声明、条件复用、请求边界接管及替代证据，没有导入研究运行器、Node 依赖、固定供应商选择器或离线 RSI 训练。真实模型的主动声明率、任务质量和完整费用仍需单独对照验收，不能使用论文收益作为 Xuloom 实测。
 
-最终源码、原安装与 App／CLI 验证见[本地验收记录](native-continuations-validation-2026-11-02.md)。
+最终源码、原安装与 App／CLI 验证见[本地验收记录](history/native-continuations-validation-2026-11-02.md)。

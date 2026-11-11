@@ -1,3 +1,34 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 160
+extend-exclude = ["desktop", "build", ".venv*"]
+
+[tool.ruff.lint]
+# Correctness only (syntax errors, undefined names, unused imports/variables).
+# Style rules are deliberately off: the codebase predates the linter.
+select = ["E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# The public API is re-exported lazily; the TYPE_CHECKING imports exist for type checkers.
+"xuloom/__init__.py" = ["F401"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+follow_imports = "silent"
+warn_unused_ignores = true
+# Typed public API surface, checked in CI; widen this list as modules gain annotations.
+files = [
+    "xuloom/__init__.py",
+    "xuloom/core/engine_config.py",
+    "xuloom/core/run_result.py",
+    "xuloom/models",
+    "xuloom/plugins",
+    "xuloom/observability",
+    "xuloom/testing",
+    "xuloom/server",
+]

@@ -48,4 +48,4 @@ App 显示编排图标和每个实际子工具，重开历史不执行动作。�
 
 参考 [DeepSeek Super-agent 原型 6337fc8](https://github.com/deepseek-ai/dsh-superagent-prototype/tree/6337fc823ce20251c8de8085948165c81aaa701e) 对输入送达/消费、执行归属和新输入优先的区分。本次将输入边界用于已有执行链，没有安装 GitHub/飞书监听服务或新增 Ticket 系统。
 
-最终代码、原安装及验证范围见[本地验收记录](tool-sequences-validation-2026-11-02.md)。
+最终代码、原安装及验证范围见[本地验收记录](history/tool-sequences-validation-2026-11-02.md)。

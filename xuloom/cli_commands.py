@@ -26,7 +26,7 @@ def plugin_commands():
 
 BUILTIN_COMMANDS = frozenset({"exec", "goal", "schedule", "pipeline", "plugins", "git-status", "chat-link", "summary",
                               "transcript", "remote", "sandbox-cleanup", "credentials", "mcp", "search-config",
-                              "context", "scaling"})
+                              "context", "scaling", "eval", "serve"})
 
 
 def mark_command_failed(name: str, error: BaseException) -> None:

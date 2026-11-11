@@ -18,7 +18,7 @@ from xuloom.tools.file_write_tool import FileWriteTool
 from xuloom.tools.file_edit_tool import FileEditTool
 from xuloom.tools.notebook_edit_tool import NotebookEditTool
 from xuloom.tools.repl_tool import ReplTool
-from xuloom.tools.web_tool import WebFetchTool, network_error
+from xuloom.tools.web_tool import WebFetchTool
 from xuloom.utils.command_sessions import CommandSessions
 
 

@@ -1,7 +1,6 @@
 """Terminal presentation over SSHBridge; all execution stays in the existing runtime."""
 import asyncio
 import json
-import os
 import sys
 import shlex
 import uuid

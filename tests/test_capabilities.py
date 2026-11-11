@@ -4,7 +4,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch
 
 from xuloom.skills.registry import SkillRegistry
 from xuloom.agents.registry import AgentRegistry

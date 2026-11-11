@@ -7,6 +7,26 @@ from xuloom.core.messages import create_user_message
 _logger = logging.getLogger("xuloom.core.engine")
 
 
+def client_adapter_of(engine):
+    """The adapter that created the engine's auxiliary (compactor) client, if known."""
+    from xuloom.models.registry import client_adapter
+    compactor = getattr(engine, "compactor", None)
+    return client_adapter(getattr(compactor, "client", None)) if compactor is not None else None
+
+
+class AuxiliaryGate:
+    """``safe_llm_call(guard=...)`` for one engine: replay/refuse before, record after."""
+
+    def __init__(self, engine):
+        self.engine = engine
+
+    def __call__(self, model, purpose="summary", messages=None):
+        return self.engine._auxiliary_before(model, purpose, messages)
+
+    def after(self, model, purpose, messages, text, usage):
+        self.engine._auxiliary_after(model, purpose, messages, text, usage)
+
+
 class ContextManagementMixin:
     """Compaction boundaries, prompt caching, attachments and memory files."""
 
@@ -202,6 +222,57 @@ class ContextManagementMixin:
             number = max(0, int(usage.get(name, 0) or 0))
             counts[name] += number
             self.session_token_usage[name] = self.session_token_usage.get(name, 0) + number
+        # Compaction and memory requests cost money too: price them against the same task cap.
+        meter = getattr(self, "cost_meter", None)
+        if meter is not None and usage.get("replayed"):
+            pass  # answered from a recording: nothing was spent
+        elif meter is not None:
+            cost = meter.record(usage.get("model"), usage)
+            if cost is None:
+                self.session_cost["unpriced_requests"] = int(self.session_cost.get("unpriced_requests", 0) or 0) + 1
+            else:
+                counts["cost_usd"] = round(float(counts.get("cost_usd", 0.0) or 0.0) + cost, 8)
+                self.session_cost["usd"] = float(self.session_cost.get("usd", 0.0) or 0.0) + cost
+
+    def _auxiliary_before(self, model, purpose, messages):
+        """Answer an auxiliary request from a recording, refuse it, or return ``None`` to send it."""
+        replay = getattr(client_adapter_of(self), "replay_auxiliary", None)
+        if callable(replay):  # e.g. xuloom.testing.ReplayModel: served by purpose, never from the turn sequence
+            return replay(purpose)
+        vcr = getattr(self, "vcr_manager", None)
+        if vcr is not None and vcr.mode == "replay":
+            return vcr.replay_auxiliary(vcr.auxiliary_payload(model=model, purpose=purpose, messages=messages))
+        self._auxiliary_cost_check(model)
+        return None
+
+    def _auxiliary_after(self, model, purpose, messages, text, usage):
+        """Record a live auxiliary response next to the model turns."""
+        vcr = getattr(self, "vcr_manager", None)
+        if vcr is not None:
+            vcr.record_auxiliary(vcr.auxiliary_payload(model=model, purpose=purpose, messages=messages), text, usage)
+        recorder = getattr(self, "response_recorder", None)
+        if recorder is not None:
+            recorder.append_auxiliary(purpose=purpose, model=model, text=text, usage=usage, session_id=self.session_id)
+
+    def _auxiliary_cost_check(self, model):
+        meter = getattr(self, "cost_meter", None)
+        reason = meter.blocked_reason(model) if meter is not None else None
+        if reason:
+            from xuloom.observability.cost import CostLimitError
+            raise CostLimitError(reason)
+
+    def _auxiliary_request_guard(self, model):
+        """Checks for auxiliary requests that cannot be replayed (native compaction): strict replay and the cost cap."""
+        vcr = getattr(self, "vcr_manager", None)
+        if vcr is not None and vcr.mode == "replay":
+            from xuloom.utils.vcr import ReplayMissError
+            raise ReplayMissError("XULOOM_VCR_MODE=replay: native compaction cannot be recorded or replayed, "
+                                  "so none was sent; no live request is made in strict replay")
+        meter = getattr(self, "cost_meter", None)
+        reason = meter.blocked_reason(model) if meter is not None else None
+        if reason:
+            from xuloom.observability.cost import CostLimitError
+            raise CostLimitError(reason)
 
     def get_memory_summary(self) -> str:
         return self.memory_file_manager.render_prompt_summary()

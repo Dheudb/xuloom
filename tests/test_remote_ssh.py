@@ -23,7 +23,6 @@ from xuloom.remote.ssh import SSHClient, RemoteDisconnected, RemoteRequestError,
 from xuloom.remote.cli import dispatch as remote_dispatch
 from xuloom.remote.proxy import SSHBridge
 from xuloom.remote.terminal import interactive_chat, PipeInput
-from xuloom.features.chat_links import remote_chat_link
 from rich.console import Console
 
 

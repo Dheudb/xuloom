@@ -5,7 +5,6 @@ import os
 import tempfile
 import unittest
 import uuid
-from pathlib import Path
 from unittest.mock import patch
 from PIL import Image
 from xuloom.core.storage import history_root

@@ -146,6 +146,9 @@ class StatusMixin:
             f"Cache-aware compaction pressure: {cache_signal.get('cache_pressure_tokens', 0)}",
             f"Session input tokens: {self.session_token_usage.get('input_tokens', 0)}",
             f"Session output tokens: {self.session_token_usage.get('output_tokens', 0)}",
+            f"Session cost: ${float(self.session_cost.get('usd', 0.0) or 0.0):.4f}"
+            + (f" (+{self.session_cost.get('unpriced_requests')} unpriced requests)" if self.session_cost.get('unpriced_requests') else ""),
+            f"Task cost limit: {'none' if self.cost_meter.limit_usd is None else f'${self.cost_meter.limit_usd:.4f}'}",
             f"Remaining output budget: {self._remaining_output_budget(self._build_loop_state())}",
             f"In-progress tools: {len(self.in_progress_tools)}",
             f"Running shell tasks: {len(running_shell_tasks)}",

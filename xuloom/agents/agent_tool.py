@@ -284,6 +284,8 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
             bundled_plugins=False,  # inherit exactly the parent's loaded plugins
             **options,
         )
+        # One trace and one task cost cap across the parent and its subagents.
+        sub_engine.share_observability(self.context)
         if same_model and self.context.get("reasoning_profile") is not None:
             from xuloom.core.reasoning import request_options
             sub_engine.reasoning_profile = copy.deepcopy(self.context["reasoning_profile"])

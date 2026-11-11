@@ -15,6 +15,7 @@ def register(api):
     api.add_agents(Path(__file__).parent / "agents")
     api.add_cli_command("my-cmd", configure, handler, help="...")   # xuloom my-cmd ...
     api.add_rpc_method("my-plugin.status", rpc_status)              # 桌面端调用
+    api.add_trace_exporter(MyExporter())                            # 接收 run/model/tool span
 ```
 
 | 方法 | 说明 |
@@ -24,11 +25,12 @@ def register(api):
 | `add_model_adapter(adapter)` | 见 [模型适配器](model-adapters.md) |
 | `add_skills(dir)` / `add_agents(dir)` | 提供 Skill 与子代理定义目录 |
 | `add_cli_command(name, configure, handler, help=)` | `configure(parser)` 添加 argparse 参数；`async handler(args, emit)` 返回字典，`text` 在非 `--json` 模式下打印，`ok`/`reason` 决定退出码。不能覆盖内置命令 |
+| `add_trace_exporter(exporter)` | 接收每个结束的 span（`exporter.export(span)`），见 [追踪与花费](observability.md)。子代理共享父引擎的 tracer，不会重复收到 |
 | `add_rpc_method("前缀.动作", handler)` | 桌面端 RPC。`async handler(params, context)`，`context` 是 `RpcContext`：`cwd`、`session_id`、`require_idle()`、`await engine(write=)`、`emit(event)`、`start_operation(name, work)`。不能覆盖内置方法 |
 
 插件可以是带 `register(api)` 的对象、模块或函数。每个加载它的引擎都会调用一次 `register`，因此应在其中创建新的工具实例，不要做耗时或有副作用的操作。
 
-完整示例：[examples/plugins/ollama-native](../examples/plugins/ollama-native/)（Ollama 原生适配器、一个工具、一个 Hook 和一个 Skill）。
+完整示例：[examples/plugins/ollama-native](../examples/plugins/ollama-native)（Ollama 原生适配器、一个工具、一个 Hook 和一个 Skill）。
 
 ## 内置插件
 

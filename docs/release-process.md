@@ -15,6 +15,8 @@
 - 删除便携程序目录不会清除单独保存的数据和系统凭据。彻底清理个人数据是独立的显式操作；本轮没有签名安装器的卸载钩子，不能把目录删除测试称为安装器卸载验收。
 - Windows 原安装保留一个启动路径。手工恢复时先正常关闭程序，保留失败更新目录；使用更新器保存的旧资源或上一份完整发行包，核对版本后再打开，不混合新旧 Python 包元数据。
 
-GitHub Actions 暂保持手动触发，避免已知账户计费限制导致反复失败邮件。仓库内验证脚本和本地发布不依赖付费托管 runner。本约定不要求企业 SSO、云托管、高可用或常驻监督 Agent。
+GitHub Actions：`ci.yml`（ruff、mypy、Python 3.10/3.12/3.13 测试、打包检查）在 PR 和推送到 main 时自动运行；较重的桌面工作流 `desktop.yml` 仍只手动触发。若账户计费限制仍未解除，自动运行会失败并发出邮件，可暂时把 `ci.yml` 的触发条件改回 `workflow_dispatch`。仓库内验证脚本和本地发布不依赖付费托管 runner。
+
+PyPI：推送 `v*` 标签时 `release.yml` 构建 sdist/wheel，检查标签与 `xuloom.__version__`、`setup.py` 版本一致，再用 PyPI Trusted Publishing 发布，仓库中不保存 API Token。首次使用前需在 pypi.org 为 `xuloom` 项目登记本仓库的 `release.yml` 为可信发布者，并在 GitHub 创建名为 `pypi` 的 environment。每次发布同时更新 [CHANGELOG](../CHANGELOG.md)。本约定不要求企业 SSO、云托管、高可用或常驻监督 Agent。
 
 发行包遵循[体积精简规则](packaging-size.md)：只移出明确的非运行资源；运行库、语言、证书和许可证保留。ZIP 使用标准 Deflate，用户无需安装压缩工具；可选 `--zip-program` 仅指定构建机的受信任 7-Zip 程序。

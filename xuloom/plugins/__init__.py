@@ -53,10 +53,11 @@ class PluginAPI:
         self.hooks: List[tuple] = []
         self.skill_dirs: List[Path] = []
         self.agent_dirs: List[Path] = []
-        self.adapters: List[str] = []
+        self.adapters: List[Any] = []
         self.cli_commands: Dict[str, tuple] = {}
         self.rpc_methods: Dict[str, Callable] = {}
         self.rpc_options: Dict[str, dict] = {}
+        self.trace_exporters: List[Any] = []
 
     def add_tool(self, tool, *, latent: bool = False) -> None:
         """Add a trusted ``BaseAgenticTool`` instance (create a new one per call to ``register``).
@@ -133,6 +134,16 @@ class PluginAPI:
             _restore(snapshot)
             raise
         return snapshot
+
+    def add_trace_exporter(self, exporter) -> None:
+        """Receive every finished run/model/tool span (``exporter.export(span)``; see :mod:`xuloom.observability`).
+
+        Subagents share their parent's tracer, so an exporter sees their spans once, nested
+        under the tool call that started them.
+        """
+        if not callable(getattr(exporter, "export", None)):
+            raise TypeError("Trace exporters need an export(span) method")
+        self.trace_exporters.append(exporter)
 
     def add_skills(self, directory) -> None:
         """Expose ``<directory>/<skill>/SKILL.md`` skills."""
@@ -291,6 +302,8 @@ def _resolve_name(name: str, home: Optional[Path]):
         module = sys.modules.get(module_name)
         if module is None or getattr(module, "__file__", None) != str(path):
             spec = importlib.util.spec_from_file_location(module_name, path)
+            if spec is None or spec.loader is None:
+                raise PluginError(f"Cannot load plugin file {path}")
             module = importlib.util.module_from_spec(spec)
             sys.modules[module_name] = module
             try:

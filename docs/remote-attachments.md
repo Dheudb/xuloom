@@ -58,4 +58,4 @@ await download(client, items[0]["id"], "./saved-diagram.png")
 - App 的“取消附件传输”针对实际上传会话，即使用户切到其他聊天也不会停止错误的任务。CLI 可用 Ctrl+C 取消；上传失败后重新查询、移除未完成 ID，再显式重传。
 - 这是附件一致性与会话授权约束，不是对恶意同权限宿主进程的操作系统沙箱。
 
-本次协议、故障及加密 SSH App／CLI 的证据见[验证记录](remote-attachments-validation-2026-11-02.md)。物理两机、Linux/macOS 原生及真实模型视觉质量仍需单独验收，不能以回环测试代替。
+本次协议、故障及加密 SSH App／CLI 的证据见[验证记录](history/remote-attachments-validation-2026-11-02.md)。物理两机、Linux/macOS 原生及真实模型视觉质量仍需单独验收，不能以回环测试代替。

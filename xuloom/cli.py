@@ -17,7 +17,7 @@ from xuloom.features import goals, schedules
 from xuloom.security.permissions import ApprovalPolicy
 
 EXIT_CODES = {"completed": 0, "cancelled": 130, "session_busy": 4, "session_conflict": 4, "persistence_error": 5, "remote_disconnected": 9,
-    "paused": 6, "blocked": 7, "awaiting_review": 7, "interrupted": 7, "budget_exhausted": 8, "approval_required": 3, "input_required": 3}
+    "paused": 6, "blocked": 7, "awaiting_review": 7, "interrupted": 7, "budget_exhausted": 8, "cost_limit": 8, "eval_failed": 10, "approval_required": 3, "input_required": 3}
 
 
 def parser():
@@ -131,6 +131,20 @@ def parser():
                 item.add_argument("--worker", action="append", default=[], help="Wait for all these existing worker IDs (watch only)")
                 item.add_argument("--marker-file", help="Workspace completion marker (watch only, max 64 KiB)")
                 item.add_argument("--request-id", help="Stable deduplication identity for an authorized follow-up")
+    evaluation = sub.add_parser("eval", help="Run eval cases in fresh workspaces and check the outcomes")
+    evaluation.add_argument("cases", help="Cases file: .json, .jsonl or .yaml (see docs/replay-and-eval.md)")
+    evaluation.add_argument("--json", action="store_true", help="JSON progress events and one final report")
+    evaluation.add_argument("--permission", choices=("ask", "full"), default="ask",
+                            help="ask rejects actions that need approval; full lets cases run tools without asking")
+    evaluation.add_argument("--workdir", help="Keep case workspaces in this new or empty folder (default: temporary)")
+    evaluation.add_argument("--only", action="append", default=[], help="Run only these case IDs")
+    serve = sub.add_parser("serve", help="Serve sessions over HTTP + Server-Sent Events (see docs/server.md)")
+    serve.add_argument("--host", default="127.0.0.1", help="Bind address; anything but loopback exposes tool execution to the network")
+    serve.add_argument("--port", type=int, default=8765)
+    serve.add_argument("--root", default=os.getcwd(), help="Every session workspace must be inside this folder")
+    serve.add_argument("--permission", choices=("ask", "full"), default="ask",
+                       help="Default for new sessions; ask sends approval requests to the client")
+    serve.add_argument("--approval-timeout", type=float, default=600.0, help="Seconds before an unanswered approval is denied")
     from xuloom.remote.cli import add_parser as add_remote_parser
     add_remote_parser(sub)
     for name, (configure, _, help_text) in plugin_commands().items():
@@ -236,6 +250,57 @@ async def open_engine(args, emit, *, read_only=False):
     except BaseException:
         await engine.aclose()
         raise
+
+
+async def run_eval_command(args, emit):
+    from xuloom.core.engine_config import EngineConfig
+    from xuloom.testing import load_cases, run_eval
+    cases = load_cases(args.cases)
+    if args.only:
+        unknown = set(args.only) - {case.id for case in cases}
+        if unknown:
+            raise ValueError("Unknown case id(s): " + ", ".join(sorted(unknown)))
+        cases = [case for case in cases if case.id in set(args.only)]
+    if args.workdir:
+        workdir = Path(args.workdir).resolve()
+        if workdir.exists() and any(workdir.iterdir()):
+            raise ValueError("--workdir must be a new or empty folder")
+    load_config_into_env()
+
+    async def reject(request):
+        return "deny"  # non-interactive: never wait for approval
+
+    def progress(case_id, event):
+        if event.get("type") in {"tool_scheduled", "final"}:
+            asyncio.get_running_loop().create_task(emit({"type": "eval_event", "case": case_id, "event": event}))
+    config = EngineConfig(approval_policy=ApprovalPolicy(args.permission), load_enabled_plugins=True)
+    report = await run_eval(cases, config, workdir=args.workdir, permission_handler=reject, on_event=progress)
+    lines = [f"{'PASS' if case.passed else 'FAIL'}  {case.id}  ({case.reason}, {case.seconds:.1f}s"
+             + (f", ${case.cost_usd:.4f}" if case.cost_usd is not None else "") + ")"
+             + "".join(f"\n      x {check['type']} {check.get('detail') or ''}".rstrip() for check in case.checks if not check["passed"])
+             + (f"\n      error: {case.error}" if case.error else "") for case in report.cases]
+    lines.append(f"{report.passed}/{len(report.cases)} passed")
+    return {**report.to_dict(), "reason": "completed" if report.ok else "eval_failed", "text": "\n".join(lines)}
+
+
+async def run_server_command(args):
+    from xuloom.core.engine_config import EngineConfig
+    from xuloom.server import XuloomServer
+    load_config_into_env()
+    token = os.environ.get("XULOOM_SERVER_TOKEN") or None
+    server = XuloomServer(EngineConfig(approval_policy=ApprovalPolicy(args.permission), load_enabled_plugins=True),
+                          root=args.root, token=token, host=args.host, port=args.port,
+                          approval_timeout=args.approval_timeout)
+    host, port = await server.start()
+    print(f"Xuloom server on http://{host}:{port}/v1  (root: {server.root})", file=sys.stderr)
+    if token is None:
+        print(f"Bearer token (set XULOOM_SERVER_TOKEN to choose one): {server.token}", file=sys.stderr)
+    sys.stderr.flush()
+    try:
+        await server.serve_forever()
+    finally:
+        await server.close()
+    return {"ok": True, "reason": "completed"}
 
 
 async def dispatch(args, emit):
@@ -402,6 +467,10 @@ async def dispatch(args, emit):
             finally: await bridge.close()
         return {"ok": True, "reason": "completed", "url": url, "chat": row,
                 **({"text": url} if not args.resolve else {})}
+    if args.command == "eval":
+        return await run_eval_command(args, emit)
+    if args.command == "serve":
+        return await run_server_command(args)
     if args.command == "plugins":
         from xuloom.plugins import available_plugins, set_plugin_enabled
         if args.action == "list":

@@ -22,6 +22,7 @@ from xuloom.core import tool_catalog
 from xuloom.core.hooks import HookManager
 from xuloom.core.model_stream import AbortRequestedError, ModelStream
 from xuloom.core.reasoning import configured_profile, normalize_profile, request_options
+from xuloom.core.engine_parts.context import AuxiliaryGate
 from xuloom.core.run_result import PersistenceError, RunResult, finish_run
 from xuloom.core.session import SessionManager
 from xuloom.core.session_lock import SessionConflictError
@@ -113,6 +114,7 @@ class QueryEngine(
             self._init_managers(config, permission_handler)
             self._init_tools(config)
             self._init_tool_context(permission_handler)
+            self._init_observability(config)
             for tool in config.extra_tools:
                 self.register_tool(tool)
             self._apply_plugins()
@@ -142,7 +144,7 @@ class QueryEngine(
         for plugin in self.plugins:
             if not plugin.ok:
                 continue
-            tools, hooks, roots = [], [], []
+            tools, hooks, roots, exporters = [], [], [], []
             try:
                 for tool, latent in plugin.api.tools:
                     if tool.name in self.config.disabled_tools:
@@ -150,6 +152,9 @@ class QueryEngine(
                     tools.append(self.register_tool(tool, latent=latent))
                 for event, callback, tool_filter, modes in plugin.api.hooks:
                     hooks.append(self.hook_manager.register(event, callback, tools=tool_filter, modes=modes))
+                for exporter in plugin.api.trace_exporters:
+                    self.tracer.add_exporter(exporter)
+                    exporters.append(exporter)
                 for registry in (skills, agents):
                     for kind, directories in (("skills", plugin.api.skill_dirs), ("agents", plugin.api.agent_dirs)):
                         for directory in directories:
@@ -162,6 +167,8 @@ class QueryEngine(
                     self.activated_tools.discard(name)
                 for handle in hooks:
                     self.hook_manager.unregister(handle)
+                for exporter in exporters:
+                    self.tracer.remove_exporter(exporter)
                 for bucket, directory in roots:
                     bucket.remove(directory)
                 plugin.rollback_adapters()
@@ -177,6 +184,37 @@ class QueryEngine(
                                       f"but failed to load: {plugin.error}") from error
         # Workers inherit the same plugin set without re-reading the user's enabled list.
         self.tool_context["plugin_specs"] = tuple(plugin.spec for plugin in self.plugins if plugin.ok)
+
+    def _init_observability(self, config: EngineConfig):
+        """Tracer (config + environment exporters) and cost meter (prices + task cap)."""
+        from xuloom.observability import CostMeter, Tracer, environment_exporters, load_prices
+        self.tracer = Tracer(tuple(config.trace_exporters) + tuple(environment_exporters()))
+        try:
+            prices = load_prices()
+        except ValueError as error:
+            _engine_logger.warning("Model prices were not loaded: %s", error)
+            prices = {}
+        prices.update(config.model_prices or {})
+        self.cost_meter = CostMeter(prices, limit_usd=config.max_cost_usd)
+        if not isinstance(getattr(self, "session_cost", None), dict):
+            self.session_cost = {"usd": 0.0, "unpriced_requests": 0}
+        self._owns_observability = True
+        self.response_recorder = None
+        if config.record_responses and self.agent_depth == 0:
+            from xuloom.testing.models import ResponseRecorder
+            self.response_recorder = ResponseRecorder(config.record_responses, model=self.primary_model,
+                                                      provider=self.model_provider)
+        self.tool_context["tracer"] = self.tracer
+        self.tool_context["cost_meter"] = self.cost_meter
+
+    def share_observability(self, context: dict) -> None:
+        """Use the parent's tracer and cost meter (subagents): spans nest, costs count against one task cap."""
+        tracer, meter = context.get("tracer"), context.get("cost_meter")
+        if tracer is not None:
+            self.tracer = self.tool_context["tracer"] = tracer
+        if meter is not None:
+            self.cost_meter = self.tool_context["cost_meter"] = meter
+        self._owns_observability = tracer is None
 
     def _model_clients(self):
         clients = [getattr(self, "client", None), getattr(getattr(self, "compactor", None), "client", None)]
@@ -263,6 +301,7 @@ class QueryEngine(
             request_owner=self._request_owner,
         )
         self.compactor.usage_callback = self._record_auxiliary_usage
+        self.compactor.request_guard = AuxiliaryGate(self)
         self.native_context = None
         self.last_compaction = None
         self.context_calibration = {}
@@ -489,6 +528,7 @@ class QueryEngine(
             manager.cancel_pending()
         self.client, self.compactor = next_client, next_compactor
         self.compactor.usage_callback = self._record_auxiliary_usage
+        self.compactor.request_guard = AuxiliaryGate(self)
         self.context_calibration = {}
         from xuloom.context.compaction import configured as context_settings
         if self.native_context and (route_changed or context_settings(self)["backend"] != "openai-responses"):
@@ -516,6 +556,7 @@ class QueryEngine(
     def _sync_model_runtime_context(self):
         self.tool_context.pop("request_model", None)
         self.compactor.usage_callback = self._record_auxiliary_usage
+        self.compactor.request_guard = AuxiliaryGate(self)
         self.compactor.window_limit = lambda: __import__("xuloom.context.compaction", fromlist=["policy"]).policy(self, self.compactor.model)["window"]
         self.tool_context["context_profile"] = lambda: __import__("xuloom.context.compaction", fromlist=["configured"]).configured(self)
         for name in ("session_memory_manager", "memory_extractor"):
@@ -668,6 +709,8 @@ class QueryEngine(
         failures.extend(await asyncio.gather(self.session_memory_manager.aclose(), self.memory_extractor.aclose(), return_exceptions=True))
         stop = [self.tool_context["command_sessions"].close(owner=self.agent_id if self.agent_depth else None)]
         failures.extend(await asyncio.gather(*stop, return_exceptions=True))
+        if getattr(self, "_owns_observability", False):
+            self.tracer.shutdown()
         if self.agent_depth == 0 and self.session_manager.owns_writer(self.session_id) and not any(isinstance(item, BaseException) for item in failures):
             try:
                 if not self.persist_session_state():

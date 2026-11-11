@@ -172,14 +172,26 @@ def get_model_max_output_tokens(model: str) -> tuple:
 
 
 async def safe_llm_call(client, model: str, provider: str, messages: list,
-                        max_tokens: int, _retried: bool = False, *, usage_callback=None, purpose="summary"):
+                        max_tokens: int, _retried: bool = False, *, usage_callback=None, purpose="summary", guard=None):
     from xuloom.core.output_limits import active_budgets, reserve, settle
+    if guard is not None:
+        # The engine's auxiliary gate: may refuse (cost cap, strict replay miss) or answer from a
+        # recording, in which case no request is sent at all.
+        replayed = guard(model, purpose, messages)
+        if replayed is not None:
+            text, values = replayed
+            if usage_callback:
+                usage_callback(purpose, {**dict(values or {}), "model": model, "replayed": True})
+            return text
     budgets = active_budgets()
     reserved = reserve(max_tokens, budgets) if budgets else max_tokens
     usage = []
     try:
         result = await _safe_llm_call(client, model, provider, messages, reserved, _retried, usage)
-        if usage_callback and usage and isinstance(usage[-1], dict): usage_callback(purpose, usage[-1])
+        if usage_callback and usage and isinstance(usage[-1], dict): usage_callback(purpose, {**usage[-1], "model": model})
+        after = getattr(guard, "after", None)
+        if after is not None:  # recording
+            after(model, purpose, messages, result, usage[-1] if usage and isinstance(usage[-1], dict) else {})
         return result
     finally:
         if budgets:

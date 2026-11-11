@@ -1,0 +1,45 @@
+name: 问题报告
+description: 程序行为与文档不符、崩溃或数据错误
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: 安全漏洞请不要在这里提交，按 SECURITY.md 私密报告。请删除日志中的 API Key、路径中的个人信息和会话内容。
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: "`python -c \"import xuloom; print(xuloom.__version__)\"`，或设置 → 工作区 → 程序版本"
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: 使用方式
+      options: [CLI, 桌面 App, 作为 Python 库嵌入, SSH 远程会话, 其他]
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 环境
+      description: 操作系统、Python 版本、模型适配器（openai/anthropic/插件），以及相关插件或 MCP
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 最好是能独立运行的最小示例或命令
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望结果与实际结果
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志或事件
+      description: 例如 `xuloom exec --json` 的输出、`XULOOM_TRACE_FILE` 的 span 片段
+      render: text

@@ -1,5 +1,4 @@
 """Actual legacy background processes obey native worker ownership and stop."""
-import asyncio
 import os
 from pathlib import Path
 import shlex

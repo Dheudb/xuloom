@@ -204,7 +204,7 @@ class ScriptedAdapterTests(AdapterFixture):
         finally:
             await client.close()
         self.assertEqual(text, "summary")
-        self.assertEqual(usage, [{"input_tokens": 5, "output_tokens": 3}])
+        self.assertEqual(usage, [{"input_tokens": 5, "output_tokens": 3, "model": "m"}])
         self.assertTrue(client.is_closed)
 
 

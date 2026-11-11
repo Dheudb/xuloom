@@ -238,6 +238,7 @@ class MemoryExtractor:
                 self.compactor.provider,
                 [{"role": "user", "content": full_prompt}],
                 self.compactor.output_grant([{"role": "user", "content": full_prompt}], min(default_tokens, 4096)), usage_callback=getattr(self.compactor, "usage_callback", None), purpose="long_term_memory",
+                guard=getattr(self.compactor, "request_guard", None),
             )).strip()
 
             if not raw:

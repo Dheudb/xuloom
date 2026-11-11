@@ -3,7 +3,6 @@ import copy
 import json
 import os
 import unittest
-from types import SimpleNamespace
 
 import test_agent_lifecycle as lifecycle
 from xuloom.core.tool_catalog import compact_definition

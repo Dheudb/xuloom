@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from xuloom.core.session import SessionManager
-from xuloom.core.session_lock import SessionBusyError, SessionConflictError, SessionLock
+from xuloom.core.session_lock import SessionBusyError, SessionConflictError
 from xuloom.desktop.bridge import DesktopBridge
 
 

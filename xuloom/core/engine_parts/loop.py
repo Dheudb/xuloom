@@ -313,6 +313,7 @@ class TurnLoopMixin:
         api_messages: list = None,
         tools_schema: list = None,
         thinking_config: dict = None,
+        replayed: bool = False,
     ):
         usage = getattr(response, "usage", None)
         turn_record = {
@@ -352,6 +353,28 @@ class TurnLoopMixin:
 
         loop_state["turn_input_tokens"] = turn_record["input_tokens"]
         loop_state["turn_output_tokens"] = turn_record["output_tokens"]
+        # Cost: replayed (VCR) responses cost nothing; estimated usage is still priced.
+        cost = 0.0 if replayed else self.cost_meter.record(turn_record["model"], turn_record)
+        turn_record["cost_usd"] = None if cost is None else round(cost, 8)
+        if cost is None:
+            self.session_cost["unpriced_requests"] = int(self.session_cost.get("unpriced_requests", 0) or 0) + 1
+        else:
+            self.session_cost["usd"] = float(self.session_cost.get("usd", 0.0) or 0.0) + cost
+        loop_state["turn_cost_usd"] = turn_record["cost_usd"]
+
+    def _model_span_attributes(self, response, loop_state: dict, replayed: bool) -> dict:
+        record = self.token_usage_history[0] if self.token_usage_history else {}
+        return {
+            "gen_ai.response.model": loop_state.get("active_model"),
+            "gen_ai.response.finish_reasons": [str(getattr(response, "stop_reason", "") or "")],
+            "gen_ai.usage.input_tokens": record.get("input_tokens"),
+            "gen_ai.usage.output_tokens": record.get("output_tokens"),
+            "gen_ai.usage.cache_creation_input_tokens": record.get("cache_creation_input_tokens"),
+            "gen_ai.usage.cache_read_input_tokens": record.get("cache_read_input_tokens"),
+            "xuloom.usage.source": record.get("source"),
+            "xuloom.cost_usd": record.get("cost_usd"),
+            "xuloom.replayed": replayed,
+        }
 
     def _remaining_output_budget(self, loop_state: dict) -> int:
         from xuloom.core.output_limits import active_budgets
@@ -491,6 +514,41 @@ class TurnLoopMixin:
     # ------------------------------------------------------------------
 
     async def _run_loop(self, user_input: str, sys_print_callback=print, event_callback=None, input_blocks=None, attachments=None, display_text=None, selected_skills=None, resume=False):
+        """Run one task inside a ``run`` span; a new top-level task restarts the cost cap."""
+        if self.agent_depth == 0 and not resume:
+            self.cost_meter.start_task()
+        span = self.tracer.start("xuloom.run", "run", **{
+            "xuloom.session_id": self.session_id, "xuloom.agent_id": self.agent_id,
+            "xuloom.agent_role": self.agent_role, "xuloom.agent_depth": self.agent_depth,
+            "xuloom.resume": bool(resume), "gen_ai.request.model": self.primary_model})
+        try:
+            with self.tracer.activate(span):
+                result = await self._run_task(
+                    user_input, sys_print_callback=sys_print_callback, event_callback=event_callback,
+                    input_blocks=input_blocks, attachments=attachments, display_text=display_text,
+                    selected_skills=selected_skills, resume=resume)
+        except BaseException as error:
+            self.tracer.end(span, error=error, **self._run_span_totals())
+            raise
+        reason = getattr(result, "reason", "")
+        if reason not in {"completed", ""}:
+            span.status, span.error = "error", reason
+        self.tracer.end(span, **{"xuloom.result.reason": reason, **self._run_span_totals()})
+        return result
+
+    async def _stop_for_cost(self, reason, turn_count, event_callback):
+        await self._record_loop_transition(
+            "cost_limit", turn=turn_count, event_callback=event_callback,
+            task_cost_usd=round(self.cost_meter.task_usd, 6), max_cost_usd=self.cost_meter.limit_usd)
+        self.persist_session_state()
+        return finish_run(self, reason, 'cost_limit')
+
+    def _run_span_totals(self) -> dict:
+        return {"xuloom.task.cost_usd": round(self.cost_meter.task_usd, 6),
+                "xuloom.task.unpriced_requests": self.cost_meter.task_unpriced,
+                "xuloom.session.cost_usd": round(float(self.session_cost.get("usd", 0.0) or 0.0), 6)}
+
+    async def _run_task(self, user_input: str, sys_print_callback=print, event_callback=None, input_blocks=None, attachments=None, display_text=None, selected_skills=None, resume=False):
         """Run one task: prepare input, then iterate model request -> tools until a final answer.
 
         Phases: `_begin_run` (gates, skills, user message, recovery), `_drain_inbound_messages`,
@@ -535,6 +593,9 @@ class TurnLoopMixin:
                 # before any new reasoning request, using the existing inbox path.
                 if self.user_inbox or mailbox and mailbox():
                     continue
+                blocked = self.cost_meter.blocked_reason(loop_state.get("active_model"))
+                if blocked:
+                    return await self._stop_for_cost(blocked, turn_count, event_callback)
                 await self._apply_layered_compaction_if_needed(sys_print_callback, event_callback=event_callback)
                 if self.user_inbox: continue
                 remaining_output_budget = self._remaining_output_budget(loop_state)
@@ -548,49 +609,66 @@ class TurnLoopMixin:
                     )
                     self.persist_session_state()
                     return finish_run(self, ("Session output token budget exhausted before another turn could start."), 'budget_exhausted')
+                blocked = self.cost_meter.blocked_reason(loop_state.get("active_model"))
+                if blocked:  # compaction may have spent the rest of the budget
+                    return await self._stop_for_cost(blocked, turn_count, event_callback)
                 request = await self._build_turn_request(
                     loop_state, turn_count, tools_schema, remaining_output_budget, event_callback)
 
-                streaming_fallback = False
-                replayed_response = self.vcr_manager.try_replay(request["vcr_payload"])
-                if replayed_response is not None:
-                    response = replayed_response
-                    streaming_tool_entries = []
-                    await self._replay_vcr_response_events(
+                model_span = self.tracer.start("xuloom.model", "model", **{
+                    "gen_ai.operation.name": "chat", "gen_ai.system": self.model_provider,
+                    "gen_ai.request.model": loop_state.get("active_model"),
+                    "gen_ai.request.max_tokens": request["max_tokens"], "xuloom.turn": turn_count})
+                try:
+                    streaming_fallback = False
+                    replayed_response = self.vcr_manager.try_replay(request["vcr_payload"])
+                    if replayed_response is not None:
+                        response = replayed_response
+                        streaming_tool_entries = []
+                        await self._replay_vcr_response_events(
+                            response,
+                            turn_count=turn_count,
+                            event_callback=event_callback,
+                        )
+                    else:
+                        response, streaming_tool_entries, streaming_fallback = await self._stream_model_response(
+                            system_prompt=request["system_prompt"],
+                            api_messages=request["api_messages"],
+                            tools_schema=tools_schema,
+                            turn_count=turn_count,
+                            model_name=loop_state["active_model"],
+                            max_tokens=request["max_tokens"],
+                            thinking_config=request["thinking_config"],
+                            sys_print_callback=sys_print_callback,
+                            event_callback=event_callback,
+                        )
+                        if streaming_fallback:
+                            await self._emit_stream_event(event_callback, {
+                                "type": "streaming_fallback",
+                                "turn": turn_count,
+                            })
+                        self.vcr_manager.record(
+                            request["vcr_payload"],
+                            self._serialize_response_for_vcr(response),
+                        )
+                        if self.response_recorder is not None:
+                            self.response_recorder.append(turn=turn_count, model=loop_state.get("active_model") or "",
+                                                          response=self._serialize_response_for_vcr(response),
+                                                          session_id=self.session_id)
+                    self._record_token_usage(
                         response,
-                        turn_count=turn_count,
-                        event_callback=event_callback,
-                    )
-                else:
-                    response, streaming_tool_entries, streaming_fallback = await self._stream_model_response(
+                        loop_state,
+                        turn_count,
                         system_prompt=request["system_prompt"],
                         api_messages=request["api_messages"],
                         tools_schema=tools_schema,
-                        turn_count=turn_count,
-                        model_name=loop_state["active_model"],
-                        max_tokens=request["max_tokens"],
                         thinking_config=request["thinking_config"],
-                        sys_print_callback=sys_print_callback,
-                        event_callback=event_callback,
+                        replayed=replayed_response is not None,
                     )
-                    if streaming_fallback:
-                        await self._emit_stream_event(event_callback, {
-                            "type": "streaming_fallback",
-                            "turn": turn_count,
-                        })
-                    self.vcr_manager.record(
-                        request["vcr_payload"],
-                        self._serialize_response_for_vcr(response),
-                    )
-                self._record_token_usage(
-                    response,
-                    loop_state,
-                    turn_count,
-                    system_prompt=request["system_prompt"],
-                    api_messages=request["api_messages"],
-                    tools_schema=tools_schema,
-                    thinking_config=request["thinking_config"],
-                )
+                except BaseException as error:
+                    self.tracer.end(model_span, error=error)
+                    raise
+                self.tracer.end(model_span, **self._model_span_attributes(response, loop_state, replayed_response is not None))
                 counters["protocol_failures"] = 0
                 await self._emit_stream_event(event_callback, {
                     "type": "token_usage",
@@ -599,6 +677,9 @@ class TurnLoopMixin:
                     "output_tokens": loop_state["turn_output_tokens"],
                     "session_input_tokens": self.session_token_usage.get("input_tokens", 0),
                     "session_output_tokens": self.session_token_usage.get("output_tokens", 0),
+                    "cost_usd": loop_state.get("turn_cost_usd"),
+                    "session_cost_usd": round(float(self.session_cost.get("usd", 0.0) or 0.0), 6),
+                    "task_cost_usd": round(self.cost_meter.task_usd, 6),
                 })
                 await self._emit_stream_event(event_callback, {
                     "type": "thinking_config",
@@ -1180,6 +1261,12 @@ class TurnLoopMixin:
             cancelled=isinstance(e, AbortRequestedError)))
         from xuloom.agents.external.runtime import ExternalExecutionError
         from xuloom.core.output_limits import ModelBudgetError
+        from xuloom.observability.cost import CostLimitError
+        cause = e
+        while cause is not None and not isinstance(cause, CostLimitError):
+            cause = cause.__cause__ or cause.__context__
+        if cause is not None:  # e.g. raised by compaction, possibly wrapped
+            return await self._stop_for_cost(str(cause), turn_count, event_callback)
         if isinstance(e, (ExternalExecutionError, ModelBudgetError)):
             return finish_run(self, str(e), e.reason if isinstance(e, ExternalExecutionError) else "budget_exhausted")
         if isinstance(e, ToolProtocolError):

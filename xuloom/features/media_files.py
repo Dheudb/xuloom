@@ -1,6 +1,5 @@
 """Content-based media type detection and size limits, shared by previews and attachments."""
 import hashlib
-import os
 from pathlib import Path
 
 from PIL import Image

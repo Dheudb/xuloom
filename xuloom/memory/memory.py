@@ -423,7 +423,8 @@ Conversation to summarize:
                     callback=getattr(self,'usage_callback',None)
                     if callback: callback(purpose,values)
                 return await safe_llm_call(self.client,self.model,self.provider,
-                    [{"role":"user","content":prompt}],limit,usage_callback=usage,purpose='compaction')
+                    [{"role":"user","content":prompt}],limit,usage_callback=usage,purpose='compaction',
+                    guard=getattr(self,'request_guard',None))
             owner=getattr(self,'budget_engine',None)
             if owner is not None:
                 from xuloom.core.output_limits import model_reservation

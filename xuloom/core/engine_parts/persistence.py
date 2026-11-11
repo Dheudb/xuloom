@@ -262,6 +262,16 @@ class SessionPersistenceMixin:
             })
             self.tool_context["token_usage_history"] = self.token_usage_history
             self.tool_context["session_token_usage"] = self.session_token_usage
+            saved_cost = metadata.get("session_cost")
+            self.session_cost = dict(saved_cost) if isinstance(saved_cost, dict) else {"usd": 0.0, "unpriced_requests": 0}
+            # The current task's spend, so resuming it after a restart keeps counting against the cap.
+            saved_task = metadata.get("task_cost")
+            meter = getattr(self, "cost_meter", None)
+            if meter is not None and self.agent_depth == 0:
+                meter.start_task()
+                if isinstance(saved_task, dict):
+                    meter.task_usd = max(0.0, float(saved_task.get("usd", 0.0) or 0.0))
+                    meter.task_unpriced = max(0, int(saved_task.get("unpriced_requests", 0) or 0))
             self.session_memory_manager.bind_session(self.session_id, metadata.get("session_memory", {}))
             self.memory_extractor.load_state(metadata.get("memory_extractor", {}))
             self._update_compact_boundary()
@@ -324,6 +334,9 @@ class SessionPersistenceMixin:
             "token_usage_history": self.token_usage_history,
             "post_sampling_history": self.post_sampling_history,
             "session_token_usage": self.session_token_usage,
+            "session_cost": getattr(self, "session_cost", {"usd": 0.0, "unpriced_requests": 0}),
+            "task_cost": ({"usd": self.cost_meter.task_usd, "unpriced_requests": self.cost_meter.task_unpriced}
+                          if getattr(self, "cost_meter", None) is not None else None),
             "message_statistics": self._build_message_statistics(),
             "session_memory": self.session_memory_manager.export_state(),
             "memory_extractor": self.memory_extractor.export_state(),

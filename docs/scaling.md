@@ -91,11 +91,11 @@ xuloom scaling retry RUN_ID --task TASK_ID --confirm-side-effects --json
 
 本轮只做本地确定性测试、实际 SDK 到本地 HTTP/SSE、加密 SSH 回环及隐藏 Electron 测试，不调用真实模型或外部机器。1 万条排队记录和千级分组结构的测试不是千台机器／千个真实模型同时运行的性能结论。
 
-具体轮次、首次失败及复测结果见 [本地验证记录](scaling-validation-2026-11-04.md)。供应商请求额度继续使用已有的 [`model_request_limits`](models.md) 配置（默认并发 4）；节点智能体上限不会自动提高供应商额度。集群预分配只覆盖 Scaling，不统计其他普通会话或其他应用对同一账户的请求。
+具体轮次、首次失败及复测结果见 [本地验证记录](history/scaling-validation-2026-11-04.md)。供应商请求额度继续使用已有的 [`model_request_limits`](models.md) 配置（默认并发 4）；节点智能体上限不会自动提高供应商额度。集群预分配只覆盖 Scaling，不统计其他普通会话或其他应用对同一账户的请求。
 
-运行中对话、改向、持久化和成品更新的验证见 [对话专项记录](scaling-conversation-validation-2026-11-04.md)。
+运行中对话、改向、持久化和成品更新的验证见 [对话专项记录](history/scaling-conversation-validation-2026-11-04.md)。
 
-本机参与、均衡分组与组长主会话的验证见 [本机节点专项记录](scaling-local-validation-2026-11-04.md)。
+本机参与、均衡分组与组长主会话的验证见 [本机节点专项记录](history/scaling-local-validation-2026-11-04.md)。
 
 ## 共享协作（离线优先）
 
@@ -116,7 +116,7 @@ xuloom scaling shared RUN_ID --entry ENTRY_ID --json
 
 该版本没有部署云端共享服务器，也没有自动合并代码或科学结论。框架不把凭据配置、私人 Skill 或整个工作目录打包同步；共享内容来自任务报告和明确发布的记录、产物。
 
-实现与测试范围见 [共享协作本地验收](scaling-shared-validation-2026-11-04.md)。
+实现与测试范围见 [共享协作本地验收](history/scaling-shared-validation-2026-11-04.md)。
 
 v0.1.32 修复首次共享摘要与事件游标的快照竞争，并改为不可变文件版本的有界分页。首次摘要、数量和游标在同一 SQLite 读取事务中产生，并发提交的记录会出现在该快照或下一次增量中。共享文件副本与索引位于执行端数据目录的 `scaling/shared-artifacts/`，索引在内存中最多缓存 64 份；不把文件内容全量保存在内存缓存中。
 

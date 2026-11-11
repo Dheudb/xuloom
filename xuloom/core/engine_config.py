@@ -147,6 +147,17 @@ class EngineConfig:
     disabled_plugins: FrozenSet[str] = frozenset()
     """Plugin names this engine must not load from the bundled or enabled lists."""
 
+    # --- Observability and cost (see docs/observability.md) ---------------
+    trace_exporters: Tuple[Any, ...] = ()
+    """Objects with ``export(span)`` receiving run/model/tool spans. Env adds ``XULOOM_TRACE_FILE`` / ``XULOOM_TRACE_OTLP``."""
+    model_prices: Optional[Mapping[str, Any]] = None
+    """USD per million tokens by model ID or pattern; overrides ``~/.xuloom/pricing.json``."""
+    max_cost_usd: Optional[float] = None
+    """Per-task spending cap, subagents included. Env: ``XULOOM_MAX_COST_USD``."""
+    record_responses: Optional[str] = None
+    """Append every live model response of the top-level engine to this JSONL cassette
+    (replay it with :class:`xuloom.testing.ReplayModel`). Env: ``XULOOM_RECORD_RESPONSES``."""
+
     def __post_init__(self):
         if self.reasoning_effort is not None and self.reasoning_effort not in EFFORTS:
             raise ValueError("Unsupported reasoning_effort")
@@ -156,6 +167,12 @@ class EngineConfig:
         object.__setattr__(self, "disabled_tools", frozenset(self.disabled_tools or ()))
         object.__setattr__(self, "plugins", tuple(self.plugins or ()))
         object.__setattr__(self, "disabled_plugins", frozenset(self.disabled_plugins or ()))
+        object.__setattr__(self, "trace_exporters", tuple(self.trace_exporters or ()))
+        if self.max_cost_usd is not None:
+            value = float(self.max_cost_usd)
+            if value != value or value < 0 or value == float("inf"):
+                raise ValueError("max_cost_usd must be a non-negative number")
+            object.__setattr__(self, "max_cost_usd", value)
 
     @classmethod
     def field_names(cls) -> FrozenSet[str]:
@@ -173,8 +190,17 @@ class EngineConfig:
         env = os.environ if environ is None else environ
         provider = resolve_model_provider(self.model_provider, self.model, env)
         model = resolve_primary_model(provider, self.model, env)
+        max_cost = self.max_cost_usd
+        if max_cost is None and str(env.get("XULOOM_MAX_COST_USD", "") or "").strip():
+            try:
+                max_cost = float(env["XULOOM_MAX_COST_USD"])
+            except ValueError as error:
+                raise ValueError("XULOOM_MAX_COST_USD must be a number") from error
         return dataclasses.replace(
             self,
+            max_cost_usd=max_cost,
+            record_responses=(self.record_responses if self.record_responses is not None
+                              else (env.get("XULOOM_RECORD_RESPONSES", "") or None)),
             cwd=os.path.abspath(self.cwd or os.getcwd()),
             execution_mode=self.execution_mode or env.get("XULOOM_EXECUTION_MODE", "host"),
             collaboration_mode=self.collaboration_mode or env.get("XULOOM_COLLABORATION_MODE", "auto"),
@@ -189,12 +215,14 @@ class EngineConfig:
 
     def to_public_dict(self) -> dict:
         """Settings without credentials or live objects, for logs and diagnostics."""
-        hidden = {"api_key", "approval_policy", "extra_tools", "plugins"}
+        hidden = {"api_key", "approval_policy", "extra_tools", "plugins", "trace_exporters", "model_prices"}
         data = {item.name: getattr(self, item.name) for item in dataclasses.fields(self) if item.name not in hidden}
         data["disabled_tools"] = sorted(self.disabled_tools)
         data["disabled_plugins"] = sorted(self.disabled_plugins)
         data["extra_tools"] = [getattr(tool, "name", type(tool).__name__) for tool in self.extra_tools]
         data["plugins"] = [item if isinstance(item, str) else str(getattr(item, "NAME", None) or getattr(item, "name", None)
                            or getattr(item, "__name__", type(item).__name__)) for item in self.plugins]
+        data["trace_exporters"] = [type(item).__name__ for item in self.trace_exporters]
+        data["model_prices"] = sorted(self.model_prices or {})
         data["has_api_key"] = bool(self.api_key)
         return data

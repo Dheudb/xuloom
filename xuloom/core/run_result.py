@@ -21,6 +21,7 @@ def failure_help(reason):
         "session_conflict": ("storage", "重新加载最新记录；不要用旧检查点覆盖或重放操作。", "activity"),
         "cancelled": ("cancelled", "执行已停止；已保存结果保留，未确认副作用不会自动重放。", "activity"),
         "blocked": ("blocked", "查看阻塞原因与待处理要求，再决定继续或调整任务。", "activity"),
+        "cost_limit": ("budget", "已达到任务花费上限，或所用模型没有配置价格；调整上限或价格后再继续。", "settings"),
         "workflow_incomplete": ("blocked", "流程尚未完成；查看已有回执与未完成步骤后继续。", "activity"),
     }
     category, message, action = rows.get(reason, ("execution", "查看活动和已有回执；确认当前状态后再继续。", "activity"))

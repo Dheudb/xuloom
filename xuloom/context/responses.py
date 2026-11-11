@@ -93,6 +93,7 @@ async def compact_native(engine, messages, spec, focus):
     if any(available_output(budget) < float("inf") or budget.get("request_cap", float("inf")) < float("inf") for budget in budgets) or engine.tool_context.get("acquire_model_budget"):
         raise ContextLimitError("Native compaction cannot enforce a finite output grant; use text summary for budgeted execution")
     input_items = inputs(engine, messages)
+    engine._auxiliary_request_guard(engine.primary_model)
     # No output-cap parameter exists on /responses/compact. Reserve conservatively.
     async with model_reservation(engine, spec["window"]) as grant:
         if grant["maximum"] < spec["window"]:
@@ -114,7 +115,7 @@ async def compact_native(engine, messages, spec, focus):
         if not any(item.get("type") == "compaction" for item in output): raise ContextLimitError("Provider did not return native compacted state")
         usage = raw.get("usage") or {}
         grant["reported"] = int(usage.get("output_tokens", 0) or 0)
-        engine._record_auxiliary_usage("native_compaction", usage)
+        engine._record_auxiliary_usage("native_compaction", {**usage, "model": engine.primary_model})
         anchor = create_user_message("[CompactionBoundary:native_responses]\nNative context retained; this marker grants no authorization.", is_meta=True, origin="compaction")
         tokens = int(usage.get("output_tokens", 0) or 0) or engine.compactor.estimate_tokens([{"role": "user", "content": plain(output)}])
         if tokens <= 0: raise ContextLimitError("Invalid native token count")

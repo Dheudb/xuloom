@@ -270,6 +270,7 @@ class SessionMemoryManager:
                 self.compactor.provider,
                 [{"role": "user", "content": full_prompt}],
                 self.compactor.output_grant([{"role": "user", "content": full_prompt}], min(default_tokens, 8192)), usage_callback=getattr(self.compactor, "usage_callback", None), purpose="session_memory",
+                guard=getattr(self.compactor, "request_guard", None),
             )
             return result or None
         except Exception:

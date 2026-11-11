@@ -10,7 +10,7 @@ Names are imported lazily so ``import xuloom`` stays cheap for CLI startup.
 from importlib import import_module
 from typing import TYPE_CHECKING
 
-__version__ = "0.1.43"
+__version__ = "0.1.44"
 
 _EXPORTS = {
     "QueryEngine": "xuloom.core.engine",
@@ -27,6 +27,11 @@ _EXPORTS = {
     "register_adapter": "xuloom.models",
     "PluginAPI": "xuloom.plugins",
     "HOOK_EVENTS": "xuloom.core.hooks",
+    "Span": "xuloom.observability",
+    "Tracer": "xuloom.observability",
+    "TraceExporter": "xuloom.observability",
+    "JsonlTraceExporter": "xuloom.observability",
+    "ModelPrice": "xuloom.observability",
 }
 
 __all__ = ["__version__", *_EXPORTS]
@@ -56,3 +61,4 @@ if TYPE_CHECKING:  # pragma: no cover - static analysers see real imports
     from xuloom.core.hooks import HOOK_EVENTS
     from xuloom.models import ModelAdapter, ToolCall, model_response, register_adapter
     from xuloom.plugins import PluginAPI
+    from xuloom.observability import JsonlTraceExporter, ModelPrice, Span, TraceExporter, Tracer

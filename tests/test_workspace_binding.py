@@ -1,5 +1,4 @@
 """Real requests and hook processes must use the instance workspace, not process globals."""
-import asyncio
 import hashlib
 import json
 import os

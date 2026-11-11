@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import httpx
 
-from xuloom.core.model_catalog import save_connection, delete_connection, public_config, select_model, discover_models, sync_legacy_connection, apply_connection_env, apply_catalog_env, active_connection, connections
+from xuloom.core.model_catalog import save_connection, delete_connection, public_config, select_model, discover_models, sync_legacy_connection, apply_connection_env, active_connection, connections
 
 
 class ModelCatalogTests(unittest.IsolatedAsyncioTestCase):

@@ -93,4 +93,4 @@ cd ..
 隐藏桌面测试使用临时配置和本机测试服务，不需要私人 API Key。测试安装后的程序时，指定稳定 EXE 的 `XULOOM_TEST_EXECUTABLE`，取消 `XULOOM_PYTHON` 覆盖，以验证其自带运行时。
 
 
-目标模式、非交互 CLI 与定时唤醒是后续可选能力，复用现有引擎和检查点，详见 [目标与调度](goals-and-schedules.md) 及 [2026-10-28 验证](task-modes-validation-2026-10-28.md)。它们不将未完成的真实模型长任务或系统级沙箱里程碑改成已完成。
+目标模式、非交互 CLI 与定时唤醒是后续可选能力，复用现有引擎和检查点，详见 [目标与调度](goals-and-schedules.md) 及 [2026-10-28 验证](history/task-modes-validation-2026-10-28.md)。它们不将未完成的真实模型长任务或系统级沙箱里程碑改成已完成。

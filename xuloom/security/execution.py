@@ -21,6 +21,81 @@ class SandboxUnavailable(RuntimeError):
     pass
 
 
+def detect_backend():
+    """The system isolation backend for this host, or ``None`` (workspace mode then fails closed)."""
+    if os.name == "nt":
+        return "windows-lpac" if ctypes.sizeof(ctypes.c_void_p) == 8 else None
+    if sys.platform.startswith("linux"):
+        return "linux-bwrap" if shutil.which("bwrap") else None
+    if sys.platform == "darwin":
+        return "macos-seatbelt" if shutil.which("sandbox-exec") else None
+    return None
+
+
+# Read-only system locations visible inside the Linux sandbox (missing ones are skipped).
+LINUX_SYSTEM_ROOTS = ("/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32", "/etc", "/opt")
+
+
+# Like the Windows launcher, tool processes get an allowlisted environment: no API keys or tokens.
+POSIX_ENVIRONMENT = ("PATH", "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "TERM", "TZ", "USER", "LOGNAME")
+
+
+def restricted_posix_environment(temporary, environ=None):
+    environ = os.environ if environ is None else environ
+    result = {key: environ[key] for key in POSIX_ENVIRONMENT if environ.get(key)}
+    result.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
+    result.update(HOME=str(temporary), TMPDIR=str(temporary), PYTHONUTF8="1", PYTHONIOENCODING="utf-8", MPLBACKEND="Agg")
+    return result
+
+
+def _clean_env(environment):
+    return ["/usr/bin/env", "-i", *(f"{key}={value}" for key, value in sorted(environment.items()))]
+
+
+def bwrap_argv(argv, *, workspace, cwd, read_roots, timeout_ms, bwrap="bwrap", timeout_program=None, environment=None):
+    """bubblewrap command line: empty root, read-only system and runtime, writable workspace only,
+    every namespace (including the network) unshared, killed with its parent."""
+    command = [bwrap, "--die-with-parent", "--new-session", "--unshare-all",
+               "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--tmpfs", "/run"]
+    for root in LINUX_SYSTEM_ROOTS:
+        command += ["--ro-bind-try", root, root]
+    for root in read_roots:
+        command += ["--ro-bind", str(root), str(root)]
+    command += ["--bind", str(workspace), str(workspace), "--chdir", str(cwd), "--"]
+    command += _clean_env(environment if environment is not None else restricted_posix_environment("/tmp"))
+    if timeout_program and timeout_ms:
+        command += [timeout_program, "--kill-after=5", f"{max(1, int(timeout_ms) // 1000)}s"]
+    return command + list(argv)
+
+
+def _sbpl(path):
+    """Quote a path as an SBPL string literal."""
+    return '"' + str(path).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+MACOS_SYSTEM_ROOTS = ("/usr", "/bin", "/sbin", "/System", "/Library", "/private/etc", "/private/var/db",
+                      "/opt/homebrew", "/dev")
+
+
+def seatbelt_profile(*, workspace, read_roots, temporary):
+    """sandbox-exec profile: deny by default, no network, read system/runtime, write workspace and temp only."""
+    readable = [*MACOS_SYSTEM_ROOTS, *map(str, read_roots), str(workspace), str(temporary)]
+    return "\n".join([
+        "(version 1)",
+        "(deny default)",
+        "(allow process-exec process-fork)",
+        "(allow signal (target same-sandbox))",
+        "(allow sysctl-read)",
+        "(allow mach-lookup)",
+        "(allow ipc-posix-shm)",
+        "(allow file-read-metadata)",
+        '(allow file-read* (literal "/") ' + " ".join(f"(subpath {_sbpl(path)})" for path in readable) + ")",
+        f"(allow file-write* (subpath {_sbpl(workspace)}) (subpath {_sbpl(temporary)}) "
+        '(literal "/dev/null") (literal "/dev/tty") (regex #"^/dev/fd/"))',
+        '(allow file-ioctl (literal "/dev/tty"))',
+    ])
+
+
 class PreparedLaunch:
     def __init__(self, argv, directory, api=None, event=None, finished=None):
         self.argv, self.directory, self.api, self.event = argv, directory, api, event
@@ -56,14 +131,29 @@ class ExecutionSandbox:
     def enabled(self):
         return self.mode == "workspace"
 
+    BACKEND_MESSAGES = {
+        "windows-lpac": "Windows LPAC: authorized workspace, read-only runtimes, no network capabilities, owned process jobs",
+        "linux-bwrap": "Linux bubblewrap (experimental): writable workspace, read-only system and runtime, "
+                       "home/credentials not mounted, all namespaces including network unshared",
+        "macos-seatbelt": "macOS seatbelt (experimental): deny-by-default profile, writable workspace and temp only, no network",
+    }
+
     def status(self):
-        windows = os.name == "nt" and ctypes.sizeof(ctypes.c_void_p) == 8
+        backend = detect_backend()
         from xuloom.security.sandbox_cleanup import pending
-        return {"mode": self.mode, "available": windows, "backend": "windows-lpac" if windows else None,
-            "cleanup_issues": pending(self.workspace),
+        if backend:
+            message = self.BACKEND_MESSAGES[backend]
+        elif sys.platform.startswith("linux"):
+            message = "Install bubblewrap (bwrap) to enable workspace isolation on Linux; workspace mode fails closed"
+        elif sys.platform == "darwin":
+            message = "sandbox-exec is unavailable; workspace mode fails closed"
+        else:
+            message = "This platform has no validated system execution backend; workspace mode fails closed"
+        return {"mode": self.mode, "available": backend is not None, "backend": backend,
+            "experimental": backend in {"linux-bwrap", "macos-seatbelt"},
+            "cleanup_issues": pending(self.workspace) if backend == "windows-lpac" else [],
             "network": "blocked-in-tool-processes" if self.enabled else "host",
-            "message": "Windows LPAC: authorized workspace, read-only runtimes, no network capabilities, owned process jobs" if windows else
-                "This platform has no validated system execution backend; workspace mode fails closed",
+            "message": message,
             "unsupported_tools": "Browser, LSP, network tools and MCP servers are blocked in workspace mode until confined backends are available"}
 
     def check_tool(self, name):
@@ -100,6 +190,9 @@ class ExecutionSandbox:
         for trusted in runtime_roots + sensitive:
             if trusted.is_relative_to(root) or root.is_relative_to(trusted):
                 raise SandboxUnavailable("The writable workspace overlaps trusted runtime, credentials or session storage. Choose a separate working directory; no tool was started.")
+        if status["backend"] != "windows-lpac":
+            return self._prepare_posix(status["backend"], argv=argv, command=command, cwd=cwd, root=root, package=package,
+                                       runtime_roots=runtime_roots, read_roots=read_roots, timeout_ms=timeout_ms)
         if command:
             argv = [str(Path(os.environ["SystemRoot"]) / "System32/cmd.exe"), "/d", "/s", "/c", command]
         else:
@@ -136,6 +229,36 @@ class ExecutionSandbox:
             raise
         return PreparedLaunch([sys.executable, "-I", "-B", str(Path(__file__).with_name("windows_sandbox.py")), str(path)], directory, api, event, self._cleanup_finished)
 
+    def _prepare_posix(self, backend, *, argv, command, cwd, root, package, runtime_roots, read_roots, timeout_ms):
+        if command:
+            argv = ["/bin/sh", "-c", command]
+        else:
+            argv = list(argv)
+            executable = shutil.which(argv[0])
+            if not executable:
+                raise FileNotFoundError("Sandbox executable could not be resolved")
+            argv[0] = executable
+        system = LINUX_SYSTEM_ROOTS if backend == "linux-bwrap" else MACOS_SYSTEM_ROOTS
+        candidates = [Path(path).resolve() for path in (*runtime_roots, package, sys.executable,
+                                                         getattr(sys, "_base_executable", sys.executable))]
+        candidates += [Path(p).resolve() for p in read_roots]
+        executable_path = Path(argv[0]).resolve()
+        if not executable_path.is_relative_to(root):
+            # Mount the resolved executable itself, never its whole parent directory.
+            candidates.append(executable_path)
+        candidates = [path for path in candidates if path.exists() and not path.is_relative_to(root)
+                      and not any(path.is_relative_to(Path(base)) for base in system)]
+        roots = [path for path in dict.fromkeys(candidates) if not any(path != other and path.is_relative_to(other) for other in candidates)]
+        if backend == "linux-bwrap":
+            launch_argv = bwrap_argv(argv, workspace=root, cwd=cwd, read_roots=roots, timeout_ms=timeout_ms,
+                                     bwrap=shutil.which("bwrap") or "bwrap", timeout_program=shutil.which("timeout"))
+            return PreparedLaunch(launch_argv, None)
+        directory = tempfile.TemporaryDirectory(prefix="xuloom-launch-")
+        temporary = Path(directory.name).resolve()
+        profile = seatbelt_profile(workspace=root, read_roots=roots, temporary=temporary)
+        return PreparedLaunch([shutil.which("sandbox-exec") or "/usr/bin/sandbox-exec", "-p", profile,
+                               *_clean_env(restricted_posix_environment(temporary)), *argv], directory)
+
     def _cleanup_finished(self):
         issues = self.status()["cleanup_issues"]
         if issues and self.notify:
@@ -146,8 +269,9 @@ class ExecutionSandbox:
         launch = self.prepare(argv=argv, command=command, cwd=cwd, timeout_ms=int(timeout * 1000), read_roots=read_roots)
         process = None
         try:
+            options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {"start_new_session": True}
             process = await asyncio.create_subprocess_exec(*launch.argv, stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, creationflags=subprocess.CREATE_NO_WINDOW)
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, **options)
             self.processes.add(process)
             output, error = await asyncio.wait_for(process.communicate(data), timeout + 30)
             return process.returncode, output, error

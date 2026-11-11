@@ -1,7 +1,6 @@
 """Bounded, credential-safe web diagnostics and per-client DDGS networking."""
 import math
 import re
-import sys
 import time
 from email.utils import parsedate_to_datetime
 from urllib.parse import unquote, urlsplit, urlunsplit
@@ -9,10 +8,7 @@ from urllib.request import getproxies, proxy_bypass_environment
 
 import httpx
 
-if sys.version_info >= (3, 10):
-    from ddgs.exceptions import DDGSException as SearchError, TimeoutException as SearchTimeout, RatelimitException as SearchRateLimit
-else:
-    from duckduckgo_search.exceptions import DuckDuckGoSearchException as SearchError, TimeoutException as SearchTimeout, RatelimitException as SearchRateLimit
+from ddgs.exceptions import DDGSException as SearchError, TimeoutException as SearchTimeout, RatelimitException as SearchRateLimit
 
 
 def safe_detail(value, secrets=()):
@@ -144,24 +140,18 @@ class _RoutedClient:
         return response
 
 
-def run_ddgs(factory, query, limit, proxies, info, timeout, *, legacy=False):
+def run_ddgs(factory, query, limit, proxies, info, timeout):
     proxy = proxy_for_url(proxies, "https://search.invalid")
-    if legacy:
-        # 8.x gives DDGS_PROXY precedence over proxy; its supported legacy
-        # argument lets this instance override it without changing os.environ.
-        search = factory(proxy=None, proxies={"https": proxy}, timeout=timeout)
-        search.client = _RoutedClient(search.client, proxies, info)
-    else:
-        search = factory(proxy=proxy, timeout=timeout)
-        search._proxy = proxy  # DDGS 9.x otherwise falls back to DDGS_PROXY.
-        original = search._get_engines
-        def engines(*args, **kwargs):
-            rows = original(*args, **kwargs)
-            for row in rows:
-                if not isinstance(row.http_client.client, _RoutedClient):
-                    row.http_client.client = _RoutedClient(row.http_client.client, proxies, info)
-            return rows
-        search._get_engines = engines
+    search = factory(proxy=proxy, timeout=timeout)
+    search._proxy = proxy  # DDGS 9.x otherwise falls back to DDGS_PROXY.
+    original = search._get_engines
+    def engines(*args, **kwargs):
+        rows = original(*args, **kwargs)
+        for row in rows:
+            if not isinstance(row.http_client.client, _RoutedClient):
+                row.http_client.client = _RoutedClient(row.http_client.client, proxies, info)
+        return rows
+    search._get_engines = engines
     return list(search.text(query, max_results=limit))
 
 

@@ -147,7 +147,7 @@ tools: [Read, Grep, Glob]
 
 ## 远端原生子代理
 
-原生角色可配置 `executor: ssh:连接ID` 使用另一执行主机。设置中选择 SSH 位置后读取该主机的模型列表，Skills/MCP 也在主机解析，不复制本机凭据和文件。派发、跟进、消息、取消和容量仍用现有生命周期。完整示例与恢复边界见 [原生 SSH 子代理](distributed-workers-plan.md)。本机 Claude Code/Pi/Codex/DSH 已有[可选后端](external-agents.md)；外部 CLI 经 SSH 的全部组合仍待单独验收。
+原生角色可配置 `executor: ssh:连接ID` 使用另一执行主机。设置中选择 SSH 位置后读取该主机的模型列表，Skills/MCP 也在主机解析，不复制本机凭据和文件。派发、跟进、消息、取消和容量仍用现有生命周期。完整示例与恢复边界见 [原生 SSH 子代理](history/distributed-workers-plan.md)。本机 Claude Code/Pi/Codex/DSH 已有[可选后端](external-agents.md)；外部 CLI 经 SSH 的全部组合仍待单独验收。
 
 ## 向用户提问
 

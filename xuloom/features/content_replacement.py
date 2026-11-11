@@ -1,3 +1,4 @@
+import logging
 import copy
 import os
 import time
@@ -204,8 +205,13 @@ class ContentReplacementManager:
                 tool_use_id=tool_use_id,
                 original_content_chars=size,
             )
-        except Exception:
-            pass
+        except Exception as error:
+            # Without a saved copy the preview would point at a missing file and lose the
+            # output; keep the original content inline instead.
+            logging.getLogger("xuloom.context").warning(
+                "Could not save oversized tool result %s to disk (%s: %s); keeping it inline",
+                tool_use_id, type(error).__name__, error)
+            return None
 
         preview = original[:PREVIEW_CHARS]
         return (

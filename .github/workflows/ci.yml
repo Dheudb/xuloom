@@ -1,0 +1,64 @@
+name: CI
+permissions:
+  contents: read
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e ".[dev]"
+      - run: ruff check .
+      - run: mypy
+      - run: python scripts/check-python-names.py
+  test:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ['3.10', '3.12', '3.13']
+        include:
+          - os: windows-latest
+            python: '3.12'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - if: runner.os == 'Linux'
+        name: Install bubblewrap for the Linux isolation tests
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+      - run: python -m pip install -e ".[mcp,dev]"
+      - run: python -m unittest discover -s tests
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install build twine
+      - run: python -m build
+      - run: python -m twine check dist/*
+      - name: Install the wheel in a clean environment
+        run: |
+          python -m venv /tmp/wheel
+          /tmp/wheel/bin/pip install dist/*.whl
+          cd /tmp && /tmp/wheel/bin/python -c "import xuloom; from xuloom import QueryEngine, EngineConfig, Tracer; print(xuloom.__version__)"

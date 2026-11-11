@@ -117,7 +117,7 @@ def to_openai_messages(messages: List[dict], system_prompt: str = "", *, engine=
     """
     if engine is not None:
         return engine._clean_roles_for_openai_api(messages, system_prompt)
-    out = [{"role": "system", "content": system_prompt}] if system_prompt else []
+    out: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}] if system_prompt else []
     for message in messages:
         content = message.get("content")
         blocks = [{"type": "text", "text": content}] if isinstance(content, str) else list(content or [])
@@ -126,7 +126,7 @@ def to_openai_messages(messages: List[dict], system_prompt: str = "", *, engine=
             calls = [{"id": block["id"], "type": "function", "function": {"name": block["name"],
                       "arguments": json.dumps(block.get("input") or {}, ensure_ascii=False)}}
                      for block in blocks if isinstance(block, dict) and block.get("type") == "tool_use"]
-            item = {"role": "assistant", "content": "\n".join(texts) or None}
+            item: Dict[str, Any] = {"role": "assistant", "content": "\n".join(texts) or None}
             if calls:
                 item["tool_calls"] = calls
             out.append(item)

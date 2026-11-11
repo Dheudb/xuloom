@@ -22,11 +22,13 @@ Python 依赖和 CLI 入口在 `setup.py`。`requirements.txt` 只引用当前�
 
 | Extra | 用途 |
 |---|---|
-| `mcp` | MCP SDK，Python 3.10+ |
+| `dev` | 测试与检查工具：pyflakes、paramiko、ruff、mypy、build、twine |
+| `otel` | OpenTelemetry SDK 与 OTLP 导出，见[追踪与花费](observability.md) |
+| `mcp` | MCP SDK |
 | `browser` | Python Playwright；还需执行 `python -m playwright install chromium` |
 | `tokenizers` | 可选的 tiktoken / Transformers Token 计数 |
 
-基础 CLI 支持 Python 3.9；完整桌面构建使用 Python 3.12+。
+核心库与 CLI 要求 Python 3.10+；完整桌面构建使用 Python 3.12+。
 前端依赖在 `desktop/package.json` 与 `package-lock.json`，使用 `npm ci` 安装。
 
 ## 验证命令
@@ -35,6 +37,8 @@ Python 依赖和 CLI 入口在 `setup.py`。`requirements.txt` 只引用当前�
 
 ```powershell
 # 仓库根目录
+ruff check .          # 语法、未定义名称、未使用导入
+mypy                  # 公开 API 模块的类型检查，范围见 pyproject.toml
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 cd desktop
 npm test

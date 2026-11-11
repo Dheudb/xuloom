@@ -136,7 +136,7 @@ class ToolOrchestrationMixin:
             try:
                 return bool(inspector(**tool_inputs))
             except Exception:
-                return False
+                return False  # unknown -> run sequentially (the conservative choice); input errors surface at execution
 
         return False
 
@@ -162,7 +162,23 @@ class ToolOrchestrationMixin:
         return batches
 
     async def _execute_tool_wrapper(self, tool_block, sys_print_callback=print, *, turn: int = 0, event_callback=None, result_callback=None):
-        return await execute_tool(self, tool_block, sys_print_callback, turn=turn, event_callback=event_callback, result_callback=result_callback)
+        tracer = getattr(self, "tracer", None)
+        if tracer is None or not tracer.enabled:
+            return await execute_tool(self, tool_block, sys_print_callback, turn=turn, event_callback=event_callback, result_callback=result_callback)
+        span = tracer.start("xuloom.tool", "tool", **{
+            "gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": self._tb_get(tool_block, "name", ""),
+            "gen_ai.tool.call.id": self._tb_get(tool_block, "id", ""), "xuloom.turn": turn})
+        try:
+            with tracer.activate(span):
+                receipt = await execute_tool(self, tool_block, sys_print_callback, turn=turn, event_callback=event_callback, result_callback=result_callback)
+        except BaseException as error:
+            tracer.end(span, error=error)
+            raise
+        if isinstance(receipt, dict) and receipt.get("is_error"):
+            span.status = "error"
+            span.error = "tool returned an error result"
+        tracer.end(span)
+        return receipt
 
     async def agents(self, action="list", **parameters):
         """Versioned host API over the existing authorized agent tool and execution journal."""

@@ -41,14 +41,14 @@ def register_adapter(adapter: ModelAdapter, *, replace: bool = False, owner: Opt
     return name
 
 
-def _snapshot(names) -> Dict[str, tuple]:
+def _snapshot(names) -> Dict[str, Optional[tuple]]:
     """Current (adapter, owner) per name, or None when absent; used to roll back plugin loads."""
     with _LOCK:
         _ensure_builtins()
         return {name: ((_ADAPTERS[name], _OWNERS.get(name)) if name in _ADAPTERS else None) for name in names}
 
 
-def _restore(snapshot: Dict[str, tuple]) -> None:
+def _restore(snapshot: Dict[str, Optional[tuple]]) -> None:
     with _LOCK:
         for name, previous in snapshot.items():
             if previous is None:
@@ -94,7 +94,7 @@ def _ensure_builtins():
 # Each client remembers the adapter instance that created it, so a later
 # re-registration (another engine loading the same plugin) never pairs this
 # client with a different adapter object.
-_CLIENT_ADAPTERS = weakref.WeakKeyDictionary()
+_CLIENT_ADAPTERS: "weakref.WeakKeyDictionary[object, ModelAdapter]" = weakref.WeakKeyDictionary()
 _CLIENT_ADAPTERS_BY_ID: Dict[int, tuple] = {}
 
 

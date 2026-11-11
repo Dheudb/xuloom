@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全漏洞
+    url: https://github.com/Dheudb/xuloom/security/advisories/new
+    about: 私密报告漏洞，不要公开提交
+  - name: 文档
+    url: https://github.com/Dheudb/xuloom/tree/main/docs
+    about: 先查看文档导航和当前能力表

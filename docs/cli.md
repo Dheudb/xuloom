@@ -56,7 +56,7 @@ xuloom --resume SESSION_ID      恢复指定会话
 Skills、子代理和 MCP 与桌面端共用引擎实现。CLI 在启动时读取项目 `.xuloom/mcp_servers.json`；
 修改配置后重启 CLI 以加载。桌面可以在 MCP 市场中编辑这份配置。
 
-`revision_id` 来自对应文件工具回执，备份保存在中央会话历史中。撤销只恢复该次工具写入前的文件字节，不清除对话，也不回滚 Shell、REPL、MCP 等外部副作用。范围与程序接口见 [输入与恢复说明](input-and-recovery-hardening-2026-10-30.md)。
+`revision_id` 来自对应文件工具回执，备份保存在中央会话历史中。撤销只恢复该次工具写入前的文件字节，不清除对话，也不回滚 Shell、REPL、MCP 等外部副作用。范围与程序接口见 [输入与恢复说明](history/input-and-recovery-hardening-2026-10-30.md)。
 
 ## 媒体生成与任务控制
 

@@ -1,7 +1,6 @@
 """Follow-up delivery through the real scheduler, worker journal and session checkpoint."""
 import asyncio
 import copy
-import json
 import time
 import unittest
 from unittest.mock import AsyncMock, patch
