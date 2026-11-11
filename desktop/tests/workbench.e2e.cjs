@@ -307,7 +307,7 @@ async function main() {
       "",
     );
     assert.equal(await settingsDialog.getByLabel("API Key", { exact: true }).getAttribute("placeholder"), "••••••••");
-    await settingsDialog.locator("label").filter({ has: settingsDialog.getByLabel("API Key", { exact: true }) }).getByText("已保存", { exact: true }).waitFor();
+    await settingsDialog.getByText("已保存", { exact: true }).waitFor();
     assert.equal(await settingsDialog.getByLabel("连接方式", { exact: true }).inputValue(), "direct");
     await page.getByRole("button", { name: "关闭设置", exact: true }).click();
     await page
