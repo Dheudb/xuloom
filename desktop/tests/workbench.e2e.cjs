@@ -465,7 +465,7 @@ async function main() {
     assert.equal(await page.locator(".session-item").count(), rowsBefore);
     assert.equal(received.length, requestsBeforeRestart, "Restoring history must not call the model");
     await page.getByRole("button", { name: "设置与模型", exact: true }).click();
-    await settingsDialog.getByPlaceholder("••••••••", { exact: true }).waitFor();
+    await page.getByPlaceholder("••••••••", { exact: true }).waitFor();
     await page.getByRole("button", { name: "关闭设置", exact: true }).click();
     await page.getByRole("textbox", { name: "任务输入" }).fill("重启之后继续会话");
     await page.getByRole("button", { name: "发送任务" }).click();
