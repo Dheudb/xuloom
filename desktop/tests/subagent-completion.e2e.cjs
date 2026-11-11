@@ -21,7 +21,7 @@ const server = http.createServer((req, res) => {
     try {
       const body = JSON.parse(raw);
       if (!body.stream) return res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "memory" } }] }));
-      if (!body.tools.some((t) => t.function.name === "agent_tool")) {
+      if (!body.tools.some((t) => ["agent_tool", "spawn_agent"].includes(t.function.name))) {
         childResponses.push(res); if (childResponses.length === 3) arrived(); return;
       }
       mainRequests++;
