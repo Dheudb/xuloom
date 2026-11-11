@@ -14,13 +14,15 @@
 
 需要 Python 3.10+。本地代码搜索使用 [ripgrep](https://github.com/BurntSushi/ripgrep)（`rg`），请先装好并加入 PATH。
 
+Xuloom 目前还没有发布到 PyPI，请直接从 GitHub 安装：
+
 ```bash
-pip install xuloom                 # 核心库与 CLI
-pip install "xuloom[mcp,otel]"     # 可选：MCP 客户端、OpenTelemetry 导出
-pip install "xuloom[pdf]"          # 可选：读取 PDF（PyMuPDF，AGPL-3.0 许可，约 200 MB）
+pip install "xuloom @ git+https://github.com/Dheudb/xuloom.git"              # 核心库与 CLI
+pip install "xuloom[mcp,otel] @ git+https://github.com/Dheudb/xuloom.git"    # 可选：MCP 客户端、OpenTelemetry 导出
+pip install "xuloom[pdf] @ git+https://github.com/Dheudb/xuloom.git"         # 可选：读取 PDF（PyMuPDF，AGPL-3.0 许可，约 200 MB）
 ```
 
-PyPI 发布流程已经就绪，在 `xuloom` 首次发布到 PyPI 之前，请从源码安装：
+在命令末尾加 `@v0.1.45` 这样的标签可以固定版本。需要修改源码时，克隆后以可编辑方式安装：
 
 ```bash
 git clone https://github.com/Dheudb/xuloom.git
@@ -53,32 +55,28 @@ asyncio.run(main())
 
 ## 扩展
 
-**自定义工具**：输入用 Pydantic 模型声明，与内置工具一样经过参数校验、权限审批和回执记录。
+**自定义工具**：带类型注解的函数加上 `@tool` 就是一个工具。参数结构来自类型注解，说明来自文档字符串；它与内置工具一样经过参数校验、权限审批和回执记录。需要更细的控制时，也可以继承 `BaseAgenticTool`。
 
 ```python
-from pydantic import BaseModel
-from xuloom import BaseAgenticTool
+from xuloom import tool
 
-class LookupInput(BaseModel):
-    ticket_id: str
+@tool(read_only=True)
+def ticket_lookup(ticket_id: str) -> str:
+    """Return the status of an internal ticket.
 
-class TicketLookup(BaseAgenticTool):
-    name = "ticket_lookup"
-    description = "Return the status of an internal ticket."
-    input_schema = LookupInput
-    is_read_only = True
+    Args:
+        ticket_id: Ticket identifier such as "T-123".
+    """
+    return f"{ticket_id}: open"
 
-    async def execute(self, ticket_id):
-        return f"{ticket_id}: open"
-
-config = config.replace(extra_tools=(TicketLookup(),))
+config = config.replace(extra_tools=(ticket_lookup,))
 ```
 
 **插件**：把工具、Hook、模型适配器、Skills、子代理、CLI 命令、桌面 RPC 和追踪导出器打包，供多个项目复用。内置的媒体生成功能本身就是一个插件（`xuloom/media/plugin.py`）。
 
 ```python
 def register(api):
-    api.add_tool(TicketLookup())
+    api.add_tool(ticket_lookup)
     api.add_hook("BeforeToolUse", block_production_writes, tools=["bash_tool"])
     api.add_model_adapter(MyAdapter())
     api.add_trace_exporter(MyExporter())
@@ -86,8 +84,8 @@ def register(api):
 
 | 扩展点 | 用途 | 文档 |
 | --- | --- | --- |
-| `BaseAgenticTool` / `extra_tools` / `disabled_tools` | 增加或移除模型可用的工具 | [开发者扩展](docs/extensions.md) |
-| 插件（`register(api)`、entry point、`xuloom plugins`） | 打包并启用、停用一组扩展 | [插件](docs/plugins.md) |
+| `@tool` / `BaseAgenticTool` / `extra_tools` / `disabled_tools` | 增加或移除模型可用的工具 | [开发者扩展](docs/extensions.md) |
+| 插件（`register(api)`、entry point、`xuloom plugins new/enable`） | 打包并启用、停用一组扩展 | [插件](docs/plugins.md) |
 | 生命周期 Hook（13 个事件） | 拦截或改写工具调用、在任务前后注入上下文、审计 | [Hook](docs/hooks.md) |
 | `ModelAdapter` | 接入任意模型 API | [模型适配器](docs/model-adapters.md) |
 | 追踪导出器、价格、花费上限 | 可观测性与成本控制 | [追踪与花费](docs/observability.md) |
@@ -102,6 +100,7 @@ def register(api):
 ```bash
 xuloom                                                  # 交互式终端
 xuloom exec "修复 tests 中失败的用例" --cwd ./repo --json   # 非交互执行：JSON 事件流，退出码表示结果
+xuloom plugins new my-tools                             # 生成插件模板（含离线测试），见 docs/plugins.md
 xuloom plugins list
 xuloom serve --root ./work                              # HTTP + SSE 接口，见 docs/server.md
 ```
@@ -128,7 +127,7 @@ Windows x64 桌面版使用同一个引擎，自带 Python 运行时。使用步
 2. 在 **设置 → 模型连接** 填写 API 地址、Key 和模型。
 3. 新建会话后直接输入任务，每个会话都有独立的工作目录。
 
-Skills、子代理、MCP、SSH 远程和生成模型都在设置中配置，见 [桌面 App](docs/desktop.md)。Linux/macOS 目前只能使用源码 CLI 和库，还没有桌面发行包，也没有签名安装器和自动更新。
+Skills、子代理、MCP、SSH 远程和生成模型都在设置中配置，见 [桌面 App](docs/desktop.md)。每轮回复下显示 token 和费用；在 **设置 → 费用** 填写模型价格和每个任务的花费上限（本地模型可填 0）。上限是停止条件：达到后不再发出新请求，但已发出的请求仍会计费，最终账单可能略超上限。界面支持中文和英文，在 **设置 → 工作区 → 界面语言 / Language** 切换。Linux/macOS 目前只能使用源码 CLI 和库，还没有桌面发行包，也没有签名安装器和自动更新。
 
 | 内容 | 位置 |
 | --- | --- |

@@ -1,8 +1,9 @@
 """Collaboration, plan and coordinator modes plus Ultraplan entry points."""
 import copy
+from xuloom.core.engine_state import EngineState
 
 
-class ModesMixin:
+class ModesMixin(EngineState):
     """Collaboration, plan and coordinator modes plus Ultraplan entry points."""
 
     def set_collaboration_mode(self, mode, *, persist=True):

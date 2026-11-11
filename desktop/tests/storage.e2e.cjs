@@ -20,9 +20,12 @@ async function launch() {
   page = await app.firstWindow(); page.setDefaultTimeout(30000); page.on("pageerror", (error) => errors.push(error.message));
   await page.waitForFunction(() => !document.querySelector(".new-task")?.disabled);
 }
+// Legacy history is migrated by the storage actor (a Python process) when the catalog is first read, so
+// the sidebar fills in shortly after the window is ready; wait for it rather than counting immediately.
+const sessionsShown = (count) => page.waitForFunction((count) => document.querySelectorAll(".standalone-group .session-item").length === count, count);
 async function main() {
   try {
-    await launch(); assert.equal(await page.locator(".standalone-group .session-item").count(), 2);
+    await launch(); await sessionsShown(2);
     const first = await page.locator(".breadcrumbs button").getAttribute("title"); assert.notEqual(first, shared);
     assert.equal(fs.readFileSync(path.join(first, "artifact.txt"), "utf8"), "existing output");
     await page.locator(".inline-file-link").click(); await page.getByRole("region", { name: "文件预览", exact: true }).getByText("existing output", { exact: true }).waitFor();
@@ -38,8 +41,9 @@ async function main() {
       assert(!fs.existsSync(path.join(directory, ".xuloom/sessions")));
     }
     assert(!fs.existsSync(path.join(shared, ".xuloom/sessions"))); assert(!fs.existsSync(path.join(shared, ".xuloom/session-index.json")));
-    await app.close(); await launch(); assert.equal(await page.locator(".breadcrumbs button").getAttribute("title"), second);
-    assert.equal(await page.locator(".standalone-group .session-item").count(), 2);
+    await app.close(); await launch();
+    await page.waitForFunction((second) => document.querySelector(".breadcrumbs button")?.getAttribute("title") === second, second);
+    await sessionsShown(2);
     const proof = await app.evaluate(async ({ BrowserWindow }) => {
       const web = BrowserWindow.getAllWindows()[0].webContents; await web.capturePage(undefined, { stayHidden: true, stayAwake: true });
       await new Promise((resolve) => setTimeout(resolve, 100)); return (await web.capturePage(undefined, { stayHidden: true, stayAwake: true })).toPNG().toString("base64");

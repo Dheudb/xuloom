@@ -39,7 +39,7 @@ Python 依赖和 CLI 入口在 `setup.py`。`requirements.txt` 只引用当前�
 ```powershell
 # 仓库根目录
 ruff check .          # 语法、未定义名称、未使用导入
-mypy                  # 公开 API 模块的类型检查，范围见 pyproject.toml
+mypy                  # 类型检查，范围见 pyproject.toml（包括引擎和混入类，见下文）
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 cd desktop
 npm test
@@ -68,6 +68,40 @@ MCP 安装与连接、凭据保留和停用重连。会话测试另覆盖重命�
 活动测试覆盖真实工具参数、输出和失败，子代理作用域、审批/拒绝/取消状态、历史恢复，以及面板拖动、键盘调整、复位、宽度保存和窄窗口约束。
 `npm run test:turns` 覆盖运行中展开和计时、完成后折叠、过程文字/工具结果保留、每轮隔离、停止/失败以及重启恢复。
 本地模型质量、真实搜索源可用性和第三方服务账户权限需要单独验证。
+
+## 界面翻译
+
+桌面界面以中文为源语言，英文在 `desktop/src/locales/en.ts`。做法与 gettext、Lingui 和 Codex 桌面版相同：**组件自己调用翻译函数，键是中文原文**，名称和内容只通过占位符进入句子。
+
+```tsx
+<button aria-label={t("会话操作 {title}", { title: row.title })}>      // 属性、状态、代码里的文字
+<p>{tx("删除「{name}」及其 {count} 个模型配置？", { name: <b>{name}</b>, count })}</p>  // 句子里有元素时
+```
+
+- **占位符的值永远不翻译。** 用户把会话命名为“设置”，英文界面显示 `Conversation actions 设置`；不再需要 `translate="no"` 之类的标记。
+- 英文可以写复数：`"{count, plural, one {# item} other {# items}}"`。没有英文的消息显示中文原文，不会出现半句翻译。
+- `displayName(name)`：会话标题、连接名等存储的名字照原样显示；只有应用自己起的默认名（“新会话”“我的 API”）按界面文字翻译。
+- `tServer(text)`：Python 后端和 Electron 主进程发来的错误、提示没有消息键，在显示处用它按词典翻译已知消息；其中的路径、URL 和引号里的名字保持原样，不认识的消息保持原文。只用于这类文字，不能用于用户或模型内容。
+- `N_(key)`：需要拼成更长消息再翻译的键（如工具标题“运行命令”→“已运行命令”“运行命令失败”），最后用 `t()` 翻译完整的中文消息，词典里每个组合都有英文。
+- `untranslated(text)`：各语言相同的文字，如语言选择里的“中文”。
+
+新增或修改界面文字时照常写中文，然后运行：
+
+```powershell
+cd desktop
+node scripts/i18n-codemod.mjs   # 把新的中文界面文字包进 t()/tx()（属性、模板字符串、拼接、JSX 句子）
+npm run i18n:check              # 有未包裹的中文界面文字，或消息在 en.ts 里没有英文时失败（npm test 也会运行）
+```
+
+codemod 不改比较、`switch` 分支、对象键、类型和字符串方法参数里的中文；`state.ts` 和 `i18n.ts` 不处理。`npm run test:i18n` 切换到英文检查各页面没有残留中文（`XULOOM_I18N_REPORT=1` 列出残留文字），`npm run test:i18n-content` 用与界面词同名的项目、会话、连接和文件检查内容保持原样。Electron 原生对话框目前仍只有中文。
+
+## 类型检查覆盖范围
+
+`mypy` 检查 `pyproject.toml` 的 `files` 列表，包括 `QueryEngine`（`engine.py`）、全部混入类（`engine_parts/`）和 `model_stream.py`。这些文件的方法大多没有注解，所以对它们打开了 `check_untyped_defs`，方法体照样检查。
+
+混入类彼此使用对方的属性和方法，单独检查一个混入类时 mypy 看不到这些成员。`xuloom/core/engine_state.py` 的 `EngineState` 把它们集中声明：实例属性写成注解，方法写成只在类型检查时存在的签名。所有混入类继承它；运行时它是空类，排在 MRO 最后（`object` 之前），不改变行为。每个真实方法都按对它所声明签名的覆盖来检查，签名改了没同步时 mypy 会报错。
+
+`engine_state.py` 由 `python scripts/gen_engine_state.py` 生成，不要手改。新增引擎属性或混入类方法后重新生成；`tests/test_engine_state.py` 在它过期时失败。属性类型来自显式注解，或来自 `self.x = SomeClass(...)`（各处赋值一致时，`None` 会变成 `Optional`），其他为 `Any`。想让某个属性的类型更精确，就在定义它的类里加注解再重新生成。
 
 ## Windows 便携包
 
@@ -127,3 +161,13 @@ python desktop/scripts/release.py --tag v0.1.33
 压缩包内 `RELEASE.json` 记录源码提交、版本和构建号。
 将同一提交推送并创建版本标签，在 GitHub Release 上传 ZIP 和 `SHA256SUMS.txt`。
 正式版使用普通 Release，不勾选 Pre-release；发布说明明确记录验证范围。此流程无需运行 GitHub Actions。
+
+## 桌面回归的环境隔离与文件搜索
+
+`activity`、`turns`、`questions`、`permissions` 和 `models` 使用 `desktop/tests/e2e-env.cjs` 创建隔离环境：不继承宿主模型凭据、备用模型、运行预算、用户数据目录、代理或 ripgrep 配置。仅保留明确指定的测试 Python 路径和操作系统启动所需环境。已有任务、取消、审批、提问和历史恢复断言保留。
+
+活动与权限模拟模型按任务内容识别子代理，不能用“工具列表是否包含 agent_tool”判断：工具可能尚未发现。权限回归检查新会话继承最近一次显式选择，并显式切回请求批准后验证拒绝和隔离。提问工具的 Schema 由 Python 单测检查，桌面测试验证修复参数后真实等待用户选择。
+
+Windows 完整包内置上游 ripgrep 15.2.0，构建时校验固定 SHA-256 并保留许可文件。`prepare-runtime.py` 和 `stage-update.py` 复用 `bundled_search.py`；运行时不下载。`grep_tool` 优先使用随解释器安装的搜索程序，独立的库/源码环境仍使用 PATH 中的 `rg`。这避免把开发机器上的 rg 误当成程序包自带能力。
+
+缺少 Git 时，普通会话和目录副本隔离仍能启动；Git worktree、提交和差异等 Git 功能需要系统 Git。成品回归同时去掉宿主 Git 与 ripgrep 路径，检查基础对话、工具、审批和恢复。

@@ -1,10 +1,12 @@
 """Thinking/reasoning configuration per engine and per mode."""
+from typing import Optional
 import copy
 from xuloom.core.reasoning import EFFORTS, normalize_profile
 from xuloom.core.session_lock import SessionBusyError
+from xuloom.core.engine_state import EngineState
 
 
-class ReasoningMixin:
+class ReasoningMixin(EngineState):
     """Thinking/reasoning configuration per engine and per mode."""
 
     def _normalize_thinking_config(self, config):
@@ -98,7 +100,7 @@ class ReasoningMixin:
         self.tool_context["thinking_config_explicit"] = True
         return copy.deepcopy(self.mode_thinking_overrides)
 
-    def get_thinking_config(self, mode: str = None) -> dict:
+    def get_thinking_config(self, mode: Optional[str] = None) -> dict:
         if mode is None:
             return copy.deepcopy(self._resolve_thinking_config())
         return copy.deepcopy(

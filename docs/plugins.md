@@ -20,7 +20,7 @@ def register(api):
 
 | 方法 | 说明 |
 | --- | --- |
-| `add_tool(tool, latent=False)` | 可信 Python 工具；`latent=True` 不进入每次请求，降低提示开销 |
+| `add_tool(tool, latent=False)` | 可信 Python 工具：`@tool` 装饰的函数、`BaseAgenticTool` 子类或新实例。`latent=True` 不进入每次请求，降低提示开销 |
 | `add_hook(event, callback, tools=, modes=)` | 见 [生命周期 Hook](hooks.md) |
 | `add_model_adapter(adapter)` | 见 [模型适配器](model-adapters.md) |
 | `add_skills(dir)` / `add_agents(dir)` | 提供 Skill 与子代理定义目录 |
@@ -39,6 +39,16 @@ Xuloom 自带的插件列在 `xuloom.plugins.BUNDLED_PLUGINS`，默认开启。�
 - 用户：`xuloom plugins disable media` / `enable media`，记录在 `plugins.json` 的 `disabled` 列表。
 - 程序宿主：默认加载内置插件，不读取用户的 `plugins.json`；用 `EngineConfig(bundled_plugins=False)` 或 `disabled_plugins={"media"}` 关闭。
 - 子代理只继承父引擎实际加载的插件。
+
+## 新建插件
+
+`xuloom plugins new <名称>` 在 `~/.xuloom/plugins/<名称>/` 生成可以直接运行的模板：
+
+- `plugin.py`：一个用 `@tool` 写的示例工具和一个 `AfterToolUse` Hook；
+- `test_plugin.py`：用 `ScriptedModel` 离线运行插件，不需要 API Key（`python test_plugin.py`）；
+- `README.md`。
+
+修改后运行 `xuloom plugins enable <名称>`，CLI 与桌面 App 的新会话即会加载它。
 
 ## 安装与启用
 

@@ -32,7 +32,8 @@ const server = http.createServer((req, res) => {
     try {
       const body = JSON.parse(raw);
       if (!body.stream) { res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "memory" } }] })); return; }
-      const child = !(body.tools || []).some((tool) => tool.function?.name === "agent_tool");
+      // The main agent starts with a lean tool set (agent tools are deferred), so identify children by their task, not by missing schemas.
+      const child = body.messages.find((message) => message.role === "user")?.content === "你好";
       if (child) {
         childRequests.push(body);
         const users = body.messages.filter((message) => message.role === "user");
@@ -50,8 +51,9 @@ const server = http.createServer((req, res) => {
       const afterTask = task ? body.messages.slice(body.messages.indexOf(task) + 1) : [];
       if (typeof task?.content === "string" && task.content.startsWith("启动10个") && !afterTask.some((message) => message.role === "tool")) {
         batch++;
-        const schema = body.tools.find((tool) => tool.function?.name === "agent_tool").function.parameters;
-        assert.equal(schema.properties.count.maximum, 10);
+        // agent_tool may be deferred behind tool_search_tool; its count bound is covered by tests/test_agent_schema_bounds.py.
+        const schema = (body.tools || []).find((tool) => tool.function?.name === "agent_tool")?.function.parameters;
+        if (schema) assert.equal(schema.properties.count.maximum, 10);
         const background = task.content.includes("后台");
         reply(res, null, task.content.includes("单次")
           ? [{ description: `问候测试 ${batch}`, prompt: "你好", count: 10, subagent_type: "general-purpose", run_in_background: background }]
@@ -67,7 +69,9 @@ async function main() {
     // Explicit host override tests the transport maximum; product defaults are 3/8.
     atomicJSON(path.join(project, ".xuloom", "capabilities.json"), { agent_concurrency: 10 });
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-    atomicJSON(path.join(config, "config.json"), { model_provider: "openai", openai_model: "subagent-fixture", openai_api_key: "fixture-key", openai_base_url: `http://127.0.0.1:${server.address().port}/v1` });
+    // Each connection admits 4 concurrent model requests by default (449a9ae); this test holds all ten child
+    // requests open to prove dispatch is parallel, so it raises the connection limit to ten.
+    atomicJSON(path.join(config, "config.json"), { model_provider: "openai", openai_model: "subagent-fixture", openai_api_key: "fixture-key", openai_base_url: `http://127.0.0.1:${server.address().port}/v1`, model_request_limits: { concurrency: 10 } });
     const env = { ...process.env, USERPROFILE: path.join(fixture, "home"), HOME: path.join(fixture, "home"), XULOOM_USER_DATA: data, XULOOM_CONFIG_DIR: config, XULOOM_TEST_HEADLESS: "1" };
     for (const key of ["ELECTRON_RUN_AS_NODE", "XULOOM_DEV_URL", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL", "XULOOM_MODEL_PROVIDER"]) delete env[key];
     app = await electron.launch({ executablePath: process.env.XULOOM_TEST_EXECUTABLE, args: process.env.XULOOM_TEST_EXECUTABLE ? [] : [root], env, timeout: 30000 });

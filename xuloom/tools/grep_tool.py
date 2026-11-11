@@ -1,5 +1,7 @@
 import subprocess
 import os
+import sys
+from pathlib import Path
 from typing import Optional
 from pydantic import BaseModel, Field
 from xuloom.tools.base import BaseAgenticTool
@@ -76,7 +78,11 @@ class GrepTool(BaseAgenticTool):
         search_path = path or os.getcwd()
         search_path = os.path.abspath(search_path)
 
-        cmd = ["rg", "-n", "--max-columns", "500"]
+        # Desktop distributions carry this verified binary; library installs retain
+        # their system ripgrep. Never search the current workspace for executables.
+        bundled = Path(sys.prefix) / "Lib/site-packages/xuloom_search/rg.exe"
+        executable = str(bundled) if bundled.is_file() else "rg"
+        cmd = [executable, "-n", "--max-columns", "500"]
 
         if output_mode == "files_with_matches":
             cmd.append("-l")

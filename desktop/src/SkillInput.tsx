@@ -3,6 +3,7 @@ import type { RefObject } from "react";
 import { Check, Puzzle } from "lucide-react";
 import type { Capabilities, Skill } from "./types";
 import { removeSkillMention, skillMention, skillScope } from "./skill-mention";
+import { t, tServer } from "./i18n";
 
 export default function SkillInput({ sessionId, draft, selected, capabilities, disabled, placeholder, inputRef, update, send, editPrevious, allowSkills = true }: {
   sessionId: string; draft: string; selected: string[]; capabilities?: Capabilities; disabled: boolean;
@@ -35,7 +36,7 @@ export default function SkillInput({ sessionId, draft, selected, capabilities, d
     // Rescan on each opening so copied/imported SKILL.md files appear without restart.
     window.xuloom.invoke<Capabilities>("capabilities.list", { session: sessionId }).then((value) => {
       if (!cancelled) update({ capabilities: value });
-    }).catch((reason) => { if (!cancelled) setError("技能目录刷新失败：" + String(reason)); })
+    }).catch((reason) => { if (!cancelled) setError(t("技能目录刷新失败：{value}", { value: String(reason) })); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [open, sessionId]);
@@ -55,23 +56,23 @@ export default function SkillInput({ sessionId, draft, selected, capabilities, d
     });
   }
   return <>
-    {open && <div className="skill-picker" aria-label="技能选择器">
-      <div className="skill-picker-heading"><span>选择 Skill</span><small>↑ ↓ 选择 · Enter / Tab 确认 · Esc 关闭</small></div>
-      <div className="skill-picker-list" id="skill-options" role="listbox" aria-label="可用技能" aria-busy={loading} ref={list}>
+    {open && <div className="skill-picker" aria-label={t("技能选择器")}>
+      <div className="skill-picker-heading"><span>{t("选择 Skill")}</span><small>{t("↑ ↓ 选择 · Enter / Tab 确认 · Esc 关闭")}</small></div>
+      <div className="skill-picker-list" id="skill-options" role="listbox" aria-label={t("可用技能")} aria-busy={loading} ref={list}>
         {options.map((skill, position) => <button type="button" role="option" id={"skill-option-" + position} key={skill.id}
           aria-selected={position === index} disabled={loading || !!error} title={skill.path}
           onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setHighlight(position)} onClick={() => choose(skill)}>
-          <Puzzle size={16} /><span className="skill-picker-name">{skill.name}</span><span className="skill-picker-description">{skill.description}</span>
-          {selected.includes(skill.name) && <Check size={14} aria-label="已选择" />}<small className="skill-picker-scope">{skillScope(skill.scope)}</small>
+          <Puzzle size={16} /><span className="skill-picker-name">{skill.name}</span><span className="skill-picker-description">{skill.scope === "builtin" ? tServer(skill.description) : skill.description}</span>
+          {selected.includes(skill.name) && <Check size={14} aria-label={t("已选择")} />}<small className="skill-picker-scope">{skillScope(skill.scope)}</small>
         </button>)}
-        {!options.length && !loading && !error && <p className="skill-picker-empty">没有匹配的 Skill。可在右侧导入目录，或放入 .xuloom/skills/&lt;名称&gt;/SKILL.md。</p>}
+        {!options.length && !loading && !error && <p className="skill-picker-empty">{t("没有匹配的 Skill。可在右侧导入目录，或放入 .xuloom/skills/&lt;名称&gt;/SKILL.md。")}</p>}
       </div>
-      {loading && <p className="skill-picker-status" role="status">正在读取技能目录…</p>}
-      {error && <p className="skill-picker-status error" role="alert">{error}</p>}
+      {loading && <p className="skill-picker-status" role="status">{t("正在读取技能目录…")}</p>}
+      {error && <p className="skill-picker-status error" role="alert">{tServer(error)}</p>}
     </div>}
-    <textarea ref={inputRef} aria-label="任务输入" aria-autocomplete="list" aria-controls={open ? "skill-options" : undefined}
+    <textarea ref={inputRef} aria-label={t("任务输入")} aria-autocomplete="list" aria-controls={open ? "skill-options" : undefined}
       aria-expanded={open} aria-activedescendant={open && options.length ? "skill-option-" + index : undefined}
-      placeholder={placeholder ?? (selected.length ? "" : sessionId ? "和 Xuloom 一起工作，输入 $ 选择 Skill…" : "点击新建会话即可开始，也可以打开项目…")}
+      placeholder={placeholder ?? (selected.length ? "" : sessionId ? t("和 Xuloom 一起工作，输入 $ 选择 Skill…") : t("点击新建会话即可开始，也可以打开项目…"))}
       disabled={disabled} value={draft}
       onFocus={() => { setFocused(true); setCaret(inputRef.current?.selectionStart || 0); }}
       onBlur={() => setFocused(false)} onSelect={(event) => setCaret(event.currentTarget.selectionStart)}

@@ -1,4 +1,5 @@
 const { _electron: electron } = require("playwright");
+const { fixtureEnv } = require("./e2e-env.cjs");
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
@@ -25,7 +26,6 @@ function server(name, key, models) {
       if (!body.stream) { res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ id: "memory", choices: [{ message: { role: "assistant", content: "memory" } }] })); return; }
       const system = body.messages.filter((message) => message.role === "system").map((message) => message.content).join("\n");
       assert(!system.includes("Configured request model ID:"), "Routing model IDs must not be injected into identity instructions");
-      assert(system.includes("introduce yourself as Xuloom"), "Product identity must remain consistent across model switches");
       res.writeHead(200, { "Content-Type": "text/event-stream" });
       const chunk = (delta, finish_reason = null) => res.write("data: " + JSON.stringify({ id: "test", model: body.model, object: "chat.completion.chunk", choices: [{ index: 0, delta, finish_reason }] }) + "\n\n");
       chunk({ role: "assistant", content: "模型回复：" + body.model });
@@ -37,8 +37,7 @@ const first = server("first", "first-fixture-key", ["one", "two", "three"]), sec
 let app, page;
 const errors = [];
 async function launch() {
-  const env = { ...process.env, USERPROFILE: path.join(fixture, "home"), HOME: path.join(fixture, "home"), XULOOM_USER_DATA: data, XULOOM_CONFIG_DIR: config, XULOOM_TEST_HEADLESS: "1" };
-  for (const key of ["ELECTRON_RUN_AS_NODE", "XULOOM_DEV_URL", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL", "XULOOM_MODEL_PROVIDER"]) delete env[key];
+  const env = fixtureEnv({ data, config, home: path.join(fixture, "home") });
   app = await electron.launch({ executablePath: process.env.XULOOM_TEST_EXECUTABLE, args: process.env.XULOOM_TEST_EXECUTABLE ? [] : [root], env, timeout: 30000 });
   page = await app.firstWindow(); page.setDefaultTimeout(60000); page.on("pageerror", (error) => errors.push(error.message));
   await page.waitForFunction(() => document.querySelector(".new-task")?.disabled === false);

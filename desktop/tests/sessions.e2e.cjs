@@ -102,8 +102,12 @@ async function main() {
     await row(copyTitle).waitFor({ state: "hidden" });
     assert(!fs.existsSync(historyFile(project, copyNative)));
     assert.notEqual(await activeId(), copyKey);
+    // Each "new conversation" click creates a fresh session seeded with the latest explicit preferences
+    // (model, reasoning, permission, collaboration); reusing an older empty session would bring back its
+    // stale settings. Intentional since 61f44b3 ("conversation defaults").
+    await newSession(); const firstEmpty = await activeId();
     await newSession(); const draftKey = await activeId();
-    await newSession(); assert.equal(await activeId(), draftKey, "Repeated new-session clicks reuse empty slot");
+    assert.notEqual(draftKey, firstEmpty, "Each new-session click starts a freshly seeded session");
     await page.getByRole("textbox", { name: "任务输入" }).fill("未发送的草稿");
     await page.locator(".session-item.active small").filter({ hasText: "有草稿" }).waitFor();
     assert.equal(JSON.parse(fs.readFileSync(path.join(historyRoot(project, data), "index.json"), "utf8")).sessions[draftKey.split(":")[1]].draft, "未发送的草稿");

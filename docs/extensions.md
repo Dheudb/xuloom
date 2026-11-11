@@ -20,7 +20,9 @@
 | `xuloom.models.register_adapter(adapter)` | 注册自定义模型 API，见 [模型适配器](model-adapters.md) |
 | `agents(action, **parameters)` | 原生 worker 的结构化启动、查询、消息、等待与取消；具体字段见 [框架接口](framework.md) |
 
-工具定义继承 `xuloom.BaseAgenticTool`，输入使用 Pydantic 2 模型。工具是用户信任的本地 Python 代码，与宿主进程同权；`is_read_only` 等声明必须真实，不能把它们当作 OS 隔离保证。运行时工具回执的状态和值沿用现有协议；工具执行成功和 worker 的 `completed` 是不同层次。
+最简单的工具是带类型注解的函数加 `@tool`（`from xuloom import tool`）：参数结构来自类型注解（支持 `Literal`、`list[str]`、`Annotated[int, Field(ge=1)]` 等），说明来自文档字符串第一段，参数说明来自 `Args:` 段；名为 `context` 的参数接收工具上下文而不暴露给模型；同步函数在线程中运行，非字符串结果以 JSON 交给模型。可选参数 `name`、`description`、`read_only`、`risk_level`、`workspace_paths`。`@tool` 返回 `BaseAgenticTool` 子类，`extra_tools`、`register_tool` 和插件的 `add_tool` 都接受类，并为每个引擎各建一个实例。
+
+需要更细的控制时，工具定义继承 `xuloom.BaseAgenticTool`，输入使用 Pydantic 2 模型。工具是用户信任的本地 Python 代码，与宿主进程同权；`is_read_only` 等声明必须真实，不能把它们当作 OS 隔离保证。运行时工具回执的状态和值沿用现有协议；工具执行成功和 worker 的 `completed` 是不同层次。
 
 完整示例：[examples/extension_project/app.py](../examples/extension_project/app.py)。可以复制到仓库外，安装 Xuloom 后运行：
 

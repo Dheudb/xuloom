@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 
-class IOPath(type(Path())):
+class IOPath(type(Path())):  # type: ignore[misc]  # concrete WindowsPath/PosixPath of this platform
     """Keep logical paths ordinary while Windows filesystem calls use long paths."""
     def __fspath__(self):
         value = str(self)

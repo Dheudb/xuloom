@@ -7,7 +7,7 @@ import sys
 import inspect
 import logging
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 from xuloom.branding import configuration_file
 
 HOOK_EXECUTION_TIMEOUT_S = 120
@@ -38,14 +38,14 @@ class CommandHookResult:
 class BeforeToolUseDecision:
     behavior: str
     outputs: List[str]
-    updated_input: Dict[str, object]
+    updated_input: Dict[str, Any]
     reason: str = ""
-    history: List[Dict[str, object]] = None
+    history: Optional[List[Dict[str, Any]]] = None
 
 
 @dataclass
 class PostSamplingHookResult:
-    outputs: List[Dict[str, object]]
+    outputs: List[Dict[str, Any]]
 
 
 # Lifecycle events. Key: event name used in hooks.json and engine.add_hook().
@@ -75,7 +75,7 @@ class HookOutcome:
     decision: str = "allow"           # allow | block | retry | reject
     reason: str = ""
     context: List[str] = field(default_factory=list)
-    updated_input: Optional[Dict[str, object]] = None
+    updated_input: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -99,6 +99,8 @@ class HookManager:
     if the command exits with code 2 (or returns JSON with decision=block), the
     agent retries with the error feedback injected into context.
     """
+    # Assigned by the owning engine so command hooks honor its execution isolation (declared only).
+    execution_sandbox: Any
 
     def __init__(self, config_path=None, *, cwd=None):
         self.cwd = os.path.abspath(cwd or os.getcwd())
@@ -147,7 +149,7 @@ class HookManager:
             self._report(f"configuration {self.config_path} is unreadable", error)
             return True
 
-    async def run_callbacks(self, event: str, payload: Dict[str, object], *, fail_closed: bool = False) -> HookOutcome:
+    async def run_callbacks(self, event: str, payload: Dict[str, Any], *, fail_closed: bool = False) -> HookOutcome:
         """Run Python callbacks for ``event`` in registration order and merge their answers."""
         outcome = HookOutcome()
         allowed = set(HOOK_EVENTS[event][1])
@@ -192,7 +194,7 @@ class HookManager:
                     break
         return outcome
 
-    async def dispatch(self, event: str, payload: Dict[str, object]) -> HookOutcome:
+    async def dispatch(self, event: str, payload: Dict[str, Any]) -> HookOutcome:
         """Run configured (template/command) hooks and Python callbacks for a generic event."""
         outcome = HookOutcome()
         allowed = set(HOOK_EVENTS[event][1])
@@ -234,7 +236,7 @@ class HookManager:
             outcome.decision, outcome.reason = callbacks.decision, callbacks.reason
         return outcome
 
-    def execute(self, event: str, payload: Dict[str, object]) -> List[str]:
+    def execute(self, event: str, payload: Dict[str, Any]) -> List[str]:
         try:
             config = self._load_config()
         except Exception as error:
@@ -260,7 +262,7 @@ class HookManager:
 
         return rendered_outputs
 
-    async def evaluate_stop_hooks_async(self, payload: Dict[str, object]) -> StopHookDecision:
+    async def evaluate_stop_hooks_async(self, payload: Dict[str, Any]) -> StopHookDecision:
         """Evaluate StopHooks, supporting both template and command hooks."""
         try:
             config = self._load_config()
@@ -309,7 +311,7 @@ class HookManager:
             return StopHookDecision("retry", "\n".join(retry_reasons))
         return StopHookDecision("allow", "")
 
-    def evaluate_stop_hooks(self, payload: Dict[str, object]) -> StopHookDecision:
+    def evaluate_stop_hooks(self, payload: Dict[str, Any]) -> StopHookDecision:
         """Sync fallback — only evaluates template hooks (no command execution)."""
         try:
             config = self._load_config()
@@ -351,7 +353,7 @@ class HookManager:
             return StopHookDecision("retry", "\n".join(retry_reasons))
         return StopHookDecision("allow", "")
 
-    def evaluate_before_tool_hooks(self, payload: Dict[str, object]) -> BeforeToolUseDecision:
+    def evaluate_before_tool_hooks(self, payload: Dict[str, Any]) -> BeforeToolUseDecision:
         try:
             config = self._load_config()
         except Exception as error:
@@ -451,7 +453,7 @@ class HookManager:
             history=history,
         )
 
-    def evaluate_post_sampling_hooks(self, payload: Dict[str, object]) -> PostSamplingHookResult:
+    def evaluate_post_sampling_hooks(self, payload: Dict[str, Any]) -> PostSamplingHookResult:
         try:
             config = self._load_config()
         except Exception as error:
@@ -488,9 +490,9 @@ class HookManager:
 
     async def _exec_command_hook(
         self,
-        hook: Dict[str, object],
-        payload: Dict[str, object],
-        timeout: float = None,
+        hook: Dict[str, Any],
+        payload: Dict[str, Any],
+        timeout: Optional[float] = None,
     ) -> CommandHookResult:
         """
         Execute a command-type hook via subprocess.
@@ -585,7 +587,7 @@ class HookManager:
     def _interpret_command_result(
         self,
         result: CommandHookResult,
-        hook: Dict[str, object],
+        hook: Dict[str, Any],
     ) -> StopHookDecision:
         """
         Interpret a CommandHookResult into a StopHookDecision.
@@ -640,7 +642,7 @@ class HookManager:
             payload[legacy] = payload[current] = merged
         return payload
 
-    def _hook_matches(self, hook: Dict[str, object], payload: Dict[str, object]) -> bool:
+    def _hook_matches(self, hook: Dict[str, Any], payload: Dict[str, Any]) -> bool:
         tools = hook.get("tools")
         if tools:
             tool_name = str(payload.get("tool_name", "")).strip()
@@ -655,7 +657,7 @@ class HookManager:
 
         return True
 
-    def _stringify_payload(self, payload: Dict[str, object]) -> Dict[str, str]:
+    def _stringify_payload(self, payload: Dict[str, Any]) -> Dict[str, str]:
         rendered = {}
         for key, value in payload.items():
             if isinstance(value, (dict, list)):
@@ -664,10 +666,10 @@ class HookManager:
                 rendered[key] = str(value)
         return rendered
 
-    def _render_template(self, template: str, payload: Dict[str, object]) -> str:
+    def _render_template(self, template: str, payload: Dict[str, Any]) -> str:
         return template.format_map(_SafeFormatDict(self._stringify_payload(payload))).strip()
 
-    def _render_structured_value(self, value, payload: Dict[str, object]):
+    def _render_structured_value(self, value, payload: Dict[str, Any]):
         if isinstance(value, dict):
             return {
                 key: self._render_structured_value(inner, payload)

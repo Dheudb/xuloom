@@ -2,22 +2,17 @@
 import asyncio
 import copy
 import inspect
-import json
 import os
 import re
-import sys
-import uuid
-from types import SimpleNamespace
-from typing import Optional
-from xuloom.core.messages import create_assistant_message, create_tool_result_message, create_user_message, get_msg_uuid, rollback_incomplete_turn
+from typing import Any, List, Optional
+from xuloom.core.messages import create_assistant_message, create_tool_result_message, create_user_message, get_msg_uuid
 from xuloom.core.model_stream import AbortRequestedError
 from xuloom.core.reasoning import configured_profile
 from xuloom.core.run_result import PersistenceError, RunResult, finish_run
 from xuloom.core.session_lock import SessionBusyError, SessionConflictError
-from xuloom.core.storage import artifact_directory
 from xuloom.core.tool_execution import restore_tool_activity
 from xuloom.protocols.dsml import ToolProtocolError
-from xuloom.protocols.stream_watch import StreamInterrupted
+from xuloom.core.engine_state import EngineState
 
 NOT_CONFIGURED_MESSAGE = (
     "Model not configured. Python: pass EngineConfig(model=..., model_provider=\"openai\" or \"anthropic\", "
@@ -40,7 +35,7 @@ async def _drain_cancelled(tasks):
         raise
 
 
-class TurnLoopMixin:
+class TurnLoopMixin(EngineState):
     """The model/tool turn loop, loop state, budgets, structured output and stop hooks."""
 
     def set_structured_output_request(self, request: Optional[dict]):
@@ -122,39 +117,6 @@ class TurnLoopMixin:
             "outputs": result.outputs,
         })
 
-    def _rollback_incomplete_tool_turn(self, assistant_message: dict) -> bool:
-        if not assistant_message or not self.messages:
-            return False
-
-        target_uuid = get_msg_uuid(assistant_message)
-        if target_uuid:
-            from xuloom.core.messages import rollback_to_uuid
-            removed = rollback_to_uuid(self.messages, target_uuid)
-            if removed:
-                self._sync_message_context()
-                self.persist_session_state()
-                return True
-
-        if self.messages and self.messages[-1] is assistant_message:
-            content = assistant_message.get("content")
-            if isinstance(content, list):
-                has_tool_use = any(
-                    (block.get("type") if isinstance(block, dict) else getattr(block, "type", None)) == "tool_use"
-                    for block in content
-                )
-                if has_tool_use:
-                    self.messages.pop()
-                    self._sync_message_context()
-                    self.persist_session_state()
-                    return True
-
-        removed = rollback_incomplete_turn(self.messages)
-        if removed:
-            self._sync_message_context()
-            self.persist_session_state()
-            return True
-
-        return False
 
     async def _emit_stream_event(self, event_callback, payload: dict):
         if not callable(event_callback):
@@ -164,90 +126,6 @@ class TurnLoopMixin:
         if inspect.isawaitable(result):
             await result
 
-    def _serialize_response_usage(self, response) -> dict:
-        usage = getattr(response, "usage", None)
-        if usage is None:
-            return {}
-        fields = [
-            "input_tokens",
-            "output_tokens",
-            "cache_creation_input_tokens",
-            "cache_read_input_tokens",
-        ]
-        payload = {}
-        for field in fields:
-            value = getattr(usage, field, None)
-            if value is not None:
-                payload[field] = value
-        return payload
-
-    def _serialize_response_for_vcr(self, response) -> dict:
-        return {
-            "stop_reason": getattr(response, "stop_reason", None),
-            "content": [
-                block
-                for block in [self._block_to_dict(item) for item in getattr(response, "content", []) or []]
-                if block
-            ],
-            "usage": self._serialize_response_usage(response),
-        }
-
-    async def _replay_vcr_response_events(self, response, *, turn_count: int, event_callback=None):
-        await self._emit_stream_event(event_callback, {
-            "type": "message_start",
-            "turn": turn_count,
-            "replayed": True,
-        })
-        for block in getattr(response, "content", []) or []:
-            if getattr(block, "type", "") == "text":
-                text = getattr(block, "text", "")
-                if text:
-                    await self._emit_stream_event(event_callback, {
-                        "type": "text_delta",
-                        "turn": turn_count,
-                        "text": text,
-                        "replayed": True,
-                    })
-            elif getattr(block, "type", "") == "tool_use":
-                await self._emit_stream_event(event_callback, {
-                    "type": "tool_scheduled",
-                    "turn": turn_count,
-                    "tool_name": getattr(block, "name", ""),
-                    "tool_use_id": getattr(block, "id", None),
-                    "replayed": True,
-                })
-        await self._emit_stream_event(event_callback, {
-            "type": "message_stop",
-            "turn": turn_count,
-            "stop_reason": getattr(response, "stop_reason", None),
-            "replayed": True,
-        })
-
-    def _get_model_max_output_tokens(self, model: str = "") -> tuple:
-        from xuloom.core.config import get_model_max_output_tokens
-        return get_model_max_output_tokens(model or self.primary_model)
-
-    def _get_max_output_tokens(self) -> int:
-        """
-        Resolve max output tokens: explicit env override, delegated response cap,
-        then the ordinary conversation default. Reservations still enforce all
-        remaining budgets before a delegated request reaches the provider.
-        """
-        from xuloom.core.config import DEFAULT_CAPPED_MAX_TOKENS
-        env_val = os.environ.get("XULOOM_MAX_OUTPUT_TOKENS", "")
-        if env_val:
-            try:
-                parsed = int(env_val)
-                if parsed > 0:
-                    return parsed
-            except ValueError:
-                pass
-        default_tokens, _ = self._get_model_max_output_tokens()
-        from xuloom.agents.collaboration import DELEGATION_BUDGET
-        delegation = DELEGATION_BUDGET.get()
-        if delegation is not None:
-            return min(default_tokens, delegation["request_cap"])
-        return min(default_tokens, DEFAULT_CAPPED_MAX_TOKENS)
 
     def _build_loop_state(self) -> dict:
         env_max = os.environ.get("XULOOM_MAX_TURNS", "")
@@ -289,16 +167,6 @@ class TurnLoopMixin:
             **record,
         })
 
-    def _build_continuation_prompt(self) -> str:
-        return (
-            "<system-reminder>\n"
-            "The previous assistant response stopped because the output token budget was exhausted.\n"
-            "Continue immediately from where you left off. Do not repeat completed content.\n"
-            "</system-reminder>"
-        )
-
-
-
 
     def _build_stop_hook_feedback(self, reason: str) -> str:
         return (
@@ -309,209 +177,6 @@ class TurnLoopMixin:
             "</system-reminder>"
         )
 
-    def _record_token_usage(
-        self,
-        response,
-        loop_state: dict,
-        turn: int,
-        *,
-        system_prompt: str = "",
-        api_messages: list = None,
-        tools_schema: list = None,
-        thinking_config: dict = None,
-        replayed: bool = False,
-    ):
-        usage = getattr(response, "usage", None)
-        turn_record = {
-            "turn": turn,
-            "model": loop_state.get("active_model"),
-            "input_tokens": int(getattr(usage, "input_tokens", 0) or 0) if usage is not None else 0,
-            "output_tokens": int(getattr(usage, "output_tokens", 0) or 0) if usage is not None else 0,
-            "cache_creation_input_tokens": int(getattr(usage, "cache_creation_input_tokens", 0) or 0) if usage is not None else 0,
-            "cache_read_input_tokens": int(getattr(usage, "cache_read_input_tokens", 0) or 0) if usage is not None else 0,
-        }
-        source = "api_usage"
-        if turn_record["input_tokens"] <= 0 and turn_record["output_tokens"] <= 0:
-            turn_record["input_tokens"] = self.compactor.estimate_request_tokens(
-                api_messages or [],
-                system=system_prompt,
-                tools=tools_schema,
-                thinking=thinking_config,
-            )
-            turn_record["output_tokens"] = self.compactor.estimate_content_tokens(
-                "assistant",
-                getattr(response, "content", []),
-            )
-            source = self.compactor._local_estimator_mode()
-        turn_record["source"] = source
-
-        self.token_usage_history.insert(0, turn_record)
-        self.token_usage_history = self.token_usage_history[:50]
-        self.tool_context["token_usage_history"] = self.token_usage_history
-
-        for key in [
-            "input_tokens",
-            "output_tokens",
-            "cache_creation_input_tokens",
-            "cache_read_input_tokens",
-        ]:
-            self.session_token_usage[key] = int(self.session_token_usage.get(key, 0) or 0) + turn_record[key]
-
-        loop_state["turn_input_tokens"] = turn_record["input_tokens"]
-        loop_state["turn_output_tokens"] = turn_record["output_tokens"]
-        # Cost: replayed (VCR) responses cost nothing; estimated usage is still priced.
-        cost = 0.0 if replayed else self.cost_meter.record(turn_record["model"], turn_record)
-        turn_record["cost_usd"] = None if cost is None else round(cost, 8)
-        if cost is None:
-            self.session_cost["unpriced_requests"] = int(self.session_cost.get("unpriced_requests", 0) or 0) + 1
-        else:
-            self.session_cost["usd"] = float(self.session_cost.get("usd", 0.0) or 0.0) + cost
-        loop_state["turn_cost_usd"] = turn_record["cost_usd"]
-
-    def _model_span_attributes(self, response, loop_state: dict, replayed: bool) -> dict:
-        record = self.token_usage_history[0] if self.token_usage_history else {}
-        return {
-            "gen_ai.response.model": loop_state.get("active_model"),
-            "gen_ai.response.finish_reasons": [str(getattr(response, "stop_reason", "") or "")],
-            "gen_ai.usage.input_tokens": record.get("input_tokens"),
-            "gen_ai.usage.output_tokens": record.get("output_tokens"),
-            "gen_ai.usage.cache_creation_input_tokens": record.get("cache_creation_input_tokens"),
-            "gen_ai.usage.cache_read_input_tokens": record.get("cache_read_input_tokens"),
-            "xuloom.usage.source": record.get("source"),
-            "xuloom.cost_usd": record.get("cost_usd"),
-            "xuloom.replayed": replayed,
-        }
-
-    def _remaining_output_budget(self, loop_state: dict) -> int:
-        from xuloom.core.output_limits import active_budgets
-        from xuloom.features.goals import available_output
-        budgets = active_budgets(self.tool_context.get("goal_budget"))
-        if budgets:
-            return min(available_output(budget) for budget in budgets)
-        remaining = max(
-            0,
-            int(loop_state.get("session_output_budget", 0) or 0)
-            - int(self.session_token_usage.get("output_tokens", 0) or 0),
-        )
-        return remaining
-
-    def _is_model_fallback_error(self, error: Exception) -> bool:
-        adapter = self._model_adapter()
-        if adapter is not None and not adapter.native and adapter.is_transient_error(error):
-            return True
-        # Inspect only SDKs already loaded by the selected connection.
-        for name in ("anthropic", "openai"):
-            sdk = sys.modules.get(name)
-            transient = tuple(getattr(sdk, kind) for kind in ("APIConnectionError", "RateLimitError", "InternalServerError")
-                if isinstance(getattr(sdk, kind, None), type))
-            if isinstance(error, transient):
-                return True
-            status = getattr(sdk, "APIStatusError", None)
-            if isinstance(status, type) and isinstance(error, status):
-                return getattr(error, "status_code", None) in {500, 502, 503, 504, 529}
-
-        rendered = str(error).lower()
-        markers = [
-            "overloaded",
-            "service unavailable",
-            "temporarily unavailable",
-            "rate limit",
-            "connection error",
-        ]
-        return any(marker in rendered for marker in markers)
-
-    async def _stream_model_response(
-        self, **kwargs,
-    ):
-        # A draft generated before outstanding evidence is collected is process
-        # commentary, even when the provider ends that model message normally.
-        workers = self.tool_context["subagent_tasks"]
-        from xuloom.agents.ultra_execution import required as ultra_required
-        provisional = ultra_required(self) or any(not task.done() for task in workers.tasks.values()) or bool(set(workers.results) - workers.delivered)
-        callback = kwargs.get("event_callback")
-        if provisional and callable(callback):
-            async def commentary(event):
-                if event.get("type") in {"message_start", "text_delta"}:
-                    event = {**event, "channel": "commentary"}
-                result = callback(event)
-                if inspect.isawaitable(result):
-                    await result
-            kwargs["event_callback"] = commentary
-        if self.tool_context.get("external_backend"):
-            from xuloom.agents.external.runtime import sample
-            return await sample(self, **kwargs)
-        from xuloom.core.output_limits import model_reservation
-        from xuloom.context.compaction import output_limit, policy
-        kwargs["max_tokens"] = output_limit(self, kwargs)
-        async with model_reservation(self, kwargs["max_tokens"]) as grant:
-            kwargs["max_tokens"] = grant["maximum"]
-            from xuloom.core.model_specs import official
-            adapter = self._model_adapter()
-            if adapter is not None and not adapter.native:
-                response, entries, fallback = await self._receive_adapter_response(adapter, **kwargs)
-            elif policy(self)["backend"] == "openai-responses" or official(self.model_provider, kwargs['model_name'], self.api_base_url):
-                from xuloom.context.responses import receive
-                response, entries, fallback = await receive(self, **kwargs)
-            else:
-                if self.native_context: raise ValueError("Native compacted history requires its declared Responses connection")
-                response, entries, fallback = await self._receive_model_response(**kwargs)
-            usage = self._serialize_response_usage(response)
-            from xuloom.context.compaction import calibrate
-            calibrate(self, kwargs, usage)
-            grant["reported"] = int(self._serialize_response_usage(response).get("output_tokens", 0) or 0)
-            return response, entries, fallback
-
-    async def _receive_adapter_response(self, adapter, *, system_prompt, api_messages, tools_schema, turn_count,
-                                        model_name, max_tokens, thinking_config=None, sys_print_callback=print,
-                                        event_callback=None):
-        """Run one turn through a registered (non-native) ModelAdapter.
-
-        Tool calls are executed by the loop after the response, so no streaming
-        tool entries are returned.
-        """
-        from xuloom.models.adapter import ModelRequest, STOP_REASONS
-        self.tool_context["request_model"] = model_name
-
-        streamed = []
-
-        async def emit(event):
-            if event.get("type") == "text_delta":
-                streamed.append(True)
-            await self._emit_stream_event(event_callback, event)
-
-        request = ModelRequest(client=self.client, model=model_name, system_prompt=system_prompt,
-                               messages=api_messages, tools=tools_schema, max_tokens=max_tokens, turn=turn_count,
-                               thinking=thinking_config if self._thinking_config_explicit else None,
-                               reasoning_effort=self.reasoning_effort if model_name == self.primary_model else None,
-                               _emit=emit, _engine=self)
-        await emit({"type": "model_status", "status": "waiting", "turn": turn_count})
-        await emit({"type": "message_start", "turn": turn_count})
-        task = asyncio.ensure_future(adapter.stream_turn(request))
-        abort = asyncio.ensure_future(self.abort_event.wait())
-        try:
-            done, _ = await asyncio.wait({task, abort}, return_when=asyncio.FIRST_COMPLETED)
-            if task not in done:
-                raise AbortRequestedError("Abort requested while waiting for the model adapter.")
-            response = task.result()
-        finally:
-            # Every exit path (stop request, outer cancellation, errors) ends the
-            # adapter call too; an orphaned request must not keep running.
-            pending = [item for item in (task, abort) if not item.done()]
-            for item in pending:
-                item.cancel()
-            if pending:
-                await _drain_cancelled(pending)
-        if getattr(response, "stop_reason", None) not in STOP_REASONS or not isinstance(getattr(response, "content", None), list):
-            raise TypeError(f"Model adapter {adapter.name!r} must return xuloom.models.model_response(...)")
-        if not streamed:
-            text = "".join(getattr(block, "text", "") for block in response.content if getattr(block, "type", "") == "text")
-            if text:
-                await emit({"type": "text_delta", "turn": turn_count, "text": text})
-        for block in response.content:
-            if getattr(block, "type", "") == "tool_use":
-                await emit({"type": "tool_scheduled", "turn": turn_count, "tool_name": block.name, "tool_use_id": block.id})
-        await emit({"type": "message_stop", "turn": turn_count, "stop_reason": response.stop_reason})
-        return response, [], False
 
     # ------------------------------------------------------------------
     # Turn loop. `_run_loop` orchestrates; each phase lives in its own method
@@ -542,17 +207,6 @@ class TurnLoopMixin:
         self.tracer.end(span, **{"xuloom.result.reason": reason, **self._run_span_totals()})
         return result
 
-    async def _stop_for_cost(self, reason, turn_count, event_callback):
-        await self._record_loop_transition(
-            "cost_limit", turn=turn_count, event_callback=event_callback,
-            task_cost_usd=round(self.cost_meter.task_usd, 6), max_cost_usd=self.cost_meter.limit_usd)
-        self.persist_session_state()
-        return finish_run(self, reason, 'cost_limit')
-
-    def _run_span_totals(self) -> dict:
-        return {"xuloom.task.cost_usd": round(self.cost_meter.task_usd, 6),
-                "xuloom.task.unpriced_requests": self.cost_meter.task_unpriced,
-                "xuloom.session.cost_usd": round(float(self.session_cost.get("usd", 0.0) or 0.0), 6)}
 
     async def _run_task(self, user_input: str, sys_print_callback=print, event_callback=None, input_blocks=None, attachments=None, display_text=None, selected_skills=None, resume=False):
         """Run one task: prepare input, then iterate model request -> tools until a final answer.
@@ -581,7 +235,7 @@ class TurnLoopMixin:
             loop_state["turn_count"] += 1
             turn_count = loop_state["turn_count"]
             assistant_message = None
-            streaming_tool_entries = []
+            streaming_tool_entries: List[Any] = []
             request = None
             loop_state["turn_input_tokens"] = 0
             loop_state["turn_output_tokens"] = 0
@@ -684,6 +338,7 @@ class TurnLoopMixin:
                     "session_input_tokens": self.session_token_usage.get("input_tokens", 0),
                     "session_output_tokens": self.session_token_usage.get("output_tokens", 0),
                     "cost_usd": loop_state.get("turn_cost_usd"),
+                    "usage_source": (self.token_usage_history[0].get("source") if self.token_usage_history else None),
                     "session_cost_usd": round(float(self.session_cost.get("usd", 0.0) or 0.0), 6),
                     "task_cost_usd": round(self.cost_meter.task_usd, 6),
                 })
@@ -1045,50 +700,6 @@ class TurnLoopMixin:
         )
         return content_as_dicts, assistant_message
 
-    async def _recover_max_tokens(self, streaming_tool_entries, loop_state, turn_count, sys_print_callback, event_callback):
-        """Continue after a max_tokens stop, escalating the output limit once."""
-        if streaming_tool_entries:
-            await self._cancel_streaming_tool_tasks(streaming_tool_entries)
-        loop_state["max_tokens_recovery_attempts"] += 1
-        remaining_output_budget = self._remaining_output_budget(loop_state)
-        if remaining_output_budget <= 0:
-            await self._record_loop_transition(
-                "session_output_budget_exhausted",
-                turn=turn_count,
-                event_callback=event_callback,
-                session_output_budget=loop_state["session_output_budget"],
-                output_tokens_used=self.session_token_usage.get("output_tokens", 0),
-            )
-            self.persist_session_state()
-            return finish_run(self, ("Session output token budget exhausted before continuation."), 'budget_exhausted')
-        transition_reason = "max_output_tokens_recovery"
-        if (
-            loop_state["max_tokens_recovery_attempts"] >= 2
-            and loop_state["max_tokens_escalations"] < 1
-        ):
-            loop_state["max_tokens"] = 64000
-            loop_state["max_tokens_escalations"] += 1
-            transition_reason = "max_output_tokens_escalate"
-        loop_state["max_tokens"] = min(loop_state["max_tokens"], remaining_output_budget)
-        self.messages.append(create_user_message(
-            self._build_continuation_prompt(),
-            is_continuation=True,
-            origin="system_continuation",
-        ))
-        self._sync_message_context()
-        self.persist_session_state()
-        await self._record_loop_transition(
-            transition_reason,
-            turn=turn_count,
-            event_callback=event_callback,
-            max_tokens=loop_state["max_tokens"],
-            recovery_attempts=loop_state["max_tokens_recovery_attempts"],
-            remaining_output_budget=remaining_output_budget,
-        )
-        sys_print_callback(
-            f"[dim yellow]↳ Continuing after max_tokens stop ({transition_reason}, budget={loop_state['max_tokens']}).[/dim yellow]"
-        )
-        return _CONTINUE
 
     async def _finish_turn(self, content_as_dicts, assistant_message, streaming_tool_entries, completion,
                            loop_state, turn_count, sys_print_callback, event_callback):
@@ -1257,185 +868,3 @@ class TurnLoopMixin:
         if retrying:
             return _CONTINUE
         return finish_run(self, ("[bold red]System Halt:[/bold red] " + message), 'workflow_incomplete')
-
-    async def _handle_turn_exception(self, e, assistant_message, request, tools_schema, loop_state, counters,
-                                     turn_count, sys_print_callback, event_callback):
-        """Map a turn failure to recovery (`_CONTINUE`) or a terminal RunResult."""
-        await self._dispatch_hook("TurnError", self._hook_payload(
-            "TurnError", turn=turn_count, error_type=type(e).__name__,
-            cancelled=isinstance(e, AbortRequestedError)))
-        from xuloom.agents.external.runtime import ExternalExecutionError
-        from xuloom.core.output_limits import ModelBudgetError
-        from xuloom.observability.cost import CostLimitError
-        cause = e
-        while cause is not None and not isinstance(cause, CostLimitError):
-            cause = cause.__cause__ or cause.__context__
-        if cause is not None:  # e.g. raised by compaction, possibly wrapped
-            return await self._stop_for_cost(str(cause), turn_count, event_callback)
-        if isinstance(e, (ExternalExecutionError, ModelBudgetError)):
-            return finish_run(self, str(e), e.reason if isinstance(e, ExternalExecutionError) else "budget_exhausted")
-        if isinstance(e, ToolProtocolError):
-            return await self._repair_tool_protocol(e, request, tools_schema, loop_state, counters,
-                                                    turn_count, sys_print_callback, event_callback)
-        if isinstance(e, AbortRequestedError):
-            rolled_back = self._rollback_incomplete_tool_turn(assistant_message)
-            await self._record_loop_transition(
-                "user_abort",
-                turn=turn_count,
-                event_callback=event_callback,
-                rolled_back=rolled_back,
-            )
-            self.active_stream = None
-            self.active_streaming_tool_entries = []
-            self.persist_session_state()
-            return finish_run(self, ("[bold yellow]Turn aborted.[/bold yellow] "
-                "The current agent turn was interrupted and cleanup has completed."), 'cancelled')
-        if isinstance(e, StreamInterrupted):
-            partial = create_assistant_message(e.partial_text or str(e), model=loop_state["active_model"], stop_reason="stream_interrupted")
-            if not e.partial_text:
-                partial["_is_meta"] = True
-            self.messages.append(partial)
-            if e.tool_results:
-                self.messages.append(create_user_message("[Interrupted stream: already executed tool results; inspect before continuing, do not replay]\n" +
-                    json.dumps(e.tool_results, ensure_ascii=False, default=str), is_meta=True, origin="stream_interrupted"))
-            self._sync_message_context()
-            self.persist_session_state()
-            return finish_run(self, ("[bold red]API Loop Exception:[/bold red] " + str(e)), 'stream_interrupted')
-        if isinstance(e, PersistenceError):
-            return finish_run(self, "Storage checkpoint failed: " + str(e), 'persistence_error')
-        from xuloom.core.model_inputs import UnsupportedInput
-        if isinstance(e, UnsupportedInput):
-            return finish_run(self, str(e), 'unsupported_input')
-        if (
-            self._is_model_fallback_error(e)
-            and loop_state["active_model"] != self.fallback_model
-            and self.fallback_model
-        ):
-            self._strip_thinking_signatures_from_history()
-            loop_state["active_model"] = self.fallback_model
-            loop_state["fallback_count"] += 1
-            await self._record_loop_transition(
-                "model_fallback",
-                turn=turn_count,
-                event_callback=event_callback,
-                fallback_model=self.fallback_model,
-                error=str(e),
-            )
-            sys_print_callback(
-                f"[dim yellow]↳ Primary model failed; retrying current turn with fallback model {self.fallback_model}.[/dim yellow]"
-            )
-            return _CONTINUE
-        if self._is_context_overflow_error(e):
-            if await self._recover_context_overflow(loop_state, turn_count, sys_print_callback, event_callback):
-                return _CONTINUE
-        rolled_back = self._rollback_incomplete_tool_turn(assistant_message)
-        from xuloom.core.network import model_error_message
-        if rolled_back:
-            return finish_run(self, model_error_message(e) + " 未完成的工具调用记录已回退；已完成操作保留。", 'api_error')
-        return finish_run(self, model_error_message(e), 'api_error')
-
-    async def _repair_tool_protocol(self, e, request, tools_schema, loop_state, counters, turn_count,
-                                    sys_print_callback, event_callback):
-        """Feed a malformed tool call back to the model (bounded), never replaying earlier side effects."""
-        # DSML is decoded atomically before dispatch. Earlier successful
-        # turns and their side effects must never be rolled back/replayed.
-        counters["protocol_failures"] += 1
-        protocol_failures = counters["protocol_failures"]
-        retrying = protocol_failures <= 2 and counters["protocol_retries"] < 6
-        diagnostic = ""
-        try:
-            directory = artifact_directory(self.session_cwd) / self.session_id / "protocol-errors"
-            directory.mkdir(parents=True, exist_ok=True)
-            target = directory / (uuid.uuid4().hex + ".json")
-            target.write_text(json.dumps({"code": e.code, "detail": str(e), "tool": e.tool_name,
-                "turn": turn_count, "raw_completion": e.raw_text}, ensure_ascii=False, indent=2), encoding="utf-8")
-            diagnostic = str(target)
-        except OSError:
-            pass
-        if e.usage is not None and request is not None:
-            self._record_token_usage(SimpleNamespace(usage=e.usage, content=[self._make_text_block(e.raw_text)]), loop_state, turn_count,
-                system_prompt=request["system_prompt"], api_messages=request["api_messages"], tools_schema=tools_schema,
-                thinking_config=request["thinking_config"])
-        subject = "工具调用格式"
-        message = (f"{subject}错误，正在请求模型修正（{protocol_failures}/2）。已完成的操作保留。" if retrying else
-                   f"{subject}多次修正失败，任务已中断。已完成的操作和文件保留，可继续当前会话。")
-        await self._record_loop_transition("tool_protocol_repair" if retrying else "tool_protocol_exhausted",
-            turn=turn_count, event_callback=event_callback, code=e.code, detail=str(e),
-            retrying=retrying, attempt=protocol_failures, diagnostic=diagnostic)
-        await self._emit_stream_event(event_callback, {"type": "tool_protocol_error", "message": message,
-            "retrying": retrying, "attempt": protocol_failures, "limit": 2,
-            "detail": str(e), "diagnostic": diagnostic})
-        sys_print_callback(message)
-        if e.visible_text.strip():
-            partial = create_assistant_message(e.visible_text, model=loop_state["active_model"], stop_reason="protocol_error")
-            partial["_is_meta"] = True
-            self.messages.append(partial)
-        repair_feedback = ("\n\n[Tool protocol error: current completion rejected before any of its calls executed]\n" + str(e) +
-            "\nCorrect the tool call using the currently declared tools schema. Prefer native function/tool_calls. "
-            "Arguments must be a JSON object; arrays must be actual arrays, not serialized strings. "
-            "If using DSML, use only declared parameter names, each exactly once, and close every tag. "
-            "Continue the user's selected skill/workflow from the last successful tool result. "
-            "Do not repeat completed commands, submissions or agent launches. Do not substitute an ordinary answer for the requested workflow.")
-        self.messages.append(create_user_message(repair_feedback, is_meta=True, origin="tool_protocol"))
-        self._sync_message_context()
-        self.persist_session_state()
-        if retrying:
-            counters["protocol_retries"] += 1
-            return _CONTINUE
-        halted = create_assistant_message(message, model=loop_state["active_model"], stop_reason="tool_protocol_error")
-        halted["_is_meta"] = True
-        self.messages.append(halted)
-        self._sync_message_context()
-        self.persist_session_state()
-        return finish_run(self, ("[bold red]API Loop Exception:[/bold red] " + message), 'tool_protocol_error')
-
-    async def _recover_context_overflow(self, loop_state, turn_count, sys_print_callback, event_callback) -> bool:
-        """Withhold-then-recover a context overflow; True means retry the turn.
-
-        Stages grow more aggressive: shrink max_tokens, normal compaction, aggressive compaction.
-        """
-        retries = loop_state.get("reactive_compact_retries", 0)
-        # Stage 1: reduce max_tokens (zero-cost, no data loss)
-        current_max = loop_state["max_tokens"]
-        if retries == 0 and current_max > 4096:
-            new_max = max(4096, current_max // 2)
-            loop_state["max_tokens"] = new_max
-            loop_state["reactive_compact_retries"] = 1
-            await self._record_loop_transition(
-                "reactive_withhold_stage1",
-                turn=turn_count,
-                event_callback=event_callback,
-                old_max=current_max,
-                new_max=new_max,
-            )
-            sys_print_callback(
-                f"[dim yellow]↳ Context overflow withheld (stage 1). "
-                f"Reducing max_tokens {current_max} → {new_max}.[/dim yellow]"
-            )
-            return True
-        for stage, aggressive, label, color in ((2, False, "normal", "magenta"), (3, True, "aggressive", "magenta")):
-            if retries > stage - 1:
-                continue
-            compacted = await self._apply_layered_compaction_if_needed(
-                sys_print_callback,
-                force=True,
-                aggressive=aggressive,
-                event_callback=event_callback,
-            )
-            if compacted:
-                loop_state["reactive_compact_retries"] = stage
-                loop_state["max_tokens"] = self._get_max_output_tokens()
-                await self._record_loop_transition(
-                    f"reactive_withhold_stage{stage}",
-                    turn=turn_count,
-                    event_callback=event_callback,
-                    retries=stage,
-                    stage=label,
-                    max_tokens_restored=loop_state["max_tokens"],
-                )
-                sys_print_callback(
-                    f"[dim {color}]↳ Context overflow withheld (stage {stage}). "
-                    f"Retrying after {label} compaction + state restore.[/dim {color}]"
-                )
-                return True
-        return False

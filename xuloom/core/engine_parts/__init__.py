@@ -11,5 +11,8 @@ from xuloom.core.engine_parts.auto_commit import AutoCommitMixin
 from xuloom.core.engine_parts.status import StatusMixin
 from xuloom.core.engine_parts.tools import ToolOrchestrationMixin
 from xuloom.core.engine_parts.loop import TurnLoopMixin
+from xuloom.core.engine_parts.sampling import ModelSamplingMixin
+from xuloom.core.engine_parts.usage import UsageAccountingMixin
+from xuloom.core.engine_parts.recovery import TurnRecoveryMixin
 
-__all__ = ['MessageNormalizationMixin', 'SessionPersistenceMixin', 'ContextManagementMixin', 'ReasoningMixin', 'ModesMixin', 'AutoCommitMixin', 'StatusMixin', 'ToolOrchestrationMixin', 'TurnLoopMixin']
+__all__ = ['MessageNormalizationMixin', 'SessionPersistenceMixin', 'ContextManagementMixin', 'ReasoningMixin', 'ModesMixin', 'AutoCommitMixin', 'StatusMixin', 'ToolOrchestrationMixin', 'TurnLoopMixin', 'ModelSamplingMixin', 'UsageAccountingMixin', 'TurnRecoveryMixin']

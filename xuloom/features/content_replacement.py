@@ -36,7 +36,7 @@ class ContentReplacementManager:
         tool_name: str = "",
         tool_use_id: str = "",
         original_content_chars: int = 0,
-        metadata: dict = None,
+        metadata: Optional[dict] = None,
     ) -> dict:
         abs_path = os.path.abspath(file_path)
         entry = {

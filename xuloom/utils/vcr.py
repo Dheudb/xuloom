@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import time
+from typing import Optional
 
 _legacy_warned = False
 
@@ -61,12 +62,12 @@ class ReplayMissError(RuntimeError):
 
 
 class VCRManager:
-    def __init__(self, cassette_dir: str = ".xuloom/vcr", mode: str = None):
+    def __init__(self, cassette_dir: str = ".xuloom/vcr", mode: Optional[str] = None):
         self.cassette_dir = cassette_dir
         # An explicit mode (argument or XULOOM_VCR_MODE) is a run setting: saved sessions never override it.
         self.explicit_mode = bool(mode or os.environ.get("XULOOM_VCR_MODE"))
         self.mode = str(mode or os.environ.get("XULOOM_VCR_MODE", "off") or "off").lower()
-        self.history = []
+        self.history: list = []
         if self.explicit_mode and self.mode != "off":
             _warn_legacy(self.mode)
 
@@ -93,7 +94,7 @@ class VCRManager:
     def _cassette_path(self, request_hash: str) -> str:
         return os.path.abspath(os.path.join(self.cassette_dir, f"{request_hash}.json"))
 
-    def build_request_payload(self, *, model: str, system: str, messages: list, tools: list, max_tokens: int, thinking: dict = None, provider: str = "anthropic", reasoning: dict = None) -> dict:
+    def build_request_payload(self, *, model: str, system: str, messages: list, tools: list, max_tokens: int, thinking: Optional[dict] = None, provider: str = "anthropic", reasoning: Optional[dict] = None) -> dict:
         result = {
             "provider": provider,
             "model": model,

@@ -1,4 +1,5 @@
 const { _electron: electron } = require("playwright");
+const { fixtureEnv } = require("./e2e-env.cjs");
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
@@ -21,7 +22,8 @@ const server = http.createServer((req, res) => {
     const body = JSON.parse(raw);
     const sendJSON = () => res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ id: "memory", choices: [{ message: { role: "assistant", content: "memory" }, finish_reason: "stop" }] }));
     if (!body.stream) { sendJSON(); return; }
-    const child = !(body.tools || []).some((tool) => tool.function?.name === "agent_tool");
+    // The main agent starts with a lean tool set (agent tools are deferred), so identify the child by its task, not by missing schemas.
+    const child = /PERM_CHILD:/.test(textOf(body.messages.find((message) => message.role === "user") || {}));
     const task = [...body.messages].reverse().find((message) => message.role === "user" && /^PERM_(WRITE|SHELL|CHILD):/.test(textOf(message)));
     const match = task ? /^PERM_(WRITE|SHELL|CHILD):([a-z0-9-]+\.txt)/.exec(textOf(task)) : null;
     const taskText = match ? match[0] : "";
@@ -48,8 +50,7 @@ const server = http.createServer((req, res) => {
 let app, page, workingDirectory;
 const errors = [];
 async function launch() {
-  const env = { ...process.env, USERPROFILE: path.join(fixture, "home"), HOME: path.join(fixture, "home"), XULOOM_USER_DATA: data, XULOOM_CONFIG_DIR: config, XULOOM_TEST_HEADLESS: "1" };
-  for (const key of ["ELECTRON_RUN_AS_NODE", "XULOOM_DEV_URL", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL", "XULOOM_MODEL_PROVIDER"]) delete env[key];
+  const env = fixtureEnv({ data, config, home: path.join(fixture, "home") });
   app = await electron.launch({ executablePath: process.env.XULOOM_TEST_EXECUTABLE, args: process.env.XULOOM_TEST_EXECUTABLE ? [] : [root], env, timeout: 30000 });
   page = await app.firstWindow(); page.setDefaultTimeout(60000); page.on("pageerror", (error) => errors.push(error.message));
   await page.waitForFunction(() => document.querySelector(".new-task")?.disabled === false);
@@ -101,7 +102,9 @@ async function main() {
     assert.equal(await mode().inputValue(), "full");
     await verifyWrite("restart.txt");
     await page.locator(".new-task").click(); await page.waitForFunction(() => !document.querySelector(".new-task").disabled);
-    const secondId = await activeId(); assert.notEqual(secondId, firstId); assert.equal(await mode().inputValue(), "ask");
+    const secondId = await activeId(); assert.notEqual(secondId, firstId);
+    // New chats inherit the latest explicit access choice (61f44b3); switching back to approval is explicit too.
+    assert.equal(await mode().inputValue(), "full"); await setMode("ask");
     await send("PERM_WRITE:denied.txt"); await page.getByRole("button", { name: "拒绝", exact: true }).click(); await finished();
     assert(!fs.existsSync(path.join(project, "denied.txt")));
     await row(firstId).locator(".session-select").click(); await page.waitForFunction(() => !document.querySelector(".new-task").disabled); assert.equal(await mode().inputValue(), "full");

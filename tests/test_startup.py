@@ -9,6 +9,22 @@ import unittest
 
 
 class StartupTests(unittest.TestCase):
+    def test_engine_and_directory_isolation_work_without_git(self):
+        self.assertEqual(self.child('''
+import asyncio,json,os
+os.environ['PATH']=''
+os.environ['GIT_PYTHON_REFRESH']='error'
+from xuloom import QueryEngine
+from xuloom.security.sandbox import SandboxManager
+async def check():
+    async with QueryEngine() as engine:
+        assert not engine.is_configured
+    boundary=SandboxManager(cwd=os.getcwd())
+    assert boundary._get_workspace_root()==(os.getcwd(),False)
+asyncio.run(check())
+print(json.dumps({'engineOpen':True}))
+'''), {'engineOpen': True})
+
     def test_scaling_configuration_load_and_save_do_not_start_controller_or_model(self):
         result = self.child('''
 import asyncio,json,os,sys

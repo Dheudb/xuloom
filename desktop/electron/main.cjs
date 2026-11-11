@@ -59,6 +59,7 @@ let workspaceQueue = Promise.resolve();
 let catalogRevision = 0;
 const engineMethods = new Set([
   "task.readiness",
+  "pricing.get", "pricing.save", "pricing.reload",
   "context.get", "context.compact",
   "remote.profiles", "remote.models",
   "collaboration.get", "collaboration.set", "agents.resume_queue", "execution.get", "execution.set", "execution.cleanup",
@@ -521,6 +522,15 @@ async function invoke(method, params) {
   if (["remote.profiles", "remote.models", "remote.save", "remote.remove", "remote.check"].includes(method))
     return globalConfig().request(method, params);
   if (method === "config.models") return globalConfig().request(method, params);
+  // Prices and the task cost cap live in ~/.xuloom/pricing.json (shared with the CLI). After saving,
+  // every open local conversation reloads them so its next request uses the new values.
+  if (method === "pricing.get") return globalConfig().request(method, {});
+  if (method === "pricing.save") {
+    const result = await globalConfig().request(method, params);
+    await Promise.allSettled([...sessions.values()].filter(source => !source.remote && !source.transport.closed)
+      .map(source => source.transport.request("pricing.reload")));
+    return result;
+  }
   if (method === "config.delete") {
     if ([...sessions.values()].some(running)) throw new Error("请先停止运行中的任务，再删除 API 连接");
     if (!params.session) return globalConfig().request(method, params);
@@ -850,6 +860,8 @@ app.whenReady().then(() => {
     }
     return invoke(method, params);
   });
+  // Interface language switch: reload the renderer (drafts are flushed by its beforeunload handler).
+  ipcMain.on("workbench:reload", (event) => { if (event.sender === window?.webContents) window.webContents.reload(); });
   ipcMain.on("workbench:drafts", (event, drafts) => {
     if (event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || !Array.isArray(drafts) || drafts.length > 8) {
       event.returnValue = false;

@@ -25,7 +25,7 @@ const server = http.createServer((req, res) => {
     }
     const system = body.messages.filter((m) => m.role === "system").map(textOf).join("\n");
     if (system.includes("resume-fixture") || system.includes("Configured request model ID:")) failures.push("Model routing leaked into resumed identity prompt");
-    if (!system.includes("introduce yourself as Xuloom")) failures.push("Product identity missing from resumed request");
+    // The forced self-introduction prompt was removed in 8e13e4c; only check that routing does not leak.
     if (text === "EDITED_TASK" && body.messages.some((m) => m.role === "user" && textOf(m) === "EDIT_ORIGINAL")) failures.push("Superseded prompt still sent to model");
     res.writeHead(200, { "Content-Type": "text/event-stream" });
     const chunk = (delta, finish_reason = null) => res.write("data: " + JSON.stringify({ id: "test", choices: [{ index: 0, delta, finish_reason }] }) + "\n\n");

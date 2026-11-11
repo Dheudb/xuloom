@@ -58,7 +58,7 @@ import FilePreview from "./FilePreview";
 import { clampPanelWidth, clampSidebarWidth, defaultSidebarWidth, DEFAULT_PANEL_WIDTH } from "./panel-width";
 import useConversationScroll from "./useConversationScroll";
 import Attachments, { AttachmentPreview } from "./Attachments";
-
+import { displayName, t, tServer, tx } from "./i18n";
 const basename = (value: string) =>
   value.split(/[\\/]/).filter(Boolean).pop() || value;
 
@@ -124,7 +124,7 @@ export default function App() {
       if (window.xuloom?.flushDrafts(draftSessions.current.map((session) => ({ id: session.id, draft: session.draft, draftEditId: session.editingId || "", draftAttachments: session.attachments.map((item) => item.id) }))) === false) {
         event.preventDefault();
         if (event.type === "beforeunload") (event as BeforeUnloadEvent).returnValue = "";
-        setNotice("草稿保存失败，窗口已保留。请检查存储空间、权限或会话占用，恢复后重试退出。");
+        setNotice(t("草稿保存失败，窗口已保留。请检查存储空间、权限或会话占用，恢复后重试退出。"));
       }
     };
     window.addEventListener("beforeunload", flush);
@@ -133,7 +133,7 @@ export default function App() {
   }, []);
   useEffect(() => {
     if (!window.xuloom) {
-      setNotice("请通过 Xuloom 桌面程序打开工作台。");
+      setNotice(t("请通过 Xuloom 桌面程序打开工作台。"));
       return;
     }
     window.xuloom
@@ -265,7 +265,7 @@ export default function App() {
       const result = await window.xuloom.invoke(method, params);
       if (!result) return;
       if (result.notice) setNotice(result.notice);
-      if (method === "chat.copy") setNotice("聊天链接已复制");
+      if (method === "chat.copy") setNotice(t("聊天链接已复制"));
       if (preferenceWrite) setCatalog(preferences.current.finish(preferenceWrite.id, result));
       else if (result.catalog) receiveCatalog(result.catalog);
       else if (method.startsWith("catalog.")) receiveCatalog(result);
@@ -331,14 +331,14 @@ export default function App() {
     if (name === "files") fileInput.current?.click();
     else if (name === "goal") {
       if (active?.goal && !["completed", "cancelled", "budget_exhausted"].includes(active.goal.status)) { setGoalDialog("goal"); return; }
-      if (active?.attachments.length || active?.editingId) { onError("请先发送附件或结束提示词编辑，再选择目标模式。"); return; }
+      if (active?.attachments.length || active?.editingId) { onError(t("请先发送附件或结束提示词编辑，再选择目标模式。")); return; }
       update({ goalMode: true, mode: "normal" });
       requestAnimationFrame(() => input.current?.focus());
     } else if (name === "schedule") {
-      if (active?.attachments.length) { onError("请先发送附件，或移除附件后设置目标与唤醒。"); return; }
+      if (active?.attachments.length) { onError(t("请先发送附件，或移除附件后设置目标与唤醒。")); return; }
       setGoalDialog("all");
     } else if (name === "plan") {
-      if (active?.goal && !["completed", "cancelled", "budget_exhausted"].includes(active.goal.status)) { onError("请先结束当前目标，再切换计划模式。"); return; }
+      if (active?.goal && !["completed", "cancelled", "budget_exhausted"].includes(active.goal.status)) { onError(t("请先结束当前目标，再切换计划模式。")); return; }
       update({ mode: active?.mode === "plan" ? "normal" : "plan", goalMode: false });
     } else if (name === "skills") { setPanelOpen(true); setPanelTab("skills"); }
     else if (name === "mcp") setMcpOpen(true);
@@ -373,11 +373,11 @@ export default function App() {
     if (active?.controlledExecution) return;
     if (active?.busy && active.steering) { await appendInput(); return; }
     if (resumeAvailable) { await resume(); return; }
-    if (active?.pendingInputs?.length && !active.busy) { onError('还有未送达的补充要求，请继续原任务，或先取消这些消息再开始新任务。'); return; }
+    if (active?.pendingInputs?.length && !active.busy) { onError(t("还有未送达的补充要求，请继续原任务，或先取消这些消息再开始新任务。")); return; }
     if (opening || importing || modelChanging || permissionChanging || collaborationChanging || !active || active.busy || (!active.draft.trim() && !active.attachments.length)) return;
-    if (active.attachments.some(item => item.available === false)) { onError("附件上传未完成；请移除后重新添加，再发送任务。"); return; }
+    if (active.attachments.some(item => item.available === false)) { onError(t("附件上传未完成；请移除后重新添加，再发送任务。")); return; }
     if (active.goalMode) {
-      if (active.attachments.length || active.editingId) { onError("目标模式请直接输入目标；附件或提示词编辑请先单独发送。"); return; }
+      if (active.attachments.length || active.editingId) { onError(t("目标模式请直接输入目标；附件或提示词编辑请先单独发送。")); return; }
       const id = active.id, objective = active.draft.trim();
       update({ busy: true, error: "" }, id);
       let created = false;
@@ -394,7 +394,7 @@ export default function App() {
     }
     conversationScroll.followLatest();
     const id = active.id,
-      text = active.draft.trim() || "请查看这些附件。",
+      text = active.draft.trim() || t("请查看这些附件。"),
       selected = active.selected,
       mode = active.mode,
       attached = active.attachments,
@@ -426,17 +426,17 @@ export default function App() {
     }
   }
   async function importFiles(files: File[]) {
-    if (active?.controlledExecution) { onError("此子代理只读；请回原主会话添加资料。"); return; }
+    if (active?.controlledExecution) { onError(t("此子代理只读；请回原主会话添加资料。")); return; }
     if (!files.length) return;
-    if (importing || opening) { onError(importing ? "正在添加附件，请稍后再添加" : "会话正在打开，请稍后再添加附件"); return; }
-    if (active?.busy) { onError("请先停止当前任务，再添加附件"); return; }
-    if (active?.remote && !active.remote.attachments) { onError("请先更新远端 Xuloom，再传输附件。"); return; }
+    if (importing || opening) { onError(importing ? t("正在添加附件，请稍后再添加") : t("会话正在打开，请稍后再添加附件")); return; }
+    if (active?.busy) { onError(t("请先停止当前任务，再添加附件")); return; }
+    if (active?.remote && !active.remote.attachments) { onError(t("请先更新远端 Xuloom，再传输附件。")); return; }
     setImporting(true);
     let id = activeId;
     const remote = !!active?.remote;
     try {
       const existing = active?.attachments.map((item) => item.id) || [];
-      if (existing.length + files.length > 10) throw new Error("每条消息最多添加 10 个附件");
+      if (existing.length + files.length > 10) throw new Error(t("每条消息最多添加 10 个附件"));
       if (!active) {
         const value = await window.xuloom.invoke("session.new", { scope: "standalone" });
         if (value.catalog) receiveCatalog(value.catalog);
@@ -444,7 +444,7 @@ export default function App() {
         id = value.id; setActiveId(id);
       }
       importOwner.current = { id, remote };
-      const pending: Attachment[] = remote ? files.map(file => ({ id: crypto.randomUUID(), name: file.name || "粘贴图片", path: "", size: file.size,
+      const pending: Attachment[] = remote ? files.map(file => ({ id: crypto.randomUUID(), name: file.name || t("粘贴图片"), path: "", size: file.size,
         kind: /\.(png|jpe?g|webp|gif|bmp)$/i.test(file.name) ? "image" : "file", available: false, state: "uploading" })) : [];
       if (pending.length) setSessions(previous => previous.map(session => session.id === id ? { ...session, attachments: [...session.attachments, ...pending] } : session));
       const items = await window.xuloom.importFiles(id, files, existing, remote ? pending.map(item => item.id) : undefined);
@@ -530,7 +530,7 @@ export default function App() {
   const title = catalog.projects.flatMap((project) => project.sessions).find((row) => row.id === activeId)?.title ||
     active?.messages
       .find((message) => message.role === "user")
-      ?.text.split("\n")[0] || "新会话";
+      ?.text.split("\n")[0] || t("新会话");
   const enabledSkills =
     active?.capabilities.skills.filter(
       (skill) => skill.valid && skill.enabled && !skill.shadowed,
@@ -546,7 +546,7 @@ export default function App() {
       onDragLeave={() => { if (--dragDepth.current <= 0) { dragDepth.current = 0; setFileDrag(false); } }}
       onDragOver={(event) => { if (Array.from(event.dataTransfer.types).includes("Files")) { event.preventDefault(); event.dataTransfer.dropEffect = active?.busy || importing ? "none" : "copy"; } }}
       onDrop={(event) => { if (Array.from(event.dataTransfer.types).includes("Files")) { event.preventDefault(); event.stopPropagation(); dragDepth.current = 0; setFileDrag(false); void importFiles(Array.from(event.dataTransfer.files)); } }}>
-      {fileDrag && <div className="file-drop-overlay"><Paperclip size={28} /><strong>{active?.busy ? "请先停止当前任务" : "松开以添加附件"}</strong><span>图片、PDF 和本地文件</span></div>}
+      {fileDrag && <div className="file-drop-overlay"><Paperclip size={28} /><strong>{active?.busy ? t("请先停止当前任务") : t("松开以添加附件")}</strong><span>{t("图片、PDF 和本地文件")}</span></div>}
       <aside className="sidebar">
         <PanelResizer side="left" width={effectiveSidebarWidth} viewport={viewport} panelOpen={panelOpen} change={setSidebarWidth}
           save={(sidebarWidth) => { void window.xuloom.invoke("layout.save", { sidebarWidth }).catch(onError); }} />
@@ -555,7 +555,7 @@ export default function App() {
             <Workflow size={21} />
           </span>
           <strong>
-            Xuloom<span>序织</span>
+            Xuloom<span>{t("序织")}</span>
           </strong>
         </div>
         <button
@@ -563,37 +563,30 @@ export default function App() {
           disabled={opening}
           onClick={() => openSession()}
         >
-          <Plus size={17} />
-          新建会话<span>Ctrl N</span>
+          <Plus size={17} />{t("新建会话")}<span>Ctrl N</span>
         </button>
         <button
           className="sidebar-action"
           disabled={opening}
           onClick={() => openProject()}
         >
-          <FolderOpen size={16} />
-          创建项目{opening && <LoaderCircle size={14} className="spin" />}
+          <FolderOpen size={16} />{tx("创建项目{value}", { value: opening && <LoaderCircle size={14} className="spin" /> })}
         </button>
         <SessionSidebar catalog={catalog} activeId={activeId} live={sessions} opening={opening}
           action={workspaceAction} openProject={openProject} onError={onError} />
         <div className="sidebar-bottom">
-          <button className="sidebar-action" aria-label="Scaling 蜂群" onClick={() => setScalingOpen(true)}><Workflow size={16} />Scaling 蜂群 <span className="scaling-beta">实验阶段</span></button>
+          <button className="sidebar-action" aria-label={t("Scaling 蜂群")} onClick={() => setScalingOpen(true)}><Workflow size={16} />{t("Scaling 蜂群")} <span className="scaling-beta">{t("实验阶段")}</span></button>
           <button
             className="sidebar-action"
-            title={active ? "为当前工作区管理外部工具" : "浏览 MCP 服务目录"}
+            title={active ? t("为当前工作区管理外部工具") : t("浏览 MCP 服务目录")}
             onClick={() => setMcpOpen(true)}
           >
-            <Store size={16} />
-            MCP 市场
-          </button>
+            <Store size={16} />{t("MCP 市场")}</button>
           <div className="local-status">
-            <span />
-            本地工作区<span className="version" title={buildId ? "构建 " + buildId : "开发版本"}>{appVersion ? "v" + appVersion : "开发版"}{buildId ? " · " + buildId.slice(-4) : ""}</span>
+            <span />{t("本地工作区")}<span className="version" title={buildId ? t("构建 {buildId}", { buildId }) : t("开发版本")}>{appVersion ? "v" + appVersion : t("开发版")}{buildId ? " · " + buildId.slice(-4) : ""}</span>
           </div>
           <button className="sidebar-action" onClick={openSettings}>
-            <Settings2 size={16} />
-            设置与模型
-          </button>
+            <Settings2 size={16} />{t("设置与模型")}</button>
         </div>
       </aside>
       <main className="main-panel">
@@ -604,10 +597,10 @@ export default function App() {
               title={active?.project}
               onClick={() => { if (active?.remote) { setFilePreview(undefined); setPanelTab("files"); setPanelOpen(true); } else if (active) void invoke("project.reveal").catch(onError); }}
             >
-              {active?.remote ? `${active.remote.name} · ${active.remote.host}` : active?.scope === "standalone" ? "独立会话" : active ? catalog.projects.find((project) => project.path.toLowerCase() === active.project.toLowerCase())?.name || basename(active.project) : "工作台"}
+              {active?.remote ? <span>{`${active.remote.name} · ${active.remote.host}`}</span> : active?.scope === "standalone" ? t("独立会话") : active ? <span>{catalog.projects.find((project) => project.path.toLowerCase() === active.project.toLowerCase())?.name || basename(active.project)}</span> : t("工作台")}
             </button>
             <ChevronRight size={13} />
-            <span>{active ? title.slice(0, 35) : "开始"}</span>
+            <span>{active ? displayName(title).slice(0, 35) : t("开始")}</span>
           </div>
           <div className="topbar-actions">
             {active && <SessionSummary key={active.id} sessionId={active.id} busy={active.busy} openFile={openFile}
@@ -615,14 +608,14 @@ export default function App() {
             {active && <GitStatus key={active.id + active.project} sessionId={active.id} project={active.project} busy={active.busy} />}
             <span className="local-tag">
               <span />
-              {active?.remote ? `SSH · ${active.remote.hostname || active.remote.host}${active.busy ? " · 执行中" : ""}` : active?.busy ? "执行中" : "本地"}
+              {active?.remote ? `SSH · ${active.remote.hostname || active.remote.host}${active.busy ? t(" · 执行中") : ""}` : active?.busy ? t("执行中") : t("本地")}
             </span>
-            <div className="panel-shortcuts" aria-label="会话工具">
+            <div className="panel-shortcuts" aria-label={t("会话工具")}>
               {[
-                { id: "files", label: "文件", icon: FolderTree },
-                { id: "activity", label: "活动", icon: Activity },
+                { id: "files", label: t("文件"), icon: FolderTree },
+                { id: "activity", label: t("活动"), icon: Activity },
               ].map(({ id, label, icon: Icon }) => (
-                <button key={id} className="icon-button" title={label} aria-label={"打开" + label + "面板"}
+                <button key={id} className="icon-button" title={label} aria-label={t("打开{label}面板", { label })}
                   aria-pressed={panelOpen && !filePreview && panelTab === id}
                   onClick={() => { setActivityQuery(""); setFilePreview(undefined); setPanelTab(id); setPanelOpen(true); }}>
                   <Icon size={17} />
@@ -631,8 +624,8 @@ export default function App() {
             </div>
             <button
               className="icon-button"
-              title={panelOpen ? "收起侧栏" : "技能、子代理与会话工具"}
-              aria-label={panelOpen ? "收起能力面板" : "展开能力面板"}
+              title={panelOpen ? t("收起侧栏") : t("技能、子代理与会话工具")}
+              aria-label={panelOpen ? t("收起能力面板") : t("展开能力面板")}
               aria-expanded={panelOpen}
               onClick={() => setPanelOpen(!panelOpen)}
             >
@@ -644,11 +637,11 @@ export default function App() {
             </button>
           </div>
         </header>
-        {!!catalog.navigationIssues && <div className="global-notice" role="alert"><span>{catalog.navigationIssues} 项 SSH 导航数据异常，本机历史可继续使用。</span><button onClick={() => setNavigationRepair(true)}>处理 SSH 导航问题</button></div>}
+        {!!catalog.navigationIssues && <div className="global-notice" role="alert"><span>{tx("{navigationIssues} 项 SSH 导航数据异常，本机历史可继续使用。", { navigationIssues: catalog.navigationIssues })}</span><button onClick={() => setNavigationRepair(true)}>{t("处理 SSH 导航问题")}</button></div>}
         {notice && (
           <div className="global-notice" role="alert">
-            <span>{notice}</span>
-            <button aria-label="关闭提示" onClick={() => setNotice("")}>
+            <span>{tServer(notice)}</span>
+            <button aria-label={t("关闭提示")} onClick={() => setNotice("")}>
               <X size={15} />
             </button>
           </div>
@@ -661,12 +654,12 @@ export default function App() {
               </div>
               <div className="eyebrow">YOUR LOCAL AGENT WORKSPACE</div>
               <h1>
-                {active?.scope === "standalone" ? "开始一个新会话。" : active ? "今天想完成什么？" : "从一个问题或任务开始。"}
+                {active?.scope === "standalone" ? t("开始一个新会话。") : active ? t("今天想完成什么？") : t("从一个问题或任务开始。")}
               </h1>
               <p>
-                {active?.scope === "standalone" ? "直接开始对话；文件和命令任务使用此会话的专属工作目录。" : active
-                  ? "描述你的任务，连接模型，让代理在这个项目里开始工作。"
-                  : "连接模型即可开始；每个独立会话都有自己的工作目录，也可以打开项目资料。"}
+                {active?.scope === "standalone" ? t("直接开始对话；文件和命令任务使用此会话的专属工作目录。") : active
+                  ? t("描述你的任务，连接模型，让代理在这个项目里开始工作。")
+                  : t("连接模型即可开始；每个独立会话都有自己的工作目录，也可以打开项目资料。")}
               </p>
               {!active ? (
                 <button
@@ -675,7 +668,7 @@ export default function App() {
                   onClick={() => openSession()}
                 >
                   <FolderOpen size={17} />
-                  {opening ? "正在打开…" : "开始新会话"}
+                  {opening ? t("正在打开…") : t("开始新会话")}
                   <ArrowUpRight size={15} />
                 </button>
               ) : (
@@ -688,21 +681,21 @@ export default function App() {
                     {[
                       {
                         icon: Paperclip,
-                        title: "阅读与总结资料",
-                        text: "提炼要点，保留来源和未读内容。",
-                        prompt: "请帮我总结资料，区分原文事实与推测，标明来源和无法读取的内容。先确认要处理的文件或链接。",
+                        title: t("阅读与总结资料"),
+                        text: t("提炼要点，保留来源和未读内容。"),
+                        prompt: t("请帮我总结资料，区分原文事实与推测，标明来源和无法读取的内容。先确认要处理的文件或链接。"),
                       },
                       {
                         icon: Workflow,
-                        title: "分析表格与数据",
-                        text: "核对数据口径，生成可复现结果。",
-                        prompt: "请帮我分析数据。先确认数据来源和分析问题，检查格式、字段及本机工具支持，保留原始数据，并验证关键计算。",
+                        title: t("分析表格与数据"),
+                        text: t("核对数据口径，生成可复现结果。"),
+                        prompt: t("请帮我分析数据。先确认数据来源和分析问题，检查格式、字段及本机工具支持，保留原始数据，并验证关键计算。"),
                       },
                       {
                         icon: Pencil,
-                        title: "撰写或修改文档",
-                        text: "围绕读者、用途与已有材料写作。",
-                        prompt: "请帮我撰写或修改文档。先确认读者、用途、材料和输出格式；需要保存时明确产物位置，不编造事实和引用。",
+                        title: t("撰写或修改文档"),
+                        text: t("围绕读者、用途与已有材料写作。"),
+                        prompt: t("请帮我撰写或修改文档。先确认读者、用途、材料和输出格式；需要保存时明确产物位置，不编造事实和引用。"),
                       },
                     ].map(({ icon: Icon, title, text, prompt }) => (
                       <button
@@ -721,17 +714,11 @@ export default function App() {
               {!active && (
                 <div className="welcome-features">
                   <span>
-                    <ShieldCheck size={14} />
-                    项目保存在本地
-                  </span>
+                    <ShieldCheck size={14} />{t("项目保存在本地")}</span>
                   <span>
-                    <Puzzle size={14} />
-                    按需挂载 Skills
-                  </span>
+                    <Puzzle size={14} />{t("按需挂载 Skills")}</span>
                   <span>
-                    <Bot size={14} />
-                    独立子代理
-                  </span>
+                    <Bot size={14} />{t("独立子代理")}</span>
                 </div>
               )}
             </div>
@@ -749,20 +736,18 @@ export default function App() {
               }
             }}>
               {active.messages.map((message, index) => (
-                <article key={index} className={"message " + message.role} aria-label={message.role === "user" ? "你的消息" : "Xuloom 回复"}>
+                <article key={index} className={"message " + message.role} aria-label={message.role === "user" ? t("你的消息") : t("Xuloom 回复")}>
                   <div className="message-avatar">
-                    {message.role === "assistant" ? <Workflow size={16} /> : "你"}
+                    {message.role === "assistant" ? <Workflow size={16} /> : t("你")}
                   </div>
                   <div className="message-body">
                     <div className="message-author">
-                      {message.role === "assistant" ? "Xuloom" : "你"}
+                      {message.role === "assistant" ? "Xuloom" : t("你")}
                       {message.role === "assistant" &&
                         active.busy &&
                         index === active.streamIndex && (
                           <span className="working-label">
-                            <span />
-                            处理中
-                          </span>
+                            <span />{t("处理中")}</span>
                         )}
                     </div>
                     {message.trace && <TurnProcess trace={message.trace} sessionId={activeId} />}
@@ -776,7 +761,7 @@ export default function App() {
                           <span />
                         </div>
                       ) : !message.trace ? (
-                        <span className="muted">此次任务未返回文本。</span>
+                        <span className="muted">{t("此次任务未返回文本。")}</span>
                       ) : null}
                     </div>
                     {!!message.attachments?.length && <Attachments items={message.attachments} open={openAttachment} remote={!!active?.remote} />}
@@ -788,7 +773,7 @@ export default function App() {
                     {!!message.text && <MessageActions key={active.id + ":" + index} role={message.role} text={message.text} onError={onError}
                       fork={message.role === "assistant" ? () => branchFrom(index) : undefined}
                       disabled={opening || active.busy || !!runningWorkers || !!runningCommands}>
-                      {message === lastUser && message.id && <button aria-label="编辑上一条提示词" title="编辑上一条提示词（空输入框连按两次 Esc）"
+                      {message === lastUser && message.id && <button aria-label={t("编辑上一条提示词")} title={t("编辑上一条提示词（空输入框连按两次 Esc）")}
                         disabled={opening || active.busy || !!runningWorkers || !!runningCommands} onClick={editLastPrompt}><Pencil size={13} /></button>}
                     </MessageActions>}
                   </div>
@@ -809,13 +794,13 @@ export default function App() {
         <div className="composer-area">
           {active?.error && (!paused || active.error !== "任务已停止，已收到的内容保留。") && (
             <div className="session-error" role="alert">
-              {active.error}
+              {tServer(active.error)}
               {active.errorAction && <button onClick={() => {
                 if (active.errorAction === "settings") setSettingsOpen(true);
                 else { setFilePreview(undefined); setPanelTab("activity"); setPanelOpen(true); }
-              }}>{active.errorAction === "settings" ? "检查模型设置" : "查看活动"}</button>}
+              }}>{active.errorAction === "settings" ? t("检查模型设置") : t("查看活动")}</button>}
               <button
-                aria-label="清除会话提示"
+                aria-label={t("清除会话提示")}
                 onClick={() => update({ error: "" })}
               >
                 <X size={13} />
@@ -831,33 +816,32 @@ export default function App() {
               }}
             >
               <LoaderCircle size={13} className="spin" />
-              {runningWorkers} 个子代理执行或排队中
-              <ChevronRight size={13} />
+              {tx("{runningWorkers} 个子代理执行或排队中", { runningWorkers })}<ChevronRight size={13} />
             </button>
           )}
-          {!!runningCommands && !active?.busy && <button className="worker-strip" onClick={() => invoke("stop").catch(onError)}><Square size={13} />{runningCommands} 个后台命令正在运行 · 停止所有后台任务</button>}
-          {!!active?.pendingInputs?.length && <div className="pending-inputs" aria-label="等待送达的补充要求">{active.pendingInputs.map(item=><div key={item.id}><span><small>{active.busy ? '等待当前步骤结束后送达' : '已保存，继续原任务后送达'}</small>{item.text}</span><button aria-label="取消补充要求" title="取消尚未送达的消息" onClick={()=>void window.xuloom.invoke('prompt.withdraw',{session:active.id,requestId:item.id}).catch(onError)}><X size={13}/></button></div>)}</div>}
+          {!!runningCommands && !active?.busy && <button className="worker-strip" onClick={() => invoke("stop").catch(onError)}><Square size={13} />{tx("{runningCommands} 个后台命令正在运行 · 停止所有后台任务", { runningCommands })}</button>}
+          {!!active?.pendingInputs?.length && <div className="pending-inputs" aria-label={t("等待送达的补充要求")}>{active.pendingInputs.map(item=><div key={item.id}><span><small>{active.busy ? t("等待当前步骤结束后送达") : t("已保存，继续原任务后送达")}</small>{item.text}</span><button aria-label={t("取消补充要求")} title={t("取消尚未送达的消息")} onClick={()=>void window.xuloom.invoke('prompt.withdraw',{session:active.id,requestId:item.id}).catch(onError)}><X size={13}/></button></div>)}</div>}
           {active?.goal && <GoalStrip key={active.id} goal={active.goal} busy={active.busy} invoke={invoke} onError={onError} details={() => setGoalDialog("goal")} />}
-          {active?.controlledExecution && <p className="fine-print" role="status">此子代理由原主会话控制。可以查看历史和文件，或从消息创建独立分支；继续执行请返回主会话。</p>}
-          {active?.goalMode && <details className="goal-limits"><summary>可选运行上限 · 留空则持续运行</summary>
+          {active?.controlledExecution && <p className="fine-print" role="status">{t("此子代理由原主会话控制。可以查看历史和文件，或从消息创建独立分支；继续执行请返回主会话。")}</p>}
+          {active?.goalMode && <details className="goal-limits"><summary>{t("可选运行上限 · 留空则持续运行")}</summary>
             <div>{([
-              ["seconds", "累计执行秒数", 604800], ["output_tokens", "累计输出 tokens", 10000000], ["rounds", "最多执行轮数", 10000],
+              ["seconds", t("累计执行秒数"), 604800], ["output_tokens", t("累计输出 tokens"), 10000000], ["rounds", t("最多执行轮数"), 10000],
             ] as const).map(([key, label, max]) => <label key={key}>{label}<input aria-label={label} type="number" min={1} max={max} step={1} disabled={active.busy}
-              value={active.goalLimits?.[key] ?? ""} placeholder="不限" onChange={e => {
+              value={active.goalLimits?.[key] ?? ""} placeholder={t("不限")} onChange={e => {
                 const limits = { ...active.goalLimits }; if (e.target.value === "") delete limits[key]; else limits[key] = Number(e.target.value);
                 update({ goalLimits: limits });
-              }} /></label>)}</div><p className="fine-print">主任务、子代理及摘要共用输出预算；这是运行限制，不是供应商账单金额保证。</p>
+              }} /></label>)}</div><p className="fine-print">{t("主任务、子代理及摘要共用输出预算；这是运行限制，不是供应商账单金额保证。")}</p>
           </details>}
           <div className={"composer " + (!active ? "disabled" : "")} onPaste={(event) => { if (event.clipboardData.files.length) { event.preventDefault(); void importFiles(Array.from(event.clipboardData.files)); } }}>
-            {active?.editingId && <div className="editing-prompt"><span>编辑上一条提示词 · 发送后重新执行，已修改的文件保留</span>
-              <button aria-label="取消编辑提示词" disabled={active.busy} onClick={() => update({ editingId: undefined, draft: active.draftBeforeEdit || "", draftBeforeEdit: undefined, attachments: active.attachmentsBeforeEdit || [], attachmentsBeforeEdit: undefined })}><X size={13} /></button></div>}
+            {active?.editingId && <div className="editing-prompt"><span>{t("编辑上一条提示词 · 发送后重新执行，已修改的文件保留")}</span>
+              <button aria-label={t("取消编辑提示词")} disabled={active.busy} onClick={() => update({ editingId: undefined, draft: active.draftBeforeEdit || "", draftBeforeEdit: undefined, attachments: active.attachmentsBeforeEdit || [], attachmentsBeforeEdit: undefined })}><X size={13} /></button></div>}
             {active && <Attachments items={active.attachments} open={openAttachment} remote={!!active.remote} disabled={importing || active.busy} remove={(id) => update({ attachments: active.attachments.filter((item) => item.id !== id) })} />}
-            {importing && <div className="attachment-loading" role="status"><LoaderCircle size={13} className="spin" />正在添加附件…{importOwner.current?.remote && <button className="text-button" onClick={() => { const owner = importOwner.current; if (owner) void window.xuloom.invoke("stop", { session: owner.id }).catch(onError); }}>取消附件传输</button>}</div>}
+            {importing && <div className="attachment-loading" role="status"><LoaderCircle size={13} className="spin" />{tx("正在添加附件…{value}", { value: importOwner.current?.remote && <button className="text-button" onClick={() => { const owner = importOwner.current; if (owner) void window.xuloom.invoke("stop", { session: owner.id }).catch(onError); }}>{t("取消附件传输")}</button> })}</div>}
             <div className={"composer-input " + (active?.selected.length ? "has-skills" : "")}>
             {active && active.selected.length > 0 && (
               <div className="selected-skills">
                 {active.selected.map((name) => (
-                  <span className="selected-skill" key={name} title={"已选择技能：" + name + " · 在输入开头按 Backspace 移除"}>
+                  <span className="selected-skill" key={name} title={t("已选择技能：{name} · 在输入开头按 Backspace 移除", { name })}>
                     <Box size={15} />
                     {name}
                   </span>
@@ -866,40 +850,40 @@ export default function App() {
             )}
             <SkillInput key={activeId} sessionId={activeId} draft={active?.draft || ""}
               selected={active?.selected || []} capabilities={active?.capabilities}
-              placeholder={active?.controlledExecution ? "子代理历史 · 请返回主会话继续执行" : active?.busy && active.steering ? "补充要求，将在当前步骤结束后送达…" : undefined}
+              placeholder={active?.controlledExecution ? t("子代理历史 · 请返回主会话继续执行") : active?.busy && active.steering ? t("补充要求，将在当前步骤结束后送达…") : undefined}
               allowSkills={!active?.busy} disabled={opening || !active || (active.busy && !active.steering) || !!active.controlledExecution} inputRef={input} update={update} send={send} editPrevious={editLastPrompt} />
             </div>
             <div className="composer-toolbar">
               <div className="composer-options">
-                <input ref={fileInput} type="file" multiple hidden aria-label="选择附件文件" onChange={(event) => { const files = Array.from(event.target.files || []); event.target.value = ""; void importFiles(files); }} />
+                <input ref={fileInput} type="file" multiple hidden aria-label={t("选择附件文件")} onChange={(event) => { const files = Array.from(event.target.files || []); event.target.value = ""; void importFiles(files); }} />
                 <ComposerMenu sessionId={activeId} disabled={opening || importing || !active || active.busy || !!active.controlledExecution} plan={active?.mode === "plan"} action={composerAction} />
-                <select className={"permission-picker " + (active?.permissionMode === "full" ? "full-access" : "")} aria-label="访问权限"
-                  title={active?.permissionMode === "full" ? "默认自动执行；显式权限规则、Plan 限制和中断恢复确认仍然生效" : "文件修改、命令和需要审批的外部工具会请求批准"}
+                <select className={"permission-picker " + (active?.permissionMode === "full" ? "full-access" : "")} aria-label={t("访问权限")}
+                  title={active?.permissionMode === "full" ? t("默认自动执行；显式权限规则、Plan 限制和中断恢复确认仍然生效") : t("文件修改、命令和需要审批的外部工具会请求批准")}
                   disabled={opening || !active || permissionChanging || !!active.controlledExecution} value={active?.permissionMode || "ask"}
                   onChange={(event) => void setPermissionMode(event.target.value as PermissionMode)}>
-                  <option value="ask">请求批准</option><option value="full">完全访问</option>
+                  <option value="ask">{t("请求批准")}</option><option value="full">{t("完全访问")}</option>
                 </select>
-                {active?.mode === "plan" && <button className="composer-mode-chip" aria-label="退出计划模式" title="计划模式 · 点击退出" onClick={() => update({ mode: "normal" })} disabled={active.busy}><Lightbulb size={14} />计划<X size={11} /></button>}
-                {active?.goalMode && <button className="composer-goal-mode" aria-label="取消目标模式" title="目标模式：输入目标并发送 · 点击取消" disabled={active.busy} onClick={() => update({ goalMode: false })}><Target size={15} className="goal-mode-icon" /><X size={15} className="goal-mode-remove" /><span>目标</span></button>}
+                {active?.mode === "plan" && <button className="composer-mode-chip" aria-label={t("退出计划模式")} title={t("计划模式 · 点击退出")} onClick={() => update({ mode: "normal" })} disabled={active.busy}><Lightbulb size={14} />{t("计划")}<X size={11} /></button>}
+                {active?.goalMode && <button className="composer-goal-mode" aria-label={t("取消目标模式")} title={t("目标模式：输入目标并发送 · 点击取消")} disabled={active.busy} onClick={() => update({ goalMode: false })}><Target size={15} className="goal-mode-icon" /><X size={15} className="goal-mode-remove" /><span>{t("目标")}</span></button>}
               </div>
               <div className="send-options">
-                <select className="collaboration-picker" aria-label="协作档位"
-                  title="Solo 独立完成；Auto 按需委派；Ultra 更积极寻找协作机会。两者不限制子代理数量，与模型思考强度、权限及宿主运行配置独立。"
+                <select className="collaboration-picker" aria-label={t("协作档位")}
+                  title={t("Solo 独立完成；Auto 按需委派；Ultra 更积极寻找协作机会。两者不限制子代理数量，与模型思考强度、权限及宿主运行配置独立。")}
                   disabled={opening || !active || collaborationChanging || active.busy || !!runningWorkers || !!runningCommands || !!active.controlledExecution}
                   value={active?.collaborationMode || "auto"}
                   onChange={(event) => void setCollaborationMode(event.target.value as SessionView["collaborationMode"])}>
-                  <option value="solo">Solo · 独立</option><option value="auto">Auto · 自动</option><option value="ultra">Ultra · 增强</option>
+                  <option value="solo">{t("Solo · 独立")}</option><option value="auto">{t("Auto · 自动")}</option><option value="ultra">{t("Ultra · 增强")}</option>
                 </select>
-                {active?.controlledExecution ? <span className="model-button">{active.controlledModel || "子代理历史"}</span> : selectedModel?.connections?.some((connection) => connection.models.length) ? <select
-                  className="model-picker" aria-label="选择模型" title={`${selectedModel.connectionName || "API"} · ${selectedModel.model}`}
+                {active?.controlledExecution ? <span className="model-button">{active.controlledModel || t("子代理历史")}</span> : selectedModel?.connections?.some((connection) => connection.models.length) ? <select
+                  className="model-picker" aria-label={t("选择模型")} title={`${selectedModel.connectionName || "API"} · ${selectedModel.model}`}
                   disabled={opening || modelChanging || active?.busy || !!runningWorkers || !!runningCommands}
                   value={JSON.stringify([selectedModel.connectionId, selectedModel.model])}
                   onChange={(event) => void selectModel(event.target.value)}>
                   {selectedModel.connections.filter((connection) => connection.models.length).map((connection) =>
-                    <optgroup key={connection.connectionId} label={connection.connectionName}>
+                    <optgroup key={connection.connectionId} label={displayName(connection.connectionName)}>
                       {connection.models.map((model) => <option key={model} value={JSON.stringify([connection.connectionId, model])}>{model}</option>)}
                     </optgroup>)}
-                </select> : <button className="model-button" onClick={openSettings}>连接模型<ChevronRight size={12} /></button>}
+                </select> : <button className="model-button" onClick={openSettings}>{t("连接模型")}<ChevronRight size={12} /></button>}
                 {!active?.controlledExecution && <ReasoningControls profile={selectedModel?.modelReasoning?.[selectedModel.model]}
                   disabled={opening || modelChanging || !!active?.busy || !!runningWorkers || !!runningCommands}
                   change={value => void selectReasoning(value)} />}
@@ -912,11 +896,11 @@ export default function App() {
                     {active.loaded.length} Skills
                   </span>
                 ) : null}
-                {active?.busy && active.steering && !!active.draft.trim() && <button className="send-button" aria-label="追加指令" title="保存并在下一个安全边界送达" disabled={steeringSending} onClick={() => void appendInput()}><ArrowUp size={19}/></button>}
+                {active?.busy && active.steering && !!active.draft.trim() && <button className="send-button" aria-label={t("追加指令")} title={t("保存并在下一个安全边界送达")} disabled={steeringSending} onClick={() => void appendInput()}><ArrowUp size={19}/></button>}
                 {active?.busy ? (
                   <button
                     className="send-button stop"
-                    aria-label="停止任务"
+                    aria-label={t("停止任务")}
                     onClick={() => invoke("stop").catch(onError)}
                   >
                     <Square size={15} fill="currentColor" />
@@ -924,8 +908,8 @@ export default function App() {
                 ) : (
                   <button
                     className={"send-button" + (resumeAvailable ? " resume" : "")}
-                    aria-label={resumeAvailable ? "继续执行" : "发送任务"}
-                    title={resumeAvailable ? "继续原任务，不新增消息" : "发送任务"}
+                    aria-label={resumeAvailable ? t("继续执行") : t("发送任务")}
+                    title={resumeAvailable ? t("继续原任务，不新增消息") : t("发送任务")}
                     disabled={opening || importing || modelChanging || permissionChanging || collaborationChanging || !!active?.controlledExecution || !!active?.attachments.some(item => item.available === false) || (!resumeAvailable && !active?.draft.trim() && !active?.attachments.length)}
                     onClick={() => void send()}
                   >
@@ -938,23 +922,19 @@ export default function App() {
           <div className="composer-caption">
             <span>
               <ShieldCheck size={12} />
-              {active?.executionMode === "workspace" ? "系统隔离 · 工具进程仅可写工作目录，禁止网络" : active?.permissionMode === "full" ? "宿主执行 · 完全访问：遵守显式权限规则" : "宿主执行 · 请求批准：需要审批的工具会先确认"}
+              {active?.executionMode === "workspace" ? t("系统隔离 · 工具进程仅可写工作目录，禁止网络") : active?.permissionMode === "full" ? t("宿主执行 · 完全访问：遵守显式权限规则") : t("宿主执行 · 请求批准：需要审批的工具会先确认")}
             </span>
             <span>
-              <span className="capability-count">{enabledSkills.length} Skills 可用 ·{" "}
-              {active?.capabilities.agents.filter(
+              <span className="capability-count">{tx("{length} Skills 可用 · {value} 代理角色", { length: enabledSkills.length, value: active?.capabilities.agents.filter(
                 (agent) => agent.valid && !agent.shadowed,
-              ).length || 0}{" "}
-              代理角色</span>
-              <span className="shortcut-hint">
-                Enter 发送 · Shift Enter 换行
-              </span>
+              ).length || 0 })}</span>
+              <span className="shortcut-hint">{t("Enter 发送 · Shift Enter 换行")}</span>
             </span>
           </div>
         </div>
       </main>
       {navigationRepair && <div className="overlay" onMouseDown={event => { if (event.target === event.currentTarget) setNavigationRepair(false); }}>
-        <section className="dialog" role="dialog" aria-modal="true" aria-label="恢复 SSH 导航" onKeyDown={event => {
+        <section className="dialog" role="dialog" aria-modal="true" aria-label={t("恢复 SSH 导航")} onKeyDown={event => {
           if (event.key === "Escape") { event.stopPropagation(); setNavigationRepair(false); }
           if (event.key === "Tab") {
             const items = [...event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled)')];
@@ -962,7 +942,7 @@ export default function App() {
             else if (!event.shiftKey && document.activeElement === items.at(-1)) { event.preventDefault(); items[0]?.focus(); }
           }
         }}>
-          <header><h2>恢复 SSH 导航</h2><button autoFocus aria-label="关闭导航恢复" onClick={() => setNavigationRepair(false)}><X size={17} /></button></header>
+          <header><h2>{t("恢复 SSH 导航")}</h2><button autoFocus aria-label={t("关闭导航恢复")} onClick={() => setNavigationRepair(false)}><X size={17} /></button></header>
           <RemoteReferences action={workspaceAction} />
         </section>
       </div>}
@@ -970,7 +950,7 @@ export default function App() {
       {createProjectOpen && <CreateProjectDialog create={(name, path) => workspaceAction("project.create", { name, path })} close={() => setCreateProjectOpen(false)} />}
       {contextOpen && active && <ContextDialog key={activeId} invoke={invoke} busy={active.busy || !!runningWorkers || !!runningCommands} close={() => setContextOpen(false)} />}
       {goalDialog && active && <div className="overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setGoalDialog(null); }}>
-        <section className="dialog composer-goal-dialog" role="dialog" aria-modal="true" aria-label={goalDialog === "goal" ? "调整目标" : "定时唤醒"}
+        <section className="dialog composer-goal-dialog" role="dialog" aria-modal="true" aria-label={goalDialog === "goal" ? t("调整目标") : t("定时唤醒")}
           onKeyDown={(event) => {
             if (event.key === "Escape") { event.stopPropagation(); setGoalDialog(null); }
             if (event.key === "Tab") {
@@ -979,7 +959,7 @@ export default function App() {
               else if (!event.shiftKey && document.activeElement === items.at(-1)) { event.preventDefault(); items[0]?.focus(); }
             }
           }}>
-          <header><strong>{goalDialog === "goal" ? "调整目标" : "定时唤醒"}</strong><button aria-label="关闭目标设置" onClick={() => setGoalDialog(null)} autoFocus><X size={17} /></button></header>
+          <header><strong>{goalDialog === "goal" ? t("调整目标") : t("定时唤醒")}</strong><button aria-label={t("关闭目标设置")} onClick={() => setGoalDialog(null)} autoFocus><X size={17} /></button></header>
           {goalDialog === "goal" && active.goal ? <GoalEditor key={activeId} objective={active.goal.objective} invoke={invoke} close={() => setGoalDialog(null)} /> : <SchedulePanel key={activeId} invoke={invoke} onError={onError} />}
         </section>
       </div>}

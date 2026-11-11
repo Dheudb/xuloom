@@ -3,7 +3,7 @@ import re
 import sys
 
 _PLUGIN_COMMANDS = None
-_FAILED_COMMANDS = {}
+_FAILED_COMMANDS: dict = {}
 
 
 def plugin_commands():

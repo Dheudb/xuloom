@@ -1,6 +1,6 @@
 {
   "name": "xuloom-desktop",
-  "version": "0.1.45",
+  "version": "0.1.46",
   "private": true,
   "type": "module",
   "description": "Xuloom desktop workbench",
@@ -11,6 +11,10 @@
     "start": "electron .",
     "test": "node --test tests/*.test.cjs",
     "test:e2e": "node tests/workbench.e2e.cjs",
+    "test:cost": "node tests/cost.e2e.cjs",
+    "test:i18n": "node tests/i18n.e2e.cjs",
+    "test:i18n-content": "node tests/i18n-content.e2e.cjs",
+    "i18n:check": "node scripts/i18n-codemod.mjs --check",
     "test:sessions": "node tests/sessions.e2e.cjs",
     "test:session-ownership": "node tests/session-ownership.e2e.cjs",
     "test:draft-exit": "node tests/draft-exit.e2e.cjs",

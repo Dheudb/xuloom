@@ -121,7 +121,9 @@ def status(engine):
         components=dict(system=count([], system=system), tools=count([], tools=tools),
             conversation=max(0, total-count([], system=system)-count([], tools=tools)), memoryCharacters=sum(item.get("chars", 0) for item in engine.memory_file_manager.loaded_files)),
         last=copy.deepcopy(getattr(engine, "last_compaction", None)),
-        auxiliary=copy.deepcopy(getattr(engine, "auxiliary_usage", {})), estimator=engine.compactor._local_estimator_mode())
+        auxiliary=copy.deepcopy(getattr(engine, "auxiliary_usage", {})), estimator=engine.compactor._local_estimator_mode(),
+        cost=dict(getattr(engine, "session_cost", None) or {"usd": 0.0, "unpriced_requests": 0},
+                  limitUsd=getattr(getattr(engine, "cost_meter", None), "limit_usd", None)))
 
 
 def output_limit(engine, kwargs):

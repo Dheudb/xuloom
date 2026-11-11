@@ -1,4 +1,5 @@
 import type { List, Paragraph, PhrasingContent, Root } from "mdast";
+import { t } from "./i18n.ts";
 
 // Some replies put an entire bibliography in one paragraph. Split only plain
 // numbered markers, leaving link labels, code, math and ordinary citations alone.
@@ -35,7 +36,7 @@ function referenceList(paragraph: Paragraph, explicitSources: boolean): List | u
   }
   return {
     type: "list", ordered: true, start: 1, spread: false,
-    data: { hProperties: { className: ["reference-list"], ariaLabel: "参考来源" } },
+    data: { hProperties: { className: ["reference-list"], ariaLabel: t("参考来源") } },
     children: rows.map(row => ({ type: "listItem", spread: false,
       children: [{ type: "paragraph", children: row.children }] })),
   };

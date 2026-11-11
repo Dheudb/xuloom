@@ -1,10 +1,12 @@
 """Provider-neutral message shaping and API history cleanup."""
+from typing import Any, Dict, List
 import copy
 import json
 from types import SimpleNamespace
+from xuloom.core.engine_state import EngineState
 
 
-class MessageNormalizationMixin:
+class MessageNormalizationMixin(EngineState):
     """Provider-neutral message shaping and API history cleanup."""
 
 
@@ -63,7 +65,7 @@ class MessageNormalizationMixin:
             return {"role": "user", "content": values if any(item["type"] == "image_url" for item in values) else "".join(item.get("text", "") for item in values)}
 
         normalized_messages = self._clean_roles_for_api(messages)
-        rendered = []
+        rendered: List[Dict[str, Any]] = []
         if system_prompt:
             rendered.append({"role": "system", "content": system_prompt})
 
@@ -100,7 +102,7 @@ class MessageNormalizationMixin:
                 continue
 
             user_parts = []
-            tool_images = []
+            tool_images: List[Any] = []
             for block in content:
                 if not isinstance(block, dict):
                     continue
@@ -182,7 +184,7 @@ class MessageNormalizationMixin:
         return None
 
     def _merge_adjacent_text_blocks(self, blocks: list) -> list:
-        merged = []
+        merged: List[Any] = []
         for block in blocks:
             if not isinstance(block, dict):
                 continue
@@ -200,7 +202,7 @@ class MessageNormalizationMixin:
 
     def _normalize_message_content_for_api(self, role: str, content):
         if isinstance(content, str):
-            normalized = [{"type": "text", "text": content}]
+            normalized: List[Dict[str, Any]] = [{"type": "text", "text": content}]
         elif isinstance(content, list):
             normalized = []
             for raw_block in content:
@@ -346,7 +348,7 @@ class MessageNormalizationMixin:
         normalized_messages = self._filter_incomplete_tool_messages_for_api(normalized_messages)
         normalized_messages = self._strip_error_causing_attachments(normalized_messages)
 
-        collapsed = []
+        collapsed: List[Any] = []
         for msg in normalized_messages:
             if not collapsed:
                 collapsed.append(msg)

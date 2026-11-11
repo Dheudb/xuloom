@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { t, tServer } from "./i18n";
 
 export default function HtmlPreview({ sessionId, path, revision }: { sessionId: string; path: string; revision: string }) {
   const [url, setUrl] = useState(""), [error, setError] = useState(""), [loading, setLoading] = useState(true);
@@ -13,8 +14,8 @@ export default function HtmlPreview({ sessionId, path, revision }: { sessionId: 
     return () => { cancelled = true; if (token) release(token); };
   }, [sessionId, path, revision]);
   return <div className="html-preview">
-    {loading && <p className="muted" role="status">正在加载网页预览…</p>}
-    {error && <p className="error" role="alert">{error}</p>}
-    {url && <iframe key={url} title="HTML 网页预览" src={url} sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer" onLoad={() => setLoading(false)} />}
+    {loading && <p className="muted" role="status">{t("正在加载网页预览…")}</p>}
+    {error && <p className="error" role="alert">{tServer(error)}</p>}
+    {url && <iframe key={url} title={t("HTML 网页预览")} src={url} sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer" onLoad={() => setLoading(false)} />}
   </div>;
 }

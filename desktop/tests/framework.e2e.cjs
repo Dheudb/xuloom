@@ -31,7 +31,8 @@ const server = http.createServer((req, res) => {
     try {
       const body = JSON.parse(raw);
       if (!body.stream) { res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "memory" } }] })); return; }
-      const isChild = !body.tools.some((tool) => tool.function.name === "agent_tool");
+      // The main agent starts with a lean tool set (agent tools are deferred), so identify the child by its task, not by missing schemas.
+      const isChild = JSON.stringify(body.messages.find((m) => m.role === "user")?.content || "").includes("FIRST_MEMORY");
       if (isChild) {
         assert.equal(body.reasoning_effort, "high");
         assert.equal(body.model, "worker-fixture");

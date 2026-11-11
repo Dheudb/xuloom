@@ -1,4 +1,5 @@
 const { _electron: electron } = require("playwright");
+const { fixtureEnv } = require("./e2e-env.cjs");
 const fs = require("node:fs"), path = require("node:path"), os = require("node:os"), http = require("node:http"), assert = require("node:assert/strict");
 const { atomicJSON } = require("../electron/catalog.cjs");
 const root = path.resolve(__dirname, "..");
@@ -10,6 +11,8 @@ const python = process.env.XULOOM_TEST_EXECUTABLE ? path.join(path.dirname(proce
 const picture = path.join(project, "landscape.png");
 require("node:child_process").execFileSync(python, ["-I", "-c", "from PIL import Image,ImageDraw; import sys; im=Image.new('RGB',(720,420),'#e9f3fa'); d=ImageDraw.Draw(im); d.ellipse((480,40,600,160),fill='#f4cf76'); d.polygon([(0,350),(180,170),(400,420)],fill='#89b5c8'); d.polygon([(250,420),(530,210),(720,420)],fill='#bed1be'); im.save(sys.argv[1])", picture], { windowsHide: true });
 let mediaRequests = 0, modelReceivedImage = false;
+let releaseFirstTurn;
+const firstTurnGate = new Promise(resolve => { releaseFirstTurn = resolve; });
 atomicJSON(path.join(data, "workbench.json"), { projects: [], activeConversation: null, defaultDirectory: project });
 let app, page;
 const errors = [];
@@ -43,7 +46,8 @@ const server = http.createServer((req, res) => {
       chunk({}, "tool_calls");
     } else if (multi || cancel || error) {
       chunk({ role: "assistant", content: cancel ? "先请求批准，再写文件。" : calls ? "再检查一次，确认结果。" : "我先检查文件内容。" });
-      await new Promise((resolve) => setTimeout(resolve, multi && !calls ? 1400 : 30));
+      // Keep a real request open after the first tool has finished, until the UI verifies its running state.
+      if (multi && calls === 1) await firstTurnGate;
       chunk({ tool_calls: [{ index: 0, id: `call_${calls}`, type: "function", function: { name: cancel ? "file_write_tool" : "file_read_tool", arguments: JSON.stringify({ file_path: path.join(project, cancel ? "cancelled.txt" : "proof.txt"), ...(cancel ? { content: "never write" } : {}) }) } }] });
       chunk({}, "tool_calls");
     } else {
@@ -54,8 +58,7 @@ const server = http.createServer((req, res) => {
   });
 });
 async function launch() {
-  const env = { ...process.env, USERPROFILE: path.join(fixture, "home"), HOME: path.join(fixture, "home"), XULOOM_USER_DATA: data, XULOOM_CONFIG_DIR: config, XULOOM_TEST_HEADLESS: "1" };
-  for (const key of ["ELECTRON_RUN_AS_NODE", "XULOOM_DEV_URL", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL", "XULOOM_MODEL_PROVIDER"]) delete env[key];
+  const env = fixtureEnv({ data, config, home: path.join(fixture, "home") });
   app = await electron.launch({ executablePath: process.env.XULOOM_TEST_EXECUTABLE, args: process.env.XULOOM_TEST_EXECUTABLE ? [] : [root], env, timeout: 30000 });
   page = await app.firstWindow(); page.setDefaultTimeout(60000); page.on("pageerror", (error) => errors.push(error.message));
   await page.waitForFunction(() => document.querySelector(".new-task")?.disabled === false);
@@ -69,6 +72,8 @@ async function main() {
     await launch(); await page.locator(".new-task").click(); await page.locator(".session-item.active").waitFor();
     await send("TRACE_MULTI");
     await page.locator('.turn-process[data-turn-status="running"][open]').waitFor();
+    await page.waitForFunction(() => /用时 [1-9]\d*秒/.test(document.querySelector('.turn-process[data-turn-status="running"] > summary')?.textContent || ""));
+    releaseFirstTurn();
     await finished();
     const first = page.locator(".turn-process").first();
     assert.equal(await first.getAttribute("open"), null);
@@ -139,6 +144,6 @@ async function main() {
     fs.writeFileSync(path.join(root, "test-results/turn-process.png"), Buffer.from(shot, "base64"));
     assert.deepEqual(errors, []);
     console.log("Turn process E2E passed: typed compact rows, native model image input, thumbnail/enlargement after original deletion and restart, live timer, collapse, details, cancellation/error and per-turn isolation");
-  } finally { if (app) await app.close().catch(() => {}); server.closeAllConnections(); server.close(); }
+  } finally { releaseFirstTurn(); if (app) await app.close().catch(() => {}); server.closeAllConnections(); server.close(); }
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

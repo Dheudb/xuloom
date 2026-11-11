@@ -488,6 +488,31 @@ class DesktopBridge:
             self.recorder = None
         return receipt or {"ok": False, "reason": "cancelled" if self.stop_requested else "error"}
 
+    def pricing(self, method, params):
+        """Model prices and the task cost cap kept in ~/.xuloom/pricing.json (shared with the CLI)."""
+        from xuloom.observability.cost import load_pricing_settings, pricing_path, save_pricing_settings
+        if method == "pricing.save":
+            models = params.get("models") or {}
+            if not isinstance(models, dict):
+                raise ValueError("models must be an object of model -> prices")
+            cap = params.get("maxCostUsd")
+            save_pricing_settings(models, None if cap in (None, "") else float(cap))
+        prices, cap = load_pricing_settings()
+        engine = self.engine
+        if method in {"pricing.save", "pricing.reload"} and engine is not None:
+            # The open conversation uses the new prices and cap from its next request
+            # (prices passed explicitly in EngineConfig still win, as at construction).
+            from xuloom.observability.cost import ModelPrice
+            merged = dict(prices)
+            merged.update({str(name): ModelPrice.coerce(value) for name, value in (engine.config.model_prices or {}).items()})
+            engine.cost_meter.prices = merged
+            if engine.config.max_cost_usd is None:
+                engine.cost_meter.limit_usd = cap
+        return {"models": {name: {key: value for key, value in vars(price).items() if value is not None}
+                           for name, price in prices.items()},
+                "maxCostUsd": cap, "path": str(pricing_path()),
+                "capFromEnvironment": bool(os.environ.get("XULOOM_MAX_COST_USD"))}
+
     async def dispatch(self, method, params):
         if method == 'task.readiness':
             from .readiness import inspect
@@ -742,6 +767,8 @@ class DesktopBridge:
             return {"permissionMode": self.approval_policy.mode}
         if method == "config.models":
             return await discover_models(load_config(), params)
+        if method in {"pricing.get", "pricing.save", "pricing.reload"}:
+            return await asyncio.to_thread(self.pricing, method, params)
         if method == "mcp.list":
             return await asyncio.to_thread(self.mcp_snapshot)
         if method in {"mcp.oauth.cancel","mcp.oauth.callback"}:

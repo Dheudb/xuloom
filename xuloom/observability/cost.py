@@ -28,9 +28,10 @@ import json
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional, Tuple
 
-__all__ = ["ModelPrice", "CostMeter", "CostLimitError", "load_prices", "pricing_path"]
+__all__ = ["ModelPrice", "CostMeter", "CostLimitError", "load_prices", "load_pricing_settings",
+           "save_pricing_settings", "pricing_path"]
 
 
 class CostLimitError(RuntimeError):
@@ -80,13 +81,45 @@ def pricing_path(home: Optional[Path] = None) -> Path:
 
 def load_prices(path: Optional[Path] = None) -> Dict[str, ModelPrice]:
     """Read ``pricing.json``; a missing file means no prices, a malformed one raises ``ValueError``."""
+    return load_pricing_settings(path)[0]
+
+
+def load_pricing_settings(path: Optional[Path] = None) -> Tuple[Dict[str, ModelPrice], Optional[float]]:
+    """``(prices, max_cost_usd)`` from ``pricing.json``; the cap is optional (``"max_cost_usd": 0.5``)."""
     path = Path(path) if path is not None else pricing_path()
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return {}
+        return {}, None
     except (OSError, json.JSONDecodeError) as error:
         raise ValueError(f"Cannot read {path}: {error}") from error
+    cap = raw.get("max_cost_usd") if isinstance(raw, dict) else None
+    if cap is not None and (isinstance(cap, bool) or not isinstance(cap, (int, float)) or not math.isfinite(cap) or cap < 0):
+        raise ValueError(f"{path}: max_cost_usd must be a non-negative number")
+    return _parse_models(path, raw), (None if cap is None else float(cap))
+
+
+def save_pricing_settings(models: Mapping[str, Any], max_cost_usd: Optional[float], path: Optional[Path] = None) -> Path:
+    """Validate and write ``pricing.json`` atomically (used by the desktop settings)."""
+    path = Path(path) if path is not None else pricing_path()
+    prices = {str(name).strip(): ModelPrice.coerce(value) for name, value in (models or {}).items()}
+    if any(not name for name in prices):
+        raise ValueError("Model names or patterns cannot be empty")
+    if max_cost_usd is not None:
+        max_cost_usd = float(max_cost_usd)
+        if not math.isfinite(max_cost_usd) or max_cost_usd < 0:
+            raise ValueError("max_cost_usd must be a non-negative number")
+    payload: Dict[str, Any] = {"models": {name: {key: value for key, value in vars(price).items() if value is not None}
+                                          for name, price in prices.items()}}
+    if max_cost_usd is not None:
+        payload["max_cost_usd"] = max_cost_usd
+    from xuloom.core.storage import atomic_json
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_json(path, payload)
+    return path
+
+
+def _parse_models(path, raw) -> Dict[str, ModelPrice]:
     models = raw.get("models") if isinstance(raw, dict) else None
     if not isinstance(models, dict):
         raise ValueError(f"{path} must contain {{\"models\": {{\"<model>\": {{\"input\": ..., \"output\": ...}}}}}}")

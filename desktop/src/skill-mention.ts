@@ -1,3 +1,4 @@
+import { t } from "./i18n.ts";
 // A mention is a complete token at the caret, not an arbitrary dollar in prose.
 export function skillMention(text: string, caret: number) {
   const before = text.slice(0, caret);
@@ -13,4 +14,4 @@ export function removeSkillMention(text: string, mention: { start: number; end: 
 }
 
 export const skillScope = (scope: string) =>
-  ({ project: "项目", global: "全局", imported: "导入", environment: "环境", builtin: "内置" })[scope] || scope;
+  ({ project: t("项目"), global: t("全局"), imported: t("导入"), environment: t("环境"), builtin: t("内置") })[scope] || scope;

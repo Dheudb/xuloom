@@ -72,6 +72,20 @@ class TurnRecorder:
                 record["steps"].append(step)
             step["compaction"].update({key: event[key] for key in ("status", "before", "after", "elapsedMs") if key in event})
             return True
+        if kind == "token_usage":
+            if event.get("agent_id"): return False
+            usage = record.setdefault("usage", {"inputTokens": 0, "outputTokens": 0, "requests": 0,
+                                                "unpricedRequests": 0, "estimated": False})
+            usage["inputTokens"] += int(event.get("input_tokens") or 0)
+            usage["outputTokens"] += int(event.get("output_tokens") or 0)
+            usage["requests"] += 1
+            if event.get("cost_usd") is None:
+                usage["unpricedRequests"] += 1
+            if event.get("usage_source") not in (None, "api_usage"):
+                usage["estimated"] = True
+            if event.get("task_cost_usd") is not None:
+                usage["costUsd"] = float(event["task_cost_usd"])
+            return True
         if kind == "stream_status":
             if event.get("agent_id"): return False
             streams = record.setdefault("modelStreams", [])

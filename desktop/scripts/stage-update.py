@@ -48,6 +48,8 @@ def main():
     stage.mkdir(parents=True)
     dependencies = stage / "dependencies"
     subprocess.run([sys.executable, "-m", "pip", "install", "--no-deps", "--no-compile", "--target", str(dependencies), "prompt_toolkit>=3.0,<4"], check=True)
+    search = runpy.run_path(str(Path(__file__).with_name('bundled_search.py')))
+    search['prepare_search'](dependencies)
     # setuptools copies incrementally; retired modules must not survive in wheels.
     cached = ROOT / "build/lib/xuloom"
     if cached.exists():
@@ -107,7 +109,7 @@ def main():
     manifest.update(**provenance, resourceHashes={p.relative_to(stage).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for directory in ("xuloom", "app", "metadata", "dependencies") for p in sorted((stage/directory).rglob("*")) if p.is_file() and "__pycache__" not in p.parts})
     if validation: shutil.copyfile(args.validation_receipt,stage/"validation-receipt.json")
     (stage / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    if list(stage.rglob("*.exe")): raise SystemExit("Resource updates must not contain another executable")
+    search['validate_search_executables'](stage)
     print(json.dumps({"stage": str(stage), "target": str(package), **manifest}))
 
 

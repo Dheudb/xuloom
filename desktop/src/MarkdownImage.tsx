@@ -1,13 +1,14 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { imageReference } from "./image-reference";
 import { AttachmentPreview } from "./Attachments";
+import { t } from "./i18n";
 
 export const MarkdownImageContext = createContext<{ sessionId?: string; basePath?: string }>({});
 
 export default function MarkdownImage({ src, alt }: { src?: string; alt?: string }) {
   const { sessionId, basePath } = useContext(MarkdownImageContext);
   const [source, setSource] = useState(""), [failed, setFailed] = useState(false), [open, setOpen] = useState(false), [ready, setReady] = useState(false);
-  const name = alt || "图片";
+  const name = alt || t("图片");
   useEffect(() => {
     let cancelled = false;
     setSource(""); setFailed(false); setOpen(false); setReady(false);
@@ -21,7 +22,7 @@ export default function MarkdownImage({ src, alt }: { src?: string; alt?: string
     return () => { cancelled = true; };
   }, [src, sessionId, basePath]);
   if (failed || !source) return null;
-  return <><button type="button" className="markdown-image" style={{ opacity: ready ? 1 : 0 }} disabled={!ready} aria-hidden={!ready} title="点击放大" aria-label={"放大图片 " + name} onClick={(event) => { event.preventDefault(); event.stopPropagation(); setOpen(true); }}>
+  return <><button type="button" className="markdown-image" style={{ opacity: ready ? 1 : 0 }} disabled={!ready} aria-hidden={!ready} title={t("点击放大")} aria-label={t("放大图片 {name}", { name })} onClick={(event) => { event.preventDefault(); event.stopPropagation(); setOpen(true); }}>
     <img src={source} alt={name} loading="lazy" referrerPolicy="no-referrer" onLoad={() => setReady(true)} onError={() => setFailed(true)} />
   </button>{open && source && <AttachmentPreview image={{ name, source }} close={() => setOpen(false)} />}</>;
 }

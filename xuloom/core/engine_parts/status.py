@@ -1,7 +1,8 @@
 """Human-readable runtime summaries for CLI and desktop."""
+from xuloom.core.engine_state import EngineState
 
 
-class StatusMixin:
+class StatusMixin(EngineState):
     """Human-readable runtime summaries for CLI and desktop."""
 
     def get_plan(self) -> str:

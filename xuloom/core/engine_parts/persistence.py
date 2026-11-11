@@ -6,9 +6,10 @@ from xuloom.core.storage import artifact_directory
 from xuloom.core.tool_execution import restore_tool_activity, restore_tool_catalog
 from xuloom.memory.memory import MemoryCompactor
 from xuloom.utils.command_sessions import CommandSessions
+from xuloom.core.engine_state import EngineState
 
 
-class SessionPersistenceMixin:
+class SessionPersistenceMixin(EngineState):
     """Session loading, metadata, persistence and parent/child state transfer."""
 
     def _sync_message_context(self):

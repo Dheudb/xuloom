@@ -1,4 +1,5 @@
 """Provider stream decoding over QueryEngine state; no separate lifecycle or scheduler."""
+from typing import Any, Dict, List, Optional
 import asyncio
 import inspect
 import os
@@ -6,13 +7,14 @@ from types import SimpleNamespace
 from xuloom.core.reasoning import configured_profile, request_options
 from xuloom.protocols.dsml import ToolTextFilter, ToolProtocolError, decode_tool_text, parse_tool_arguments
 from xuloom.protocols.stream_watch import StreamWatch, StreamAborted, StreamInterrupted
+from xuloom.core.engine_state import EngineState
 
 
 class AbortRequestedError(Exception):
     pass
 
 
-class ModelStream:
+class ModelStream(EngineState):
     async def _receive_model_response(
         self,
         *,
@@ -22,7 +24,7 @@ class ModelStream:
         turn_count: int,
         model_name: str,
         max_tokens: int,
-        thinking_config: dict = None,
+        thinking_config: Optional[dict] = None,
         sys_print_callback=print,
         event_callback=None,
     ):
@@ -31,11 +33,11 @@ class ModelStream:
         validate_media(api_messages, self._input_contract(model_name))
         validate_transport(api_messages, self.model_provider)
         self.tool_context["request_model"] = model_name
-        tool_entries = []
+        tool_entries: List[Any] = []
         self.active_streaming_tool_entries = tool_entries
         previous_batch_gate = None
         current_safe_batch_gate = None
-        current_safe_batch_tasks = None
+        current_safe_batch_tasks: Optional[List[asyncio.Task]] = None
         streaming_semaphore = asyncio.Semaphore(self.MAX_TOOL_CONCURRENCY)
         streaming_sibling_cancel = asyncio.Event()
         openai_watch = None
@@ -67,7 +69,7 @@ class ModelStream:
 
                 text_fragments = []
                 text_filter = ToolTextFilter()
-                tool_calls = {}
+                tool_calls: Dict[int, Any] = {}
                 dispatched_indices = set()
                 emitted_tool_ids = set()
                 finish_reason = "end_turn"

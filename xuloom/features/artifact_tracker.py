@@ -1,3 +1,4 @@
+from typing import Optional
 import copy
 import os
 import time
@@ -113,7 +114,7 @@ class ArtifactTracker:
         agent_role: str = "",
         parent_agent_id: str = None,
         agent_depth: int = None,
-        exit_code: int = None,
+        exit_code: Optional[int] = None,
         agent_id: str = None,
         session_id: str = None,
     ):

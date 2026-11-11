@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { defaultSidebarWidth, DEFAULT_PANEL_WIDTH, panelLimits, sidebarLimits } from "./panel-width";
+import { t } from "./i18n";
 
 export default function PanelResizer({ width, viewport, change, save, side = "right", sidebarWidth, panelOpen = true, bounds, label, defaultWidth }: {
   width: number; viewport: number; change: (value: number) => void; save: (value: number) => void;
@@ -20,8 +21,8 @@ export default function PanelResizer({ width, viewport, change, save, side = "ri
     save(drag.current.current); drag.current = null; setResizing(false);
   }
   return <div className={"panel-resizer " + (left ? "sidebar-resizer " : "") + (resizing ? "dragging" : "")} role="separator"
-    aria-label={label || (left ? "调整历史栏宽度" : "调整右侧面板宽度")} aria-orientation="vertical" aria-valuemin={limits.min} aria-valuemax={limits.max} aria-valuenow={width}
-    title="拖动调整宽度，双击恢复默认宽度；方向键也可调整" tabIndex={0}
+    aria-label={label || (left ? t("调整历史栏宽度") : t("调整右侧面板宽度"))} aria-orientation="vertical" aria-valuemin={limits.min} aria-valuemax={limits.max} aria-valuenow={width}
+    title={t("拖动调整宽度，双击恢复默认宽度；方向键也可调整")} tabIndex={0}
     onPointerDown={(event) => {
       if (event.button !== 0) return;
       event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId);

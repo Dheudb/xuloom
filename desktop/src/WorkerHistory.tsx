@@ -4,6 +4,7 @@ import { Bot, Copy, Image as ImageIcon, RefreshCw, X } from "lucide-react";
 import Markdown from "./Markdown";
 import ToolIcon from "./ToolIcon";
 import { toolPresentation } from "./tool-presentation";
+import { t, tServer, tx } from "./i18n";
 
 type Entry = { id: string; role: string; kind: string; text: string; name?: string; callId?: string;
   error?: boolean; continued?: boolean; continues?: boolean; imageIndex?: number };
@@ -55,7 +56,7 @@ export default function WorkerHistory({ agentId, name, invoke, close, remoteUrl 
     } catch (reason) { if (alive.current) setError(String(reason)); }
   }
   return createPortal(<div className="overlay worker-history-overlay" onClick={close}>
-    <section ref={dialog} className="dialog worker-history" role="dialog" aria-modal="true" aria-label="子代理完整历史"
+    <section ref={dialog} className="dialog worker-history" role="dialog" aria-modal="true" aria-label={t("子代理完整历史")}
       onClick={event => event.stopPropagation()} onKeyDown={event => {
         if (event.key === "Escape") { event.stopPropagation(); close(); }
         if (event.key === "Tab") {
@@ -65,24 +66,24 @@ export default function WorkerHistory({ agentId, name, invoke, close, remoteUrl 
           if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
         }
       }}>
-      <header><div><span className="eyebrow">只读执行记录{page ? " · " + page.backend : ""}</span><h2>{name}</h2></div>
-        <div className="worker-history-actions"><button className="icon-button" aria-label="刷新历史快照" disabled={busy} onClick={() => void load(true)}><RefreshCw size={17} /></button>
-          <button className="icon-button" aria-label="关闭子代理历史" onClick={close}><X size={18} /></button></div></header>
+      <header><div><span className="eyebrow">{tx("只读执行记录{value}", { value: page ? " · " + page.backend : "" })}</span><h2>{name}</h2></div>
+        <div className="worker-history-actions"><button className="icon-button" aria-label={t("刷新历史快照")} disabled={busy} onClick={() => void load(true)}><RefreshCw size={17} /></button>
+          <button className="icon-button" aria-label={t("关闭子代理历史")} onClick={close}><X size={18} /></button></div></header>
       <div className="worker-history-body" aria-busy={busy}>
-        {page && <p className="fine-print">{page.notice}{page.live && " 此代理仍在运行，刷新可查看新记录。"}</p>}
+        {page && <p className="fine-print">{tServer(page.notice)}{page.live && t(" 此代理仍在运行，刷新可查看新记录。")}</p>}
         {entries.map(entry => <article className={"history-entry history-" + entry.kind} key={entry.id}>
           <div className="history-entry-label">{entry.kind === "tool_call" ? <ToolIcon kind={toolView(entry).kind} /> : entry.kind === "image" ? <ImageIcon size={14} /> : <Bot size={14} />}
-            <span>{entry.kind === "tool_call" ? entry.name : entry.kind === "tool_result" ? (entry.error ? "工具返回 · 失败" : "工具返回") : entry.kind === "thinking" ? "推理摘要" : entry.role === "user" ? "任务／输入" : "子代理"}</span>
-            {!!entry.text && <button className="icon-button" aria-label="复制此条历史" onClick={() => invoke("clipboard.writeText", { text: entry.text }).catch(reason => setError(String(reason)))}><Copy size={13} /></button>}</div>
+            <span>{entry.kind === "tool_call" ? entry.name : entry.kind === "tool_result" ? (entry.error ? t("工具返回 · 失败") : t("工具返回")) : entry.kind === "thinking" ? t("推理摘要") : entry.role === "user" ? t("任务／输入") : t("子代理")}</span>
+            {!!entry.text && <button className="icon-button" aria-label={t("复制此条历史")} onClick={() => invoke("clipboard.writeText", { text: entry.text }).catch(reason => setError(String(reason)))}><Copy size={13} /></button>}</div>
           {["tool_call", "thinking"].includes(entry.kind)
-            ? <details><summary>{entry.kind === "thinking" ? "查看模型公开的推理" : "查看完整内容"}{entry.callId && <code>{entry.callId}</code>}</summary><pre>{entry.text}</pre></details>
-            : entry.kind === "image" ? images[entry.id] ? <img className="history-image" alt="子代理历史中的图像" src={images[entry.id]} /> : <button className="text-button" onClick={() => void showImage(entry)}>查看此条记录的图像</button>
+            ? <details><summary>{entry.kind === "thinking" ? t("查看模型公开的推理") : t("查看完整内容")}{entry.callId && <code>{entry.callId}</code>}</summary><pre>{entry.text}</pre></details>
+            : entry.kind === "image" ? images[entry.id] ? <img className="history-image" alt={t("子代理历史中的图像")} src={images[entry.id]} /> : <button className="text-button" onClick={() => void showImage(entry)}>{t("查看此条记录的图像")}</button>
             : entry.kind === "notice" ? <p className="fine-print">{entry.text}</p> : <Markdown text={entry.text} remoteUrl={remoteUrl} allowImages={entry.kind !== "tool_result"} />}
-          {entry.continues && <p className="fine-print">此条内容尚未加载完，请继续加载；原始记录没有截断。</p>}
+          {entry.continues && <p className="fine-print">{t("此条内容尚未加载完，请继续加载；原始记录没有截断。")}</p>}
         </article>)}
-        {!busy && page && !entries.length && <p>尚无已保存的对话内容。</p>}
-        {error && <p className="worker-history-error" role="alert">{error} 可刷新快照重试；不会恢复或重放任务。</p>}
-        <div className="worker-history-footer">{busy ? <span role="status">正在读取已保存的记录…</span> : page?.nextCursor ? <button onClick={() => void load()}>继续加载历史</button> : page && <span>已到当前快照末尾</span>}</div>
+        {!busy && page && !entries.length && <p>{t("尚无已保存的对话内容。")}</p>}
+        {error && <p className="worker-history-error" role="alert">{tx("{error} 可刷新快照重试；不会恢复或重放任务。", { error })}</p>}
+        <div className="worker-history-footer">{busy ? <span role="status">{t("正在读取已保存的记录…")}</span> : page?.nextCursor ? <button onClick={() => void load()}>{t("继续加载历史")}</button> : page && <span>{t("已到当前快照末尾")}</span>}</div>
       </div>
     </section>
   </div>, document.body);

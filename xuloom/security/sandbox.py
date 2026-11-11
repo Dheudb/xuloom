@@ -1,6 +1,9 @@
 import os
 import shutil
-import git
+try:
+    import git
+except ImportError:  # GitPython also raises here when the Git executable is missing.
+    git = None
 
 class SandboxManager:
     """
@@ -26,6 +29,8 @@ class SandboxManager:
         }
 
     def _get_workspace_root(self):
+        if git is None:
+            return self.cwd, False
         try:
             repo = git.Repo(self.cwd, search_parent_directories=True)
             return repo.working_dir, True

@@ -36,7 +36,10 @@ docs/                 使用与开发文档
 
 | 模块 | 职责 |
 |---|---|
-| `loop.py` | 回合循环。`_run_loop` 只做编排，阶段方法分别是 `_begin_run`（门禁、Skill、用户消息、恢复）、`_drain_inbound_messages`、`_build_turn_request`、`_run_tool_phase`、`_recover_max_tokens`、`_finish_turn`、`_handle_turn_exception`（含 `_repair_tool_protocol`、`_recover_context_overflow`） |
+| `loop.py` | 回合循环。`_run_loop` 只做编排，阶段方法分别是 `_begin_run`（门禁、Skill、用户消息、恢复）、`_drain_inbound_messages`、`_build_turn_request`、`_run_tool_phase`、`_finish_turn` |
+| `sampling.py` | 一次模型请求：原生流式或适配器响应、fallback 判断、VCR 回放事件、输出上限 |
+| `usage.py` | token 用量、请求费用、输出预算和任务花费上限 |
+| `recovery.py` | 回合失败的处理：`_handle_turn_exception`、`_recover_max_tokens`、`_repair_tool_protocol`、`_recover_context_overflow`、未完成工具回合的回滚 |
 | `tools.py` | 工具注册、能力事件、并发批次、Hook 调用、子代理收尾 |
 | `messages.py` | 与供应商无关的消息整形和历史清理 |
 | `context.py` | 压缩边界、提示缓存、附件、记忆文件 |
@@ -45,6 +48,8 @@ docs/                 使用与开发文档
 | `modes.py` | 协作、Plan、Coordinator 模式和 Ultraplan |
 | `auto_commit.py` | Git 自动提交提案与单文件撤销 |
 | `status.py` | CLI/桌面使用的运行状态摘要 |
+
+混入类共用的属性和方法签名声明在 `xuloom/core/engine_state.py` 的 `EngineState` 中（由 `scripts/gen_engine_state.py` 生成，运行时为空类），供 mypy 检查每个混入类；见[开发文档](development.md)的“类型检查覆盖范围”。
 
 内置工具集合在 `xuloom/tools/builtin.py`（`default_tools()` 与 `LATENT_TOOL_NAMES`）。阶段方法以 `_` 开头，属于内部实现，可以随版本调整。
 

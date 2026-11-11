@@ -1,4 +1,5 @@
 """Tool registration, activity events, batching, hooks and worker collection."""
+from typing import Any, Dict, List, Optional
 import asyncio
 import copy
 import inspect
@@ -12,16 +13,17 @@ from xuloom.core.model_stream import AbortRequestedError
 from xuloom.core.run_result import PersistenceError
 from xuloom.core.session_lock import SessionBusyError, SessionConflictError
 from xuloom.core.tool_execution import execute_tool, execute_tool_batches
+from xuloom.core.engine_state import EngineState
 
 _logger = logging.getLogger("xuloom.core.engine")
 
 
-class ToolOrchestrationMixin:
+class ToolOrchestrationMixin(EngineState):
     """Tool registration, activity events, batching, hooks and worker collection."""
 
     def activate_tools(self, tool_names):
         activated = []
-        disabled = getattr(getattr(self, "config", None), "disabled_tools", frozenset())
+        disabled: Any = getattr(getattr(self, "config", None), "disabled_tools", frozenset())
         for name in tool_names or []:
             if name in disabled:
                 continue
@@ -67,12 +69,12 @@ class ToolOrchestrationMixin:
         ``latent=True`` keeps the tool hidden until the model activates it with
         ``tool_search_tool`` (or the host calls :meth:`activate_tools`).
         """
-        from xuloom.tools.base import BaseAgenticTool
+        from xuloom.tools.function import as_tool_instance
         self._assert_open()
         if self.has_active_turn():
             raise ValueError("Register tools while the engine is idle")
-        if not isinstance(tool, BaseAgenticTool):
-            raise TypeError("Custom tools must implement BaseAgenticTool")
+        # A tool class (e.g. from @tool) gets its own instance per engine; instances bind one engine's context.
+        tool = as_tool_instance(tool)
         definition = tool.get_tool_definition()
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", definition["name"]):
             raise ValueError("Invalid custom tool name")
@@ -147,7 +149,7 @@ class ToolOrchestrationMixin:
         return getattr(tool_block, key, default)
 
     def _partition_tool_batches(self, tool_calls):
-        batches = []
+        batches: List[Dict[str, Any]] = []
         for tool_block in tool_calls:
             name = self._tb_get(tool_block, "name", "")
             inp = self._tb_get(tool_block, "input", {}) or {}
@@ -183,7 +185,7 @@ class ToolOrchestrationMixin:
     async def agents(self, action="list", **parameters):
         """Versioned host API over the existing authorized agent tool and execution journal."""
         identity = "host-" + uuid.uuid4().hex
-        captured = []
+        captured: List[Any] = []
         inputs = {**parameters, "action": action, "response_format": "json"}
         # Keep the versioned host API's blocking default; model calls launch in
         # the background unless explicitly requested otherwise.
@@ -284,8 +286,8 @@ class ToolOrchestrationMixin:
     async def _await_gate_and_execute_tool(
         self, gate, tool_block, sys_print_callback=print, *,
         turn: int = 0, event_callback=None,
-        semaphore: asyncio.Semaphore = None,
-        sibling_cancel: asyncio.Event = None,
+        semaphore: Optional[asyncio.Semaphore] = None,
+        sibling_cancel: Optional[asyncio.Event] = None,
     ):
         if gate is not None:
             await gate

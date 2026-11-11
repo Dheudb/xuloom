@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
 contextBridge.exposeInMainWorld("xuloom", {
   flushDrafts: (drafts) => ipcRenderer.sendSync("workbench:drafts", drafts),
+  reloadWindow: () => ipcRenderer.send("workbench:reload"),
   importFiles: async (session, files, existing, ids) => {
     if (!Array.isArray(files) || files.length > 10) throw new Error("每条消息最多添加 10 个附件");
     const inputs = await Promise.all(files.map(async (file) => {

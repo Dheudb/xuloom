@@ -1,22 +1,24 @@
 """Git auto-commit proposals and single-file undo."""
+from typing import Optional
 import asyncio
 import copy
 from xuloom.context.tool_results import build_tool_result
 from xuloom.core.run_result import PersistenceError
+from xuloom.core.engine_state import EngineState
 
 try:
     import git
-except ImportError:
-    git = None
+except ImportError:  # GitPython also raises here when the Git executable is missing.
+    git = None  # type: ignore[assignment]
 
 
-class AutoCommitMixin:
+class AutoCommitMixin(EngineState):
     """Git auto-commit proposals and single-file undo."""
 
     def get_pending_auto_commit_proposal(self):
         return copy.deepcopy(self.auto_commit_manager.pending_proposal)
 
-    def _get_git_repo(self, start_path: str = None):
+    def _get_git_repo(self, start_path: Optional[str] = None):
         if git is None:
             return None
         try:
@@ -34,7 +36,7 @@ class AutoCommitMixin:
         self,
         proposal_id: str,
         decision: str = "skip",
-        message_override: str = None,
+        message_override: Optional[str] = None,
     ) -> dict:
         proposal = self.auto_commit_manager.pending_proposal
         if not proposal or proposal.get("proposal_id") != proposal_id:

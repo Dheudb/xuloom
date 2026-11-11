@@ -12,6 +12,7 @@ import {
   Check,
   ExternalLink,
 } from "lucide-react";
+import { t, tServer, tx } from "./i18n";
 
 type Config = {
   type: string;
@@ -82,11 +83,11 @@ type Editor = {
   clientAuth: string;
 };
 const statusText: Record<string, string> = {
-  connected: "已连接",
-  disabled: "已停用",
-  pending: "下次任务连接",
-  error: "连接失败",
-  invalid: "配置需修复",
+  connected: t("已连接"),
+  disabled: t("已停用"),
+  pending: t("下次任务连接"),
+  error: t("连接失败"),
+  invalid: t("配置需修复"),
 };
 
 export default function McpDialog({
@@ -221,7 +222,7 @@ export default function McpDialog({
         setTests((old) => ({ ...old, [String(params.name)]: result }));
         setMessage(
           result.status === "connected"
-            ? `连接成功，发现 ${result.tools.length} 个工具。`
+            ? t("连接成功，发现 {length} 个工具。", { length: result.tools.length })
             : result.error || result.runtime.message,
         );
       } else {
@@ -230,7 +231,7 @@ export default function McpDialog({
         if (method === "mcp.install" || method === "mcp.save") {
           setEditor(null);
           setTab("installed");
-          setMessage("配置已保存。启用后将在下次任务连接；也可以先测试连接。");
+          setMessage(t("配置已保存。启用后将在下次任务连接；也可以先测试连接。"));
         }
       }
       setRemoving("");
@@ -284,7 +285,7 @@ export default function McpDialog({
         "save",
       );
     } catch {
-      setError('启动参数必须是 JSON 字符串数组，例如 ["-y", "包名"]。');
+      setError(t("启动参数必须是 JSON 字符串数组，例如 [\"-y\", \"包名\"]。"));
     }
   }
 
@@ -295,7 +296,7 @@ export default function McpDialog({
       const result = await invoke(signOut ? "mcp.oauth.logout" : "mcp.oauth.login", { name });
       setSnapshot(result.snapshot);
       setTests(old => { const next = { ...old }; delete next[name]; return next; });
-      setMessage(result.status === "authorized" ? "授权已保存，下次连接会使用此账号。" : result.status === "cancelled" ? "已取消等待，账号状态以列表为准；如需清除授权，请退出登录。" : result.revocation === "failed" ? "已清除本地授权；服务端撤销失败，可到服务的账号页面撤销。" : "已清除本地授权。服务端是否撤销以该服务的支持范围为准。");
+      setMessage(result.status === "authorized" ? t("授权已保存，下次连接会使用此账号。") : result.status === "cancelled" ? t("已取消等待，账号状态以列表为准；如需清除授权，请退出登录。") : result.revocation === "failed" ? t("已清除本地授权；服务端撤销失败，可到服务的账号页面撤销。") : t("已清除本地授权。服务端是否撤销以该服务的支持范围为准。"));
     } catch (e) { setError(String(e)); }
     finally { signingIn.current = ""; setAuthorization(null); setCallbackUrl(""); setWorking(""); }
   }
@@ -307,79 +308,70 @@ export default function McpDialog({
         onKeyDown={e=>{if(e.key==='Escape' && !working){e.stopPropagation();close();}}}
         role="dialog"
         aria-modal="true"
-        aria-label="MCP 市场"
+        aria-label={t("MCP 市场")}
         className={"dialog mcp-dialog " + (editor ? "with-editor" : "")}
         onClick={(e) => e.stopPropagation()}
       >
         <header>
           <div>
             <span className="eyebrow">TOOLS & CONNECTIONS</span>
-            <h2>MCP 市场</h2>
-            <p className="mcp-subtitle">{sessionId ? "为当前工作区添加搜索、文档和开发工具" : "浏览搜索、文档和开发工具"}</p>
+            <h2>{t("MCP 市场")}</h2>
+            <p className="mcp-subtitle">{sessionId ? t("为当前工作区添加搜索、文档和开发工具") : t("浏览搜索、文档和开发工具")}</p>
           </div>
           <button
             className="icon-button"
-            aria-label="关闭 MCP 市场"
+            aria-label={t("关闭 MCP 市场")}
             disabled={!!working}
             onClick={close}
           >
             <X size={18} />
           </button>
         </header>
-        {working.startsWith("oauth:") && <section className="form-section" aria-label="MCP OAuth 登录">
-          <p role="status">{authorization ? "请在服务的授权页面确认账号及权限。" : "正在连接授权服务…"}</p>
-          {authorization && <><button onClick={() => void window.xuloom.invoke("external.open", { url: authorization.url }).catch(e => setError(String(e)))}>打开授权页面</button>
-            <details><summary>SSH / 手动完成回调</summary><p className="mcp-footnote">远端登录时，可将浏览器地址栏的完整回调地址粘贴到这里。授权码不会进入聊天或模型上下文。</p>
-              <label>完整回调地址<input aria-label="OAuth 回调地址" type="password" autoComplete="off" value={callbackUrl} onChange={e => setCallbackUrl(e.target.value)} /></label>
-              <button disabled={!callbackUrl} onClick={() => void invoke("mcp.oauth.callback", { name: authorization.name, url: callbackUrl }).then(() => setCallbackUrl("")).catch(e => setError(String(e)))}>提交授权回调</button>
+        {working.startsWith("oauth:") && <section className="form-section" aria-label={t("MCP OAuth 登录")}>
+          <p role="status">{authorization ? t("请在服务的授权页面确认账号及权限。") : t("正在连接授权服务…")}</p>
+          {authorization && <><button onClick={() => void window.xuloom.invoke("external.open", { url: authorization.url }).catch(e => setError(String(e)))}>{t("打开授权页面")}</button>
+            <details><summary>{t("SSH / 手动完成回调")}</summary><p className="mcp-footnote">{t("远端登录时，可将浏览器地址栏的完整回调地址粘贴到这里。授权码不会进入聊天或模型上下文。")}</p>
+              <label>{t("完整回调地址")}<input aria-label={t("OAuth 回调地址")} type="password" autoComplete="off" value={callbackUrl} onChange={e => setCallbackUrl(e.target.value)} /></label>
+              <button disabled={!callbackUrl} onClick={() => void invoke("mcp.oauth.callback", { name: authorization.name, url: callbackUrl }).then(() => setCallbackUrl("")).catch(e => setError(String(e)))}>{t("提交授权回调")}</button>
             </details></>}
-          {signingIn.current && <button onClick={() => void invoke("mcp.oauth.cancel", { name: signingIn.current }).catch(e => setError(String(e)))}>取消登录</button>}
+          {signingIn.current && <button onClick={() => void invoke("mcp.oauth.cancel", { name: signingIn.current }).catch(e => setError(String(e)))}>{t("取消登录")}</button>}
         </section>}
         <div className="mcp-toolbar">
           <div className="mcp-tabs">
             <button
               className={tab === "market" ? "active" : ""}
               onClick={() => setTab("market")}
-            >
-              浏览市场
-            </button>
+            >{t("浏览市场")}</button>
             <button
               className={tab === "installed" ? "active" : ""}
               disabled={!sessionId}
-              title={!sessionId ? "打开会话后管理对应工作区的服务" : undefined}
+              title={!sessionId ? t("打开会话后管理对应工作区的服务") : undefined}
               onClick={() => setTab("installed")}
-            >
-              我的服务 · {snapshot?.servers.length || 0}
+            >{tx("我的服务 · {value}", { value: snapshot?.servers.length || 0 })}
             </button>
           </div>
           <button disabled={locked} onClick={() => edit()}>
-            <Plus size={14} />
-            自定义服务
-          </button>
+            <Plus size={14} />{t("自定义服务")}</button>
         </div>
         {!sessionId && <div className="notice" role="status">
-          <p>可以直接浏览和搜索市场。安装前请新建或打开一个会话，服务配置会保存在该会话的工作区，并与 CLI 共用。</p>
-          <button disabled={creatingSession} onClick={createSession}>{creatingSession ? "正在创建会话…" : "新建会话并配置"}</button>
+          <p>{t("可以直接浏览和搜索市场。安装前请新建或打开一个会话，服务配置会保存在该会话的工作区，并与 CLI 共用。")}</p>
+          <button disabled={creatingSession} onClick={createSession}>{creatingSession ? t("正在创建会话…") : t("新建会话并配置")}</button>
         </div>}
         {busy && (
-          <p className="notice">
-            当前有任务正在运行，完成或停止后可以修改 MCP 配置。
-          </p>
+          <p className="notice">{t("当前有任务正在运行，完成或停止后可以修改 MCP 配置。")}</p>
         )}
         {snapshot && !snapshot.runtime.available && (
           <p className="mcp-warning">
-            {snapshot.runtime.message} 当前 Python：{snapshot.runtime.python}
-            。市场浏览和保存配置仍可使用。
-          </p>
+            {tx("{message} 当前 Python：{python}。市场浏览和保存配置仍可使用。", { message: tServer(snapshot.runtime.message), python: snapshot.runtime.python })}</p>
         )}
         {error && (
           <p role="alert" className="mcp-warning">
-            {error.replace(/^Error: /, "")}
+            {tServer(error.replace(/^Error: /, ""))}
           </p>
         )}
         {message && (
           <p role="status" className="mcp-message">
-            {message}
+            {tServer(message)}
           </p>
         )}
         <div className="mcp-body">
@@ -394,7 +386,7 @@ export default function McpDialog({
                   }}
                 >
                   <select
-                    aria-label="市场来源"
+                    aria-label={t("市场来源")}
                     value={source}
                     disabled={loading}
                     onChange={(e) => {
@@ -404,18 +396,18 @@ export default function McpDialog({
                       load(e.target.value, query);
                     }}
                   >
-                    <option value="builtin">精选目录</option>
-                    <option value="registry">官方 MCP 注册表</option>
+                    <option value="builtin">{t("精选目录")}</option>
+                    <option value="registry">{t("官方 MCP 注册表")}</option>
                   </select>
                   <input
-                    aria-label="搜索 MCP"
-                    placeholder="搜索服务名称或用途…"
+                    aria-label={t("搜索 MCP")}
+                    placeholder={t("搜索服务名称或用途…")}
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                   />
                   <button disabled={loading}>
                     <Search size={15} />
-                    {loading ? "搜索中" : "搜索"}
+                    {loading ? t("搜索中") : t("搜索")}
                   </button>
                 </form>
                 <div className="mcp-grid">
@@ -448,9 +440,7 @@ export default function McpDialog({
                                   .catch((e) => setError(String(e)))
                               }
                             >
-                              <ExternalLink size={12} />
-                              文档
-                            </button>
+                              <ExternalLink size={12} />{t("文档")}</button>
                           )}
                           <button
                             disabled={locked || !!installed}
@@ -458,14 +448,10 @@ export default function McpDialog({
                           >
                             {installed ? (
                               <>
-                                <Check size={13} />
-                                已安装
-                              </>
+                                <Check size={13} />{t("已安装")}</>
                             ) : (
                               <>
-                                <Plus size={13} />
-                                安装
-                              </>
+                                <Plus size={13} />{t("安装")}</>
                             )}
                           </button>
                         </div>
@@ -476,54 +462,47 @@ export default function McpDialog({
                 {!entries.length && !loading && (
                   <div className="instruction-empty">
                     <Search size={24} />
-                    <p>没有匹配的可安装服务。换个关键词或添加自定义服务。</p>
+                    <p>{t("没有匹配的可安装服务。换个关键词或添加自定义服务。")}</p>
                   </div>
                 )}
                 {skipped > 0 && (
-                  <p className="mcp-footnote">
-                    本页 {skipped}{" "}
-                    条记录需要暂未支持的启动参数或连接方式，未列入可安装列表。
-                  </p>
+                  <p className="mcp-footnote">{tx("本页 {skipped} 条记录需要暂未支持的启动参数或连接方式，未列入可安装列表。", { skipped })}</p>
                 )}
                 {cursor && (
                   <button
                     disabled={loading}
                     onClick={() => load(source, query, cursor)}
                   >
-                    {loading ? "加载中…" : "加载更多"}
+                    {loading ? t("加载中…") : t("加载更多")}
                   </button>
                 )}
               </>
             ) : (
               <>
                 <div className="mcp-installed-heading">
-                  <p>配置保存在当前工作区，与 CLI 共用。</p>
+                  <p>{t("配置保存在当前工作区，与 CLI 共用。")}</p>
                   <button
                     disabled={locked}
                     onClick={() => action("mcp.reload", {}, "reload")}
                   >
-                    <RefreshCw size={13} />
-                    刷新连接
-                  </button>
+                    <RefreshCw size={13} />{t("刷新连接")}</button>
                 </div>
                 {snapshot?.needsReload && (
-                  <p className="notice">
-                    配置已改变，下一次任务会重新连接；也可点击刷新连接立即应用到当前会话。
-                  </p>
+                  <p className="notice">{t("配置已改变，下一次任务会重新连接；也可点击刷新连接立即应用到当前会话。")}</p>
                 )}
                 {!!snapshot?.configurationIssues?.length && (
                   <div className="notice" role="status">
-                    <strong>部分 Skill 的 MCP 配置未加载，其他服务可继续使用。</strong>
+                    <strong>{t("部分 Skill 的 MCP 配置未加载，其他服务可继续使用。")}</strong>
                     {snapshot.configurationIssues.map((issue, index) => (
-                      <p key={index}><span>{issue.skill}{issue.name ? ` / ${issue.name}` : ""}：{issue.error}</span><br /><code>{issue.path}</code></p>
+                      <p key={index}><span>{issue.skill}{issue.name ? ` / ${issue.name}` : ""}：{tServer(issue.error)}</span><br /><code>{issue.path}</code></p>
                     ))}
                   </div>
                 )}
                 {!snapshot?.servers.length && (
                   <div className="instruction-empty">
                     <Plug size={28} />
-                    <h4>还没有 MCP 服务</h4>
-                    <p>从市场安装搜索服务，或添加自己的连接。</p>
+                    <h4>{t("还没有 MCP 服务")}</h4>
+                    <p>{t("从市场安装搜索服务，或添加自己的连接。")}</p>
                   </div>
                 )}
                 {snapshot?.servers.map((server) => {
@@ -547,21 +526,19 @@ export default function McpDialog({
                           server.connection?.error ||
                           test?.error ||
                           (test?.status === "connected"
-                            ? `测试成功：${test.tools?.join("、") || "没有工具"}`
+                            ? t("测试成功：{value}", { value: test.tools?.join("、") || t("没有工具") })
                             : server.connection?.tools?.length
-                              ? `${server.connection.tools.length} 个工具可用`
+                              ? t("{length} 个工具可用", { length: server.connection.tools.length })
                               : server.name)}
                       </p>
                       <div className="mcp-card-actions">
-                        {server.auth?.type === "oauth" && <><span className="mcp-footnote">{server.oauth?.status === "authorized" ? "已授权" : server.oauth?.status === "unavailable" ? "授权不可用" : "未登录"}</span>
-                          <button disabled={locked || !snapshot.runtime.available} onClick={() => void authorize(server.name)}>{server.oauth?.status === "authorized" ? "重新登录" : "登录"}</button>
-                          <button disabled={locked || !snapshot.runtime.available} onClick={() => void authorize(server.name, true)}>退出登录</button></>}
+                        {server.auth?.type === "oauth" && <><span className="mcp-footnote">{server.oauth?.status === "authorized" ? t("已授权") : server.oauth?.status === "unavailable" ? t("授权不可用") : t("未登录")}</span>
+                          <button disabled={locked || !snapshot.runtime.available} onClick={() => void authorize(server.name)}>{server.oauth?.status === "authorized" ? t("重新登录") : t("登录")}</button>
+                          <button disabled={locked || !snapshot.runtime.available} onClick={() => void authorize(server.name, true)}>{t("退出登录")}</button></>}
                         <button
                           disabled={locked}
                           onClick={() => edit(undefined, server)}
-                        >
-                          配置
-                        </button>
+                        >{t("配置")}</button>
                         <button
                           disabled={locked || !snapshot.runtime.available}
                           onClick={() =>
@@ -572,13 +549,11 @@ export default function McpDialog({
                             )
                           }
                         >
-                          {working === server.name ? (
+                          {tx("{value}测试连接", { value: working === server.name ? (
                             <LoaderCircle className="spin" size={13} />
                           ) : (
                             <Plug size={13} />
-                          )}
-                          测试连接
-                        </button>
+                          ) })}</button>
                         <button
                           disabled={locked}
                           onClick={() =>
@@ -592,7 +567,7 @@ export default function McpDialog({
                             )
                           }
                         >
-                          {server.enabled === false ? "启用" : "停用"}
+                          {server.enabled === false ? t("启用") : t("停用")}
                         </button>
                         <button
                           className="danger"
@@ -607,7 +582,7 @@ export default function McpDialog({
                               : setRemoving(server.name)
                           }
                         >
-                          {removing === server.name ? "确认移除" : "移除"}
+                          {removing === server.name ? t("确认移除") : t("移除")}
                         </button>
                       </div>
                     </article>
@@ -621,14 +596,14 @@ export default function McpDialog({
               <div className="mcp-editor-title">
                 <h3>
                   {editor.entry
-                    ? "安装 " + editor.entry.name
+                    ? t("安装 {name}", { name: editor.entry.name })
                     : editor.server
-                      ? "编辑服务"
-                      : "添加自定义 MCP"}
+                      ? t("编辑服务")
+                      : t("添加自定义 MCP")}
                 </h3>
                 <button
                   className="icon-button"
-                  aria-label="取消 MCP 配置"
+                  aria-label={t("取消 MCP 配置")}
                   disabled={!!working}
                   onClick={() => setEditor(null)}
                 >
@@ -636,10 +611,8 @@ export default function McpDialog({
                 </button>
               </div>
               <div className="form-section">
-                <label>
-                  服务标识
-                  <input
-                    aria-label="MCP 服务标识"
+                <label>{t("服务标识")}<input
+                    aria-label={t("MCP 服务标识")}
                     value={editor.name}
                     disabled={!!editor.server || locked}
                     placeholder="my-search"
@@ -662,7 +635,7 @@ export default function McpDialog({
                     {editor.entry.inputs.map((spec) => (
                       <label key={spec.name}>
                         {spec.name}
-                        {spec.optional ? "（可选）" : " *"}
+                        {spec.optional ? t("（可选）") : " *"}
                         <input
                           type={spec.secret ? "password" : "text"}
                           autoComplete="off"
@@ -684,10 +657,8 @@ export default function McpDialog({
                   </>
                 ) : (
                   <>
-                    <label>
-                      连接方式
-                      <select
-                        aria-label="MCP 连接方式"
+                    <label>{t("连接方式")}<select
+                        aria-label={t("MCP 连接方式")}
                         value={editor.type}
                         disabled={locked}
                         onChange={(e) =>
@@ -698,54 +669,46 @@ export default function McpDialog({
                           })
                         }
                       >
-                        <option value="http">
-                          远程 HTTP（Streamable HTTP）
-                        </option>
-                        <option value="stdio">本地程序（stdio）</option>
+                        <option value="http">{t("远程 HTTP（Streamable HTTP）")}</option>
+                        <option value="stdio">{t("本地程序（stdio）")}</option>
                       </select>
                     </label>
                     {editor.type === "http" ? (
-                      <><label>
-                        服务地址
-                        <input
-                          aria-label="MCP 服务地址"
+                      <><label>{t("服务地址")}<input
+                          aria-label={t("MCP 服务地址")}
                           placeholder="https://example.com/mcp"
                           value={editor.url}
                           onChange={(e) =>
                             setEditor({ ...editor, url: e.target.value })
                           }
                         />
-                      </label><label>认证方式<select aria-label="MCP 认证方式" value={editor.oauth ? "oauth" : "headers"} onChange={e => setEditor({ ...editor, oauth: e.target.value === "oauth" })}><option value="headers">无需登录 / 手动请求头</option><option value="oauth">OAuth · 浏览器登录</option></select></label>
-                        {editor.oauth && <><p className="mcp-footnote">保存后点击“登录”。授权令牌仅保存在系统保护的本机存储中，不发送给聊天模型。不能同时填写 Authorization 请求头。</p>
-                          <label>客户端注册<select aria-label="OAuth 客户端注册" value={editor.registration} onChange={e => setEditor({ ...editor, registration: e.target.value })}><option value="automatic">自动注册 / 客户端元数据文档</option><option value="fixed">使用已有 Client ID</option></select></label>
+                      </label><label>{t("认证方式")}<select aria-label={t("MCP 认证方式")} value={editor.oauth ? "oauth" : "headers"} onChange={e => setEditor({ ...editor, oauth: e.target.value === "oauth" })}><option value="headers">{t("无需登录 / 手动请求头")}</option><option value="oauth">{t("OAuth · 浏览器登录")}</option></select></label>
+                        {editor.oauth && <><p className="mcp-footnote">{t("保存后点击“登录”。授权令牌仅保存在系统保护的本机存储中，不发送给聊天模型。不能同时填写 Authorization 请求头。")}</p>
+                          <label>{t("客户端注册")}<select aria-label={t("OAuth 客户端注册")} value={editor.registration} onChange={e => setEditor({ ...editor, registration: e.target.value })}><option value="automatic">{t("自动注册 / 客户端元数据文档")}</option><option value="fixed">{t("使用已有 Client ID")}</option></select></label>
                           {editor.registration === "fixed" ? <>
                             <label>Client ID<input aria-label="OAuth Client ID" value={editor.clientId} onChange={e => setEditor({ ...editor, clientId: e.target.value })} /></label>
-                            <label>授权服务器 Issuer<input aria-label="OAuth Issuer" placeholder="服务公布的授权服务器标识" value={editor.issuer} onChange={e => setEditor({ ...editor, issuer: e.target.value })} /></label>
-                            <label>已注册的回调地址<input aria-label="OAuth 注册回调地址" placeholder="http://127.0.0.1:端口/回调路径" value={editor.redirectUri} onChange={e => setEditor({ ...editor, redirectUri: e.target.value })} /></label>
-                            <label>Client Secret（可选）<input aria-label="OAuth Client Secret" type="password" autoComplete="new-password" placeholder={!editor.clearClientSecret && editor.server?.auth?.client_secret !== undefined ? "已保存；留空保留" : "仅在服务方提供时填写"} value={editor.clientSecret} onChange={e => setEditor({ ...editor, clientSecret: e.target.value, clearClientSecret: false, clientAuth: e.target.value && editor.clientAuth === "none" ? "auto" : editor.clientAuth })} /></label>
-                            {editor.server?.auth?.client_secret !== undefined && <button type="button" onClick={() => setEditor({ ...editor, clearClientSecret: !editor.clearClientSecret, clientSecret: "", clientAuth: "auto" })}>{editor.clearClientSecret ? "保留已保存 Secret" : "清除已保存 Secret"}</button>}
-                            <details><summary>客户端认证（高级）</summary><label>Token 端点认证<select aria-label="OAuth Token 认证" value={editor.clientAuth} onChange={e => setEditor({ ...editor, clientAuth: e.target.value })}><option value="auto">自动 · 使用服务公布的方式</option><option value="none">公开客户端 · 无 Secret</option><option value="client_secret_basic">Client Secret Basic</option><option value="client_secret_post">Client Secret POST</option></select></label></details>
-                            <p className="mcp-footnote">Issuer 与回调地址应与服务方登记一致；回调只支持本机 127.0.0.1。端口占用时会停止登录，不会另选地址或重新注册。</p>
-                          </> : <details><summary>客户端元数据（可选）</summary><label>HTTPS 客户端元数据地址<input aria-label="OAuth 客户端元数据地址" value={editor.clientMetadataUrl} onChange={e => setEditor({ ...editor, clientMetadataUrl: e.target.value })} /></label></details>}
+                            <label>{t("授权服务器 Issuer")}<input aria-label="OAuth Issuer" placeholder={t("服务公布的授权服务器标识")} value={editor.issuer} onChange={e => setEditor({ ...editor, issuer: e.target.value })} /></label>
+                            <label>{t("已注册的回调地址")}<input aria-label={t("OAuth 注册回调地址")} placeholder={t("http://127.0.0.1:端口/回调路径")} value={editor.redirectUri} onChange={e => setEditor({ ...editor, redirectUri: e.target.value })} /></label>
+                            <label>{t("Client Secret（可选）")}<input aria-label="OAuth Client Secret" type="password" autoComplete="new-password" placeholder={!editor.clearClientSecret && editor.server?.auth?.client_secret !== undefined ? t("已保存；留空保留") : t("仅在服务方提供时填写")} value={editor.clientSecret} onChange={e => setEditor({ ...editor, clientSecret: e.target.value, clearClientSecret: false, clientAuth: e.target.value && editor.clientAuth === "none" ? "auto" : editor.clientAuth })} /></label>
+                            {editor.server?.auth?.client_secret !== undefined && <button type="button" onClick={() => setEditor({ ...editor, clearClientSecret: !editor.clearClientSecret, clientSecret: "", clientAuth: "auto" })}>{editor.clearClientSecret ? t("保留已保存 Secret") : t("清除已保存 Secret")}</button>}
+                            <details><summary>{t("客户端认证（高级）")}</summary><label>{t("Token 端点认证")}<select aria-label={t("OAuth Token 认证")} value={editor.clientAuth} onChange={e => setEditor({ ...editor, clientAuth: e.target.value })}><option value="auto">{t("自动 · 使用服务公布的方式")}</option><option value="none">{t("公开客户端 · 无 Secret")}</option><option value="client_secret_basic">Client Secret Basic</option><option value="client_secret_post">Client Secret POST</option></select></label></details>
+                            <p className="mcp-footnote">{t("Issuer 与回调地址应与服务方登记一致；回调只支持本机 127.0.0.1。端口占用时会停止登录，不会另选地址或重新注册。")}</p>
+                          </> : <details><summary>{t("客户端元数据（可选）")}</summary><label>{t("HTTPS 客户端元数据地址")}<input aria-label={t("OAuth 客户端元数据地址")} value={editor.clientMetadataUrl} onChange={e => setEditor({ ...editor, clientMetadataUrl: e.target.value })} /></label></details>}
                         </>}
                       </>
                     ) : (
                       <>
-                        <label>
-                          启动程序
-                          <input
-                            aria-label="MCP 启动程序"
-                            placeholder="npx / uvx / Python 路径"
+                        <label>{t("启动程序")}<input
+                            aria-label={t("MCP 启动程序")}
+                            placeholder={t("npx / uvx / Python 路径")}
                             value={editor.command}
                             onChange={(e) =>
                               setEditor({ ...editor, command: e.target.value })
                             }
                           />
                         </label>
-                        <label>
-                          启动参数（JSON 数组）
-                          <textarea
-                            aria-label="MCP 启动参数"
+                        <label>{t("启动参数（JSON 数组）")}<textarea
+                            aria-label={t("MCP 启动参数")}
                             value={editor.args}
                             onChange={(e) =>
                               setEditor({ ...editor, args: e.target.value })
@@ -755,13 +718,11 @@ export default function McpDialog({
                       </>
                     )}
                     <p className="mcp-footnote">
-                      {editor.type === "http" ? "HTTP 请求头" : "环境变量"}
-                      。已保存的值留空即可保留；删除一行可清除该项。
-                    </p>
+                      {tx("{value}。已保存的值留空即可保留；删除一行可清除该项。", { value: editor.type === "http" ? t("HTTP 请求头") : t("环境变量") })}</p>
                     {editor.pairs.map((pair, index) => (
                       <div className="mcp-pair" key={index}>
                         <input
-                          aria-label={`配置名称 ${index + 1}`}
+                          aria-label={t("配置名称 {value}", { value: index + 1 })}
                           placeholder={
                             editor.type === "http" ? "Authorization" : "API_KEY"
                           }
@@ -778,9 +739,9 @@ export default function McpDialog({
                         <input
                           type="password"
                           autoComplete="off"
-                          aria-label={`配置值 ${index + 1}`}
+                          aria-label={t("配置值 {value}", { value: index + 1 })}
                           placeholder={
-                            editor.server ? "已保存的值留空保留" : "值"
+                            editor.server ? t("已保存的值留空保留") : t("值")
                           }
                           value={pair.value}
                           onChange={(e) =>
@@ -796,7 +757,7 @@ export default function McpDialog({
                         />
                         <button
                           className="icon-button"
-                          aria-label={`删除配置 ${index + 1}`}
+                          aria-label={t("删除配置 {value}", { value: index + 1 })}
                           onClick={() =>
                             setEditor({
                               ...editor,
@@ -817,32 +778,28 @@ export default function McpDialog({
                         })
                       }
                     >
-                      <Plus size={12} />
-                      添加字段
-                    </button>
+                      <Plus size={12} />{t("添加字段")}</button>
                   </>
                 )}
               </div>
-              <p className="mcp-footnote">
-                保存配置不会启动服务。测试连接会启动本地程序或访问远程地址；启用后，工具调用遵循会话权限。
-              </p>
+              <p className="mcp-footnote">{t("保存配置不会启动服务。测试连接会启动本地程序或访问远程地址；启用后，工具调用遵循会话权限。")}</p>
               <button
                 className="primary mcp-save"
                 disabled={locked || !editor.name.trim()}
                 onClick={save}
               >
                 {working === "save"
-                  ? "保存中…"
+                  ? t("保存中…")
                   : editor.entry
-                    ? "安装并保存配置"
-                    : "保存配置"}
+                    ? t("安装并保存配置")
+                    : t("保存配置")}
               </button>
             </aside>
           )}
         </div>
         <footer className="mcp-footer">
-          <span>内置 DDGS 多搜索源搜索可独立使用。</span>
-          <span>{sessionId ? "当前工作区 · " + (snapshot?.project.split(/[\\/]/).pop() || "正在读取…") : "尚未选择安装工作区"}</span>
+          <span>{t("内置 DDGS 多搜索源搜索可独立使用。")}</span>
+          <span>{sessionId ? t("当前工作区 · {value}", { value: snapshot?.project.split(/[\\/]/).pop() || t("正在读取…") }) : t("尚未选择安装工作区")}</span>
         </footer>
       </section>
     </div>

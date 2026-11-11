@@ -72,7 +72,9 @@ async function moved(id, target) {
 async function send(task, approval = false) {
   await page.getByRole("textbox", { name: "任务输入" }).fill(task); await page.getByRole("button", { name: "发送任务", exact: true }).click();
   if (approval) await page.getByRole("button", { name: "允许一次", exact: true }).click();
-  await page.getByText(task + "_DONE", { exact: true }).waitFor();
+  // A background child makes the model answer again after its completion notice; the earlier answer is kept as
+  // progress commentary, so look for the text in the final reply.
+  await page.locator(".message-text").getByText(task + "_DONE", { exact: true }).last().waitFor();
   await page.waitForFunction(() => !document.querySelector(".send-button.stop"));
 }
 async function main() {
@@ -83,13 +85,13 @@ async function main() {
     const old = sessionKey(first, "moving"), next = sessionKey(second, "moving");
     if (await page.getByRole("button", { name: "展开能力面板", exact: true }).count()) await page.getByRole("button", { name: "展开能力面板", exact: true }).click();
     await page.locator(".capability-card").filter({ has: page.getByText("only-first", { exact: true }) }).getByRole("button", { name: "选择使用", exact: true }).click();
-    assert.equal(await page.locator(".selected-skills button").count(), 1);
+    assert.equal(await page.locator(".selected-skills .selected-skill").count(), 1);
     await page.getByRole("textbox", { name: "任务输入" }).fill("拖动前最后输入的草稿");
     await row(old).dragTo(group(second).locator(".project-heading"));
     await moved(next, second);
     assert.equal(await row(old).count(), 0); assert.equal(await page.locator(".standalone-group .session-item").count(), 0);
     assert.equal(await page.getByRole("textbox", { name: "任务输入" }).inputValue(), "拖动前最后输入的草稿");
-    assert.equal(await page.locator(".selected-skills button").count(), 0);
+    assert.equal(await page.locator(".selected-skills .selected-skill").count(), 0);
     await page.getByText("原来的回答", { exact: true }).waitFor();
     assert.equal(await page.getByText("only-first", { exact: true }).count(), 0); await page.getByText("only-second", { exact: true }).waitFor();
     assert.equal(await page.getByRole("switch", { name: /启用技能/ }).count(), 0);
@@ -102,7 +104,9 @@ async function main() {
     await page.getByRole("button", { name: "代理", exact: true }).click();
     await page.locator(".worker-result").getByText(/SECOND_PROJECT_MARKER/).waitFor({ state: "attached" });
     const mcp = await page.evaluate((id) => window.xuloom.invoke("mcp.list", { session: id }), next); assert.equal(projectKey(mcp.project), projectKey(second));
-    assert(requests.some((request) => textOf(request.messages[0]).includes("Conversation working directory") && textOf(request.messages[0]).includes(fs.realpathSync(second))));
+    // Windows paths compare case-insensitively (TEMP may be spelled C:\WINDOWS\TEMP while Python reports C:\Windows\Temp).
+    const samePath = (text) => process.platform === "win32" ? text.toLowerCase() : text;
+    assert(requests.some((request) => textOf(request.messages[0]).includes("Conversation working directory") && samePath(textOf(request.messages[0])).includes(samePath(fs.realpathSync(second)))));
     // Running tasks cannot change directory under a live tool call.
     await page.getByRole("textbox", { name: "任务输入" }).fill("MOVE_SLOW"); await page.getByRole("button", { name: "发送任务", exact: true }).click();
     await page.getByText("正在运行迁移保护测试", { exact: true }).waitFor(); assert.equal(await row(next).getAttribute("draggable"), "false");

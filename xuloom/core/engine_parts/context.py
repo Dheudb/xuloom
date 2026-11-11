@@ -1,8 +1,10 @@
 """Compaction boundaries, prompt caching, attachments and memory files."""
+from typing import Any, Optional
 import json
 import logging
 import os
 from xuloom.core.messages import create_user_message
+from xuloom.core.engine_state import EngineState
 
 _logger = logging.getLogger("xuloom.core.engine")
 
@@ -27,7 +29,7 @@ class AuxiliaryGate:
         self.engine._auxiliary_after(model, purpose, messages, text, usage)
 
 
-class ContextManagementMixin:
+class ContextManagementMixin(EngineState):
     """Compaction boundaries, prompt caching, attachments and memory files."""
 
 
@@ -77,7 +79,7 @@ class ContextManagementMixin:
             return True
         return False
 
-    def _build_cached_system_blocks(self, system_prompt: str) -> list:
+    def _build_cached_system_blocks(self, system_prompt: str) -> Any:
         """
         Split system prompt into cached blocks for Anthropic's prompt caching.
 
@@ -306,7 +308,7 @@ class ContextManagementMixin:
         }
 
     def _build_spill_recorder(self, *, tool_name: str, tool_use_id: str):
-        def _record_spill(*, file_path: str, original_content_chars: int = 0, metadata: dict = None):
+        def _record_spill(*, file_path: str, original_content_chars: int = 0, metadata: Optional[dict] = None):
             self.content_replacement_manager.register_spill(
                 file_path=file_path,
                 tool_name=tool_name,

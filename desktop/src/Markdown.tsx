@@ -11,6 +11,7 @@ import { fileReference, webReference } from "./references";
 import ReferenceIcon from "./ReferenceIcon";
 import { ReferenceNavigation } from "./ReferenceNavigation";
 import remarkReferenceList from "./remark-reference-list";
+import { t, tServer } from "./i18n";
 
 const ReferenceLabel = createContext(false);
 
@@ -40,17 +41,17 @@ function CodeBlock({ text, language }: { text: string; language: string }) {
       await window.xuloom.invoke("clipboard.writeText", { text });
       setCopied(true); clearTimeout(timer.current);
       timer.current = setTimeout(() => setCopied(false), 1800);
-    } catch { setError("复制失败，请重试或选中代码手动复制。"); }
+    } catch { setError(t("复制失败，请重试或选中代码手动复制。")); }
   }
   return <div className="markdown-code-block">
     <div className="code-block-toolbar">
-      <span className="code-block-language">{language || "代码"}</span>
-      <button type="button" aria-label="复制代码" title="复制整个代码块" onClick={() => void copy()}>
+      <span className="code-block-language">{language || t("代码")}</span>
+      <button type="button" aria-label={t("复制代码")} title={t("复制整个代码块")} onClick={() => void copy()}>
         {copied ? <Check size={14} /> : <Copy size={14} />}
-        <span role={copied ? "status" : undefined}>{copied ? "已复制" : "复制代码"}</span>
+        <span role={copied ? "status" : undefined}>{copied ? t("已复制") : t("复制代码")}</span>
       </button>
     </div>
-    {error && <div className="code-copy-error" role="alert">{error}</div>}
+    {error && <div className="code-copy-error" role="alert">{tServer(error)}</div>}
     <pre><code className={language ? "language-" + language : undefined}>{text}</code></pre>
   </div>;
 }
@@ -71,7 +72,7 @@ export default function Markdown({ text, onOpenFile, sessionId, basePath, remote
   function openLink(event: MouseEvent<HTMLAnchorElement>, url: string) {
     event.preventDefault();
     setLinkError("");
-    window.xuloom.invoke("external.open", { url }).catch(() => setLinkError("无法打开链接，请复制地址后手动打开：" + url));
+    window.xuloom.invoke("external.open", { url }).catch(() => setLinkError(t("无法打开链接，请复制地址后手动打开：{url}", { url })));
   }
   return (
     <>
@@ -100,7 +101,7 @@ export default function Markdown({ text, onOpenFile, sessionId, basePath, remote
           const file = fileReference(path, true), url = webReference(path);
           if (!className && url) return <a href={url} title={url} className="markdown-link" target="_blank" rel="noopener noreferrer" onClick={event => openLink(event, url)} onAuxClick={event => { if (event.button === 1) openLink(event, url); }}><ReferenceIcon url={url} /><code>{children}</code></a>;
           return canOpen && !className && node?.position?.start.line === node?.position?.end.line && file
-            ? <button className="inline-file-link" title={"查看 " + path} onClick={() => openFile(file)}><ReferenceIcon path={file.path} /><code>{children}</code></button>
+            ? <button className="inline-file-link" title={t("查看 {path}", { path })} onClick={() => openFile(file)}><ReferenceIcon path={file.path} /><code>{children}</code></button>
             : <code className={className}>{children}</code>;
         },
         a: ({ children, href }) => {

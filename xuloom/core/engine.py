@@ -9,7 +9,7 @@ import os
 import uuid
 import inspect
 import logging
-from typing import Optional
+from typing import Any, List, Optional
 from xuloom.agents.registry import AgentRegistry
 from xuloom.agents.tasks import SubagentTasks
 from xuloom.agents.team import TeamManager
@@ -72,6 +72,9 @@ from xuloom.core.engine_parts import (
     StatusMixin,
     ToolOrchestrationMixin,
     TurnLoopMixin,
+    ModelSamplingMixin,
+    UsageAccountingMixin,
+    TurnRecoveryMixin,
 )
 
 
@@ -85,11 +88,18 @@ class QueryEngine(
     StatusMixin,
     ToolOrchestrationMixin,
     TurnLoopMixin,
+    ModelSamplingMixin,
+    UsageAccountingMixin,
+    TurnRecoveryMixin,
     ModelStream,
 ):
     """
     The shared execution loop over explicit model connections, context and tools.
     """
+    # Set by xuloom.features.goals while a goal drives this engine (declared for type checkers only).
+    _goal_task: Optional[asyncio.Task]
+    _goal_turn_task: Optional[asyncio.Task]
+
     def __init__(self, config: Optional[EngineConfig] = None, /, *, permission_handler=None, **options):
         """Create an engine from an :class:`EngineConfig` and/or keyword options.
 
@@ -187,15 +197,17 @@ class QueryEngine(
 
     def _init_observability(self, config: EngineConfig):
         """Tracer (config + environment exporters) and cost meter (prices + task cap)."""
-        from xuloom.observability import CostMeter, Tracer, environment_exporters, load_prices
+        from xuloom.observability import CostMeter, Tracer, environment_exporters
+        from xuloom.observability.cost import load_pricing_settings
         self.tracer = Tracer(tuple(config.trace_exporters) + tuple(environment_exporters()))
         try:
-            prices = load_prices()
+            prices, file_cap = load_pricing_settings()
         except ValueError as error:
             _engine_logger.warning("Model prices were not loaded: %s", error)
-            prices = {}
+            prices, file_cap = {}, None
         prices.update(config.model_prices or {})
-        self.cost_meter = CostMeter(prices, limit_usd=config.max_cost_usd)
+        # EngineConfig / XULOOM_MAX_COST_USD win over the cap saved in pricing.json (desktop settings).
+        self.cost_meter = CostMeter(prices, limit_usd=config.max_cost_usd if config.max_cost_usd is not None else file_cap)
         if not isinstance(getattr(self, "session_cost", None), dict):
             self.session_cost = {"usd": 0.0, "unpriced_requests": 0}
         self._owns_observability = True
@@ -229,9 +241,9 @@ class QueryEngine(
                 closing = client.close()
                 if inspect.isawaitable(closing):
                     try:
-                        asyncio.get_running_loop().create_task(closing)
+                        asyncio.get_running_loop().create_task(closing)  # type: ignore[arg-type]  # client.close() returns a coroutine
                     except RuntimeError:
-                        asyncio.run(closing)
+                        asyncio.run(closing)  # type: ignore[arg-type]
             except Exception:
                 pass
             unbind_client(client)
@@ -482,11 +494,11 @@ class QueryEngine(
     def switch_model_runtime(
         self,
         *,
-        provider: str = None,
-        model: str = None,
-        api_base_url: str = None,
-        api_key: str = None,
-        network_mode: str = None,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        api_base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+        network_mode: Optional[str] = None,
         persist: bool = True,
     ) -> dict:
         """
@@ -582,7 +594,7 @@ class QueryEngine(
             'profile': normalize(search), 'model': self.primary_model, 'base_url': self.api_base_url or str(getattr(self.client, 'base_url', '')),
             'api_key': self._api_key, 'network_mode': self.network_mode, 'owner': self._request_owner}
 
-    def _resolve_model_provider(self, provider: str = None, model: str = None) -> str:
+    def _resolve_model_provider(self, provider: Optional[str] = None, model: Optional[str] = None) -> str:
         return resolve_model_provider(provider, model)
 
     def _resolve_fallback_model(self, fallback_model: Optional[str], *, provider=None, primary_model=None) -> str:
@@ -705,7 +717,7 @@ class QueryEngine(
                 self.goal["status"], self.goal["reason"] = "interrupted", "Owner closing; explicitly resume after inspecting saved results"
             goal_task.cancel()
             await asyncio.gather(goal_task, return_exceptions=True)
-        failures = await asyncio.gather(self.request_abort(), return_exceptions=True)
+        failures: List[Any] = list(await asyncio.gather(self.request_abort(), return_exceptions=True))
         failures.extend(await asyncio.gather(self.session_memory_manager.aclose(), self.memory_extractor.aclose(), return_exceptions=True))
         stop = [self.tool_context["command_sessions"].close(owner=self.agent_id if self.agent_depth else None)]
         failures.extend(await asyncio.gather(*stop, return_exceptions=True))
@@ -766,7 +778,7 @@ class QueryEngine(
             result = RunResult('Resume the stopped task or withdraw its queued instructions before starting another task.', 'input_required')
             yield {'type':'final','text':result.text,'result':result.to_dict()}
             return
-        queue = asyncio.Queue()
+        queue: asyncio.Queue = asyncio.Queue()
 
         async def emit(payload: dict):
             await queue.put(payload)

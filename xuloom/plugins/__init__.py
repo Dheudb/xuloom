@@ -60,15 +60,13 @@ class PluginAPI:
         self.trace_exporters: List[Any] = []
 
     def add_tool(self, tool, *, latent: bool = False) -> None:
-        """Add a trusted ``BaseAgenticTool`` instance (create a new one per call to ``register``).
+        """Add a trusted tool: a ``BaseAgenticTool`` subclass (e.g. from ``@tool``) or a new instance.
 
         ``latent=True`` installs the tool hidden: the model finds and activates it
         through ``tool_search_tool``, which keeps rarely used tools out of every request.
         """
-        from xuloom.tools.base import BaseAgenticTool
-        if not isinstance(tool, BaseAgenticTool):
-            raise TypeError("Plugin tools must be BaseAgenticTool instances")
-        self.tools.append((tool, bool(latent)))
+        from xuloom.tools.function import as_tool_instance
+        self.tools.append((as_tool_instance(tool), bool(latent)))
 
     def add_cli_command(self, name: str, configure: Callable, handler: Callable, *, help: str = "") -> None:
         """Add ``xuloom <name> ...`` to the non-interactive CLI.

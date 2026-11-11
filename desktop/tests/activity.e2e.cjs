@@ -1,4 +1,5 @@
 const { _electron: electron } = require("playwright");
+const { fixtureEnv } = require("./e2e-env.cjs");
 const fs = require("node:fs"), path = require("node:path"), os = require("node:os"), http = require("node:http"), assert = require("node:assert/strict");
 const { atomicJSON } = require("../electron/catalog.cjs");
 const root = path.resolve(__dirname, "..");
@@ -13,7 +14,9 @@ const server = http.createServer((req, res) => {
   req.on("end", () => {
     const body = JSON.parse(raw);
     if (!body.stream) { res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "memory" } }] })); return; }
-    const child = !(body.tools || []).some((tool) => tool.function?.name === "agent_tool");
+    // The main agent starts with a lean tool set (agent tools are deferred), so identify the child by its task, not by missing schemas.
+    const first = body.messages.find((message) => message.role === "user");
+    const child = JSON.stringify(first?.content || "").includes("ACTIVITY_CHILD");
     const task = [...body.messages].reverse().find((message) => message.role === "user" && typeof message.content === "string" && message.content.startsWith("ACTIVITY_"));
     const after = task ? body.messages.slice(body.messages.indexOf(task) + 1) : [];
     let tools;
@@ -35,8 +38,7 @@ const server = http.createServer((req, res) => {
   });
 });
 async function launch() {
-  const env = { ...process.env, USERPROFILE: path.join(fixture, "home"), HOME: path.join(fixture, "home"), XULOOM_USER_DATA: data, XULOOM_CONFIG_DIR: config, XULOOM_TEST_HEADLESS: "1" };
-  for (const key of ["ELECTRON_RUN_AS_NODE", "XULOOM_DEV_URL", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL", "XULOOM_MODEL_PROVIDER"]) delete env[key];
+  const env = fixtureEnv({ data, config, home: path.join(fixture, "home") });
   app = await electron.launch({ executablePath: process.env.XULOOM_TEST_EXECUTABLE, args: process.env.XULOOM_TEST_EXECUTABLE ? [] : [root], env, timeout: 30000 });
   page = await app.firstWindow(); page.setDefaultTimeout(60000); page.on("pageerror", (error) => errors.push(error.message));
   await page.waitForFunction(() => document.querySelector(".new-task")?.disabled === false);

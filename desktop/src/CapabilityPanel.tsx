@@ -23,6 +23,7 @@ import ActivityPanel from "./ActivityPanel";
 import WorkspaceTree from "./WorkspaceTree";
 import WorkerHistory from "./WorkerHistory";
 import PipelineTree from "./PipelineTree";
+import { t, tServer, tx } from "./i18n";
 
 export default function CapabilityPanel({
   session,
@@ -81,10 +82,10 @@ export default function CapabilityPanel({
       <div className="panel-tabs">
         {[
           { id: "skills", label: "Skills", icon: Puzzle },
-          { id: "agents", label: "代理", icon: Bot },
-          { id: "activity", label: "活动", icon: Activity },
-          { id: "changes", label: "变更", icon: FileDiff },
-          { id: "files", label: "文件", icon: FolderTree },
+          { id: "agents", label: t("代理"), icon: Bot },
+          { id: "activity", label: t("活动"), icon: Activity },
+          { id: "changes", label: t("变更"), icon: FileDiff },
+          { id: "files", label: t("文件"), icon: FolderTree },
         ].map(({ id, label, icon: Icon }) => (
           <button
             key={id}
@@ -101,8 +102,8 @@ export default function CapabilityPanel({
       {!session ? (
         <div className="panel-empty">
           <Puzzle size={28} />
-          <p>会话能力会显示在这里</p>
-          <small>开始会话后，管理技能、子代理、文件和执行过程。</small>
+          <p>{t("会话能力会显示在这里")}</p>
+          <small>{t("开始会话后，管理技能、子代理、文件和执行过程。")}</small>
         </div>
       ) : (
         <>
@@ -110,14 +111,13 @@ export default function CapabilityPanel({
             <>
               <div className="panel-title">
                 <div>
-                  <h3>
-                    技能库 <span>{active.length}</span>
+                  <h3>{t("技能库")} <span>{active.length}</span>
                   </h3>
-                  <p>按需加载，让代理掌握你的工作流</p>
+                  <p>{t("按需加载，让代理掌握你的工作流")}</p>
                 </div>
                 <button
                   className="icon-button"
-                  aria-label="刷新技能"
+                  aria-label={t("刷新技能")}
                   onClick={() => refresh().catch(onError)}
                 >
                   <RefreshCw size={15} />
@@ -127,19 +127,14 @@ export default function CapabilityPanel({
                 className="import-button"
                 onClick={() => importDirectory("skills")}
               >
-                <Plus size={15} />
-                导入技能目录
-              </button>
-              <button className="capability-guide-link" onClick={() => setGuide("skills")}>Skill 怎么配置？查看目录和示例</button>
+                <Plus size={15} />{t("导入技能目录")}</button>
+              <button className="capability-guide-link" onClick={() => setGuide("skills")}>{t("Skill 怎么配置？查看目录和示例")}</button>
               <div className="panel-scroll">
                 {!session.capabilities.skills.length && (
                   <div className="instruction-empty">
                     <Puzzle size={26} />
-                    <h4>添加第一个 Skill</h4>
-                    <p>
-                      选择包含 SKILL.md 的目录，也可以将技能放入项目的
-                      .xuloom/skills。
-                    </p>
+                    <h4>{t("添加第一个 Skill")}</h4>
+                    <p>{t("选择包含 SKILL.md 的目录，也可以将技能放入项目的 .xuloom/skills。")}</p>
                   </div>
                 )}
                 {session.capabilities.skills.map((skill) => (
@@ -154,31 +149,30 @@ export default function CapabilityPanel({
                       <Puzzle size={15} />
                       <strong>{skill.name}</strong>
                     </div>
-                    <p className="skill-description" title={skill.description || skill.error}>{skill.description || skill.error}</p>
+                    <p className="skill-description" title={skill.description || tServer(skill.error)}>{(skill.scope === "builtin" ? tServer(skill.description) : skill.description) || tServer(skill.error)}</p>
                     <div className="card-meta">
                       <span>
                         {skillScope(skill.scope)}
                       </span>
                       <span className={!skill.valid ? "bad" : ""}>
                         {!skill.valid
-                          ? "格式错误"
+                          ? t("格式错误")
                           : skill.shadowed
-                            ? "被同名技能覆盖"
+                            ? t("被同名技能覆盖")
                             : session.selected.includes(skill.name)
-                              ? "已选择"
+                              ? t("已选择")
                               : session.loaded.includes(skill.name)
-                                ? "本会话已加载"
+                                ? t("本会话已加载")
                                 : ""}
                       </span>
                     </div>
                     {skill.compatibility && (
-                      <small className="compatibility">
-                        环境要求：{skill.compatibility}
+                      <small className="compatibility">{tx("环境要求：{compatibility}", { compatibility: skill.compatibility })}
                       </small>
                     )}
                     {skill.valid && skill.enabled && !skill.shadowed && (
                       <div className="card-actions">
-                        <button onClick={() => read(skill)}>查看指令</button>
+                        <button onClick={() => read(skill)}>{t("查看指令")}</button>
                         <button
                           className={
                             session.selected.includes(skill.name)
@@ -196,55 +190,47 @@ export default function CapabilityPanel({
                           }
                         >
                           {session.selected.includes(skill.name)
-                            ? "已选择"
-                            : "选择使用"}
+                            ? t("已选择")
+                            : t("选择使用")}
                         </button>
                       </div>
                     )}
                     {skill.error && skill.description && (
-                      <small className="bad">{skill.error}</small>
+                      <small className="bad">{tServer(skill.error)}</small>
                     )}
                   </article>
                 ))}
                 <details className="root-details">
-                  <summary>
-                    扫描目录与优先级 <ChevronDown size={13} />
+                  <summary>{t("扫描目录与优先级")} <ChevronDown size={13} />
                   </summary>
-                  <p>
-                    项目 .xuloom → .agents → .claude → 导入目录 → 环境目录 →
-                    全局目录 → 内置目录。同名技能以首个格式正确的目录为准。
-                  </p>
+                  <p>{t("项目 .xuloom → .agents → .claude → 导入目录 → 环境目录 → 全局目录 → 内置目录。同名技能以首个格式正确的目录为准。")}</p>
                 </details>
               </div>
               <div className="panel-footnote">
-                <CircleCheck size={13} />
-                名称和描述常驻，完整指令按需加载
-              </div>
+                <CircleCheck size={13} />{t("名称和描述常驻，完整指令按需加载")}</div>
             </>
           )}
           {tab === "agents" && (
             <>
               <div className="panel-title">
                 <div>
-                  <h3>子代理</h3>
-                  <p>分配独立任务，查看执行结果</p>
+                  <h3>{t("子代理")}</h3>
+                  <p>{t("分配独立任务，查看执行结果")}</p>
                 </div>
-                <button className="icon-button" aria-label="刷新子代理" onClick={() => refresh().catch(onError)}><RefreshCw size={15} /></button>
+                <button className="icon-button" aria-label={t("刷新子代理")} onClick={() => refresh().catch(onError)}><RefreshCw size={15} /></button>
               </div>
               <button
                 className="import-button"
                 onClick={() => importDirectory("agents")}
               >
-                <Plus size={15} />
-                导入代理定义目录
-              </button>
-              <button className="capability-guide-link" onClick={() => setGuide("agents")}>Subagent 怎么配置？查看目录和示例</button>
+                <Plus size={15} />{t("导入代理定义目录")}</button>
+              <button className="capability-guide-link" onClick={() => setGuide("agents")}>{t("Subagent 怎么配置？查看目录和示例")}</button>
               <div className="panel-scroll">
                 <PipelineTree sessionId={session.id} busy={session.busy || !!session.controlledExecution} invoke={invoke} onError={onError}
                   onHistory={(id, name) => setHistoryWorker({ id, name })} />
                 {session.workers.length > 0 && (
                   <>
-                    <span className="section-label">会话任务</span>
+                    <span className="section-label">{t("会话任务")}</span>
                     {session.workers.map((worker) => (
                       <article
                         className="capability-card"
@@ -252,29 +238,29 @@ export default function CapabilityPanel({
                       >
                         <div className="card-heading">
                           <Bot size={15} />
-                          <strong>{worker.description || worker.agent_type || "子代理"}</strong>
+                          <strong>{worker.description || worker.agent_type || t("子代理")}</strong>
                           <span className={"status-dot " + worker.status} />
                         </div>
                         <p>{worker.task}</p>
                         <div className="card-meta worker-meta">
-                          <span className="worker-model" title={worker.model}>{worker.agent_type || "子代理"}{worker.backend === "claude" ? " · Claude Code" : worker.backend === "pi" ? " · Pi" : worker.backend === "codex" ? " · Codex" : worker.backend === "dsh" ? " · DSH" : ""} · {worker.model || (worker.executor?.startsWith("ssh:") ? "执行主机默认模型" : "继承主模型")}</span>
+                          <span className="worker-model" title={worker.model}>{worker.agent_type || t("子代理")}{worker.backend === "claude" ? " · Claude Code" : worker.backend === "pi" ? " · Pi" : worker.backend === "codex" ? " · Codex" : worker.backend === "dsh" ? " · DSH" : ""} · {worker.model || (worker.executor?.startsWith("ssh:") ? t("执行主机默认模型") : t("继承主模型"))}</span>
                           <span className="worker-status">
-                            {worker.outcome_unknown ? "结果待确认" : worker.status === "queued" ? worker.phase === "awaiting_resume" ? "等待恢复队列" : "排队中" : worker.status === "running"
-                              ? worker.phase === "starting" ? "启动中" : "执行中"
+                            {worker.outcome_unknown ? t("结果待确认") : worker.status === "queued" ? worker.phase === "awaiting_resume" ? t("等待恢复队列") : t("排队中") : worker.status === "running"
+                              ? worker.phase === "starting" ? t("启动中") : t("执行中")
                               : worker.status === "completed"
-                                ? "已完成"
+                                ? t("已完成")
                                 : worker.status === "cancelled"
-                                  ? "已取消"
-                                  : "异常"}
+                                  ? t("已取消")
+                                  : t("异常")}
                           </span>
                         </div>
-                        {worker.started_at && <div className="card-meta"><span>启动 {new Date(worker.started_at).toLocaleTimeString("zh-CN", { hour12: false })}</span></div>}
-                        {!!worker.pending_message_count && <p className="fine-print">{worker.pending_message_count} 条消息待处理{worker.status !== "running" && " · 请在主会话继续此代理"}</p>}
-                        {worker.external_recovery && <p className="fine-print">{worker.external_recovery.resumable ? "停止已确认，可在主会话继续此代理。" : "停止结果尚未确认，请先核对已有产物，不会自动重放。"}</p>}
-                        {worker.remote_reference && <div className="card-meta" title={worker.remote_reference.cwd}><span>SSH · {worker.remote_reference.machine || worker.remote_reference.host}</span><button className="text-button" onClick={() => onNavigateChat(worker.remote_reference!.url)}>查看远端历史与文件</button></div>}
-                        <button className="text-button" onClick={() => setHistoryWorker({ id: worker.agent_id, name: worker.description || worker.agent_type || "子代理", remoteUrl: worker.remote_reference?.url })}>查看完整对话历史</button>
+                        {worker.started_at && <div className="card-meta"><span>{tx("启动 {value}", { value: new Date(worker.started_at).toLocaleTimeString("zh-CN", { hour12: false }) })}</span></div>}
+                        {!!worker.pending_message_count && <p className="fine-print">{tx("{pending_message_count} 条消息待处理{value}", { pending_message_count: worker.pending_message_count, value: worker.status !== "running" && t(" · 请在主会话继续此代理") })}</p>}
+                        {worker.external_recovery && <p className="fine-print">{worker.external_recovery.resumable ? t("停止已确认，可在主会话继续此代理。") : t("停止结果尚未确认，请先核对已有产物，不会自动重放。")}</p>}
+                        {worker.remote_reference && <div className="card-meta" title={worker.remote_reference.cwd}><span>SSH · {worker.remote_reference.machine || worker.remote_reference.host}</span><button className="text-button" onClick={() => onNavigateChat(worker.remote_reference!.url)}>{t("查看远端历史与文件")}</button></div>}
+                        <button className="text-button" onClick={() => setHistoryWorker({ id: worker.agent_id, name: worker.description || worker.agent_type || t("子代理"), remoteUrl: worker.remote_reference?.url })}>{t("查看完整对话历史")}</button>
                         {worker.status === "queued" && worker.phase === "awaiting_resume" && <button className="text-button" disabled={session.busy}
-                          onClick={() => invoke("agents.resume_queue", { agentIds: [worker.agent_id] }).then(refresh).catch(onError)}>恢复排队</button>}
+                          onClick={() => invoke("agents.resume_queue", { agentIds: [worker.agent_id] }).then(refresh).catch(onError)}>{t("恢复排队")}</button>}
                         {(["queued", "running"].includes(worker.status) || worker.outcome_unknown) && (
                           <button
                             className="text-button"
@@ -284,13 +270,11 @@ export default function CapabilityPanel({
                               }).catch(onError)
                             }
                           >
-                            <Square size={12} />
-                            停止代理
-                          </button>
+                            <Square size={12} />{t("停止代理")}</button>
                         )}
                         {worker.result && (
                           <details>
-                            <summary>查看结果</summary>
+                            <summary>{t("查看结果")}</summary>
                             <div className="worker-result">
                               <Markdown text={worker.result} sessionId={session.id} remoteUrl={worker.remote_reference?.url} />
                             </div>
@@ -300,7 +284,7 @@ export default function CapabilityPanel({
                     ))}
                   </>
                 )}
-                <span className="section-label">可用角色</span>
+                <span className="section-label">{t("可用角色")}</span>
                 {session.capabilities.agents.map((agent, index) => (
                   <article
                     className={
@@ -313,45 +297,40 @@ export default function CapabilityPanel({
                       <strong>{agent.name}</strong>
                       {!agent.valid && <CircleAlert size={14} />}
                     </div>
-                    <p>{agent.description || agent.error}</p>
+                    <p>{(agent.scope === "builtin" ? tServer(agent.description) : agent.description) || tServer(agent.error)}</p>
                     <div className="card-meta">
                       <span>
                         {agent.scope === "builtin"
-                          ? "内置"
+                          ? t("内置")
                           : agent.scope === "project"
-                            ? "项目"
-                            : "自定义"}
+                            ? t("项目")
+                            : t("自定义")}
                       </span>
                       <span>
                         {!agent.valid
-                          ? "不可用"
+                          ? t("不可用")
                           : agent.shadowed
-                            ? "被覆盖"
-                            : agent.model || "继承模型"}
+                            ? t("被覆盖")
+                            : agent.model || t("继承模型")}
                       </span>
                     </div>
                     {agent.allowed_tools && (
-                      <small className="compatibility">
-                        工具：{agent.allowed_tools.join(", ") || "无"}
+                      <small className="compatibility">{tx("工具：{value}", { value: agent.allowed_tools.join(", ") || t("无") })}
                       </small>
                     )}
                     {agent.valid && !agent.shadowed && (
                       <div className="card-actions">
-                      <button className="text-button" onClick={() => invoke("agents.read", { name: agent.name }).then((text) => setPreview({ name: agent.name, text, kind: "agent" })).catch(onError)}>查看代理定义</button>
+                      <button className="text-button" onClick={() => invoke("agents.read", { name: agent.name }).then((text) => setPreview({ name: agent.name, text, kind: "agent" })).catch(onError)}>{t("查看代理定义")}</button>
                       <button
                         className="text-button"
                         disabled={session.controlledExecution}
                         onClick={() =>
                           update({
                             draft:
-                              "请使用 " +
-                              agent.name +
-                              " 子代理完成以下任务：\n",
+                              t("请使用 {name} 子代理完成以下任务：\n", { name: agent.name }),
                           })
                         }
-                      >
-                        分配任务 →
-                      </button>
+                      >{t("分配任务 →")}</button>
                       </div>
                     )}
                   </article>
@@ -375,7 +354,7 @@ export default function CapabilityPanel({
             role="dialog"
             aria-modal="true"
             onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); setPreview(null); } }}
-            aria-label={preview.kind === "agent" ? "代理定义" : "技能指令"}
+            aria-label={preview.kind === "agent" ? t("代理定义") : t("技能指令")}
             onClick={(e) => e.stopPropagation()}
           >
             <header>
@@ -384,7 +363,7 @@ export default function CapabilityPanel({
                 <h2>{preview.name}</h2>
               </div>
               <button
-                aria-label={preview.kind === "agent" ? "关闭代理预览" : "关闭技能预览"}
+                aria-label={preview.kind === "agent" ? t("关闭代理预览") : t("关闭技能预览")}
                 className="icon-button"
                 onClick={() => setPreview(null)}
               >

@@ -1,4 +1,5 @@
 const { _electron: electron } = require("playwright");
+const { fixtureEnv } = require("./e2e-env.cjs");
 const fs = require("node:fs"), path = require("node:path"), os = require("node:os"), http = require("node:http"), assert = require("node:assert/strict");
 const { atomicJSON } = require("../electron/catalog.cjs");
 const root = path.resolve(__dirname, ".."), fixture = fs.mkdtempSync(path.join(os.tmpdir(), "xuloom-questions-"));
@@ -25,9 +26,13 @@ const server = http.createServer((req, res) => {
       const text = JSON.stringify(body.messages);
       if (name === "QUESTION_REPAIR") {
         if (count === 1) {
-          const schema = body.tools.find(t => t.function.name === "ask_user_question_tool").function.parameters;
-          assert(schema.properties.questions.items.properties.options.items.properties.label);
-          assert(!JSON.stringify(schema).includes('"$ref"'));
+          // The question tool is deferred behind tool_search_tool (lean core tool set) but still runs when called;
+          // its compact schema is covered by tests/test_questions.py, so only check it here when it was sent.
+          const schema = (body.tools || []).find(t => t.function.name === "ask_user_question_tool")?.function.parameters;
+          if (schema) {
+            assert(schema.properties.questions.items.properties.options.items.properties.label);
+            assert(!JSON.stringify(schema).includes('"$ref"'));
+          }
           return reply(res, null, { questions: choices });
         }
         if (count === 2) {
@@ -54,9 +59,7 @@ async function send(text) {
   try {
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     atomicJSON(path.join(config, "config.json"), { model_provider: "openai", openai_model: "fixture", openai_api_key: "fixture", openai_base_url: `http://127.0.0.1:${server.address().port}/v1` });
-    const env = { ...process.env, XULOOM_DATA_DIR: data, XULOOM_USER_DATA: data, XULOOM_CONFIG_DIR: config,
-      USERPROFILE: home, HOME: home, XULOOM_TEST_HEADLESS: "1" };
-    for (const key of ["ELECTRON_RUN_AS_NODE", "XULOOM_DEV_URL", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL", "XULOOM_MODEL_PROVIDER"]) delete env[key];
+    const env = fixtureEnv({ data, config, home: home });
     app = await electron.launch({ executablePath: process.env.XULOOM_TEST_EXECUTABLE,
       args: process.env.XULOOM_TEST_EXECUTABLE ? [] : [root], env, timeout: 30000 });
     page = await app.firstWindow(); page.setDefaultTimeout(60000); page.on("pageerror", e => failures.push(e.message));

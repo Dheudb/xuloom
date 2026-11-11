@@ -80,6 +80,8 @@ export type TurnTrace = {
   resumedAt?: number;
   elapsedBeforeResumeMs?: number;
   approximate?: boolean;
+  /** Main-agent model usage of this turn; costUsd is the task total (subagents included) when priced. */
+  usage?: { inputTokens: number; outputTokens: number; requests: number; unpricedRequests: number; estimated: boolean; costUsd?: number };
   answer?: string;
   pendingText?: string;
   steps: ({ kind: "text"; text: string; protocolError?: { retrying?: boolean; detail?: string; diagnostic?: string } } | { kind: "tool"; tool: ToolActivity } | { kind: "compaction"; compaction: CompactionNotice } | { kind: "notice"; notice: RetryNotice })[];
@@ -216,6 +218,7 @@ declare global {
   interface Window {
     xuloom: {
       flushDrafts(drafts: { id: string; draft: string; draftEditId: string; draftAttachments: string[] }[]): boolean;
+      reloadWindow?(): void;
       importFiles(session: string, files: File[], existing: string[], ids?: string[]): Promise<Attachment[]>;
       invoke<T = any>(
         method: string,

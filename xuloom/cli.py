@@ -62,8 +62,8 @@ def parser():
     cleanup.add_argument("--cwd", default=os.getcwd())
     cleanup.add_argument("--id", help="Retry the specified saved cleanup record; omitted lists pending records")
     cleanup.add_argument("--json", action="store_true")
-    plugins = sub.add_parser("plugins", help="List, enable or disable installed plugins; no model request")
-    plugins.add_argument("action", choices=("list", "enable", "disable"))
+    plugins = sub.add_parser("plugins", help="List, enable, disable or create (new) plugins; no model request")
+    plugins.add_argument("action", choices=("list", "enable", "disable", "new"))
     plugins.add_argument("name", nargs="?")
     plugins.add_argument("--json", action="store_true")
     status = sub.add_parser("git-status", help="Read repository/branch without a model request")
@@ -479,6 +479,16 @@ async def dispatch(args, emit):
                     "text": "\n".join(f"{'*' if row['enabled'] else ' '} {row['name']}  {row.get('source') or '(not installed)'}" for row in rows) or "No plugins installed."}
         if not args.name:
             raise ValueError("Plugin name is required")
+        if args.action == "new":
+            from xuloom.plugins import PluginError
+            from xuloom.plugins.scaffold import create_plugin
+            try:
+                folder = create_plugin(args.name)
+            except PluginError as error:
+                raise ValueError(str(error)) from None
+            return {"ok": True, "reason": "completed", "path": str(folder),
+                    "text": f"Created {folder}\n  Edit plugin.py, check it with: python \"{folder / 'test_plugin.py'}\"\n"
+                            f"  Enable it with: xuloom plugins enable {args.name}"}
         if args.action == "enable" and args.name not in {row["name"] for row in available_plugins()}:
             raise ValueError(f"Plugin {args.name!r} is not installed")
         enabled = set_plugin_enabled(args.name, args.action == "enable")
