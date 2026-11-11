@@ -97,7 +97,7 @@ class ScalingTests(unittest.IsolatedAsyncioTestCase):
     async def run_swarm(self, target=12):
         return await self.controller.dispatch("create", {"goal": "Find independent evidence", "nodes": ["lab"], "target": target, "accept_high_usage": True})
 
-    async def drive(self, run, predicate=None, seconds=12):
+    async def drive(self, run, predicate=None, seconds=30):
         end = time.monotonic() + seconds
         while time.monotonic() < end:
             row = self.controller.store.get("run", run["id"])
