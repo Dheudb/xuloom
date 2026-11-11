@@ -54,7 +54,7 @@ async function idle() { await page.waitForFunction(() => !document.querySelector
   try {
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     atomicJSON(path.join(config, "config.json"), { model_provider: "openai", openai_model: "fixture", openai_api_key: "fixture", openai_base_url: `http://127.0.0.1:${server.address().port}/v1`,
-      stream_first_response_timeout_sec: 1.5, stream_idle_timeout_sec: .5, stream_end_grace_sec: .1 });
+      stream_first_response_timeout_sec: 1.5, stream_idle_timeout_sec: 2, stream_end_grace_sec: .1 });
     await launch(); await page.locator(".new-task").click(); await page.locator(".session-item.active").waitFor();
     await send("STREAM_FINISH");
     await page.getByText("VISIBLE_BEFORE_FINISH", { exact: true }).waitFor();
@@ -65,7 +65,7 @@ async function idle() { await page.waitForFunction(() => !document.querySelector
     await page.getByText("REASONING_DONE", { exact: true }).waitFor(); await idle();
     assert(!(await page.locator("body").innerText()).includes("PRIVATE_REASONING"));
     await send("STREAM_IDLE"); await page.getByText("RETAIN_THIS_PARTIAL", { exact: true }).waitFor();
-    await page.getByText(/连续 0.5 秒没有新的文本/).waitFor(); await idle();
+    await page.getByText(/连续 2 秒没有新的文本/).waitFor(); await idle();
     assert.equal(await page.locator(".turn-process").last().getAttribute("data-turn-status"), "error");
     assert.equal(calls.STREAM_IDLE, 1, "Stalled requests must not silently replay");
     await send("STREAM_DROPPED"); await page.getByText(/收到结束标记前断开/).waitFor(); await idle();
