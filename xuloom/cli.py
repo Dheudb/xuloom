@@ -621,6 +621,8 @@ def main(argv):
         result["help"] = failure_help(result.get("reason", "unknown"))
     if as_json: wire.write(json.dumps({"type": "final", "result": result}, ensure_ascii=False, default=str) + "\n")
     else: wire.write(str(result.get("text") or json.dumps(result, ensure_ascii=False, default=str)) + "\n")
-    if not as_json and result.get("help"): wire.write(result["help"]["message"] + "\n")
+    # not_configured: the text above already explains the fix; skip the desktop-oriented hint line.
+    if not as_json and result.get("help") and result.get("reason") != "not_configured":
+        wire.write(result["help"]["message"] + "\n")
     wire.flush()
     return EXIT_CODES.get(result["reason"], 1 if not result.get("ok") else 0)

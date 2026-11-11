@@ -4,6 +4,11 @@
 
 ## [未发布]
 
+### 变更
+- **不兼容**：PDF 读取改为可选依赖 `xuloom[pdf]`。PyMuPDF 采用 AGPL-3.0（或商业）许可，连同它引入的 onnxruntime、numpy 等约 200 MB；核心库不再默认安装它，MIT 核心保持宽松许可。没有安装时读取 PDF 会提示 `pip install "xuloom[pdf]"`。桌面发行包仍内置 PDF 支持。
+- `xuloom --help` 列出全部子命令（`exec`、`serve`、`eval`、`plugins` 等，包括插件提供的命令）。
+- 未配置模型时的提示改为分别说明 Python（`EngineConfig(...)`）、CLI（`OPENAI_API_KEY` / `OPENAI_MODEL` 等环境变量）、交互终端（`/model`）和桌面 App 的配置方式；CLI 文本输出不再附带面向桌面的中文提示行。
+
 ## [0.1.44] - 2026-11-11
 
 ### 新增
@@ -59,7 +64,8 @@
 - 引擎拆分为 `xuloom/core/engine_parts/` 下的多个 mixin，主循环拆成多个阶段方法。
 - 新增不可变的 `EngineConfig` 和顶层公开 API（`from xuloom import ...`）。
 
-[未发布]: https://github.com/Dheudb/xuloom/compare/v0.1.43...HEAD
+[未发布]: https://github.com/Dheudb/xuloom/compare/v0.1.44...HEAD
+[0.1.44]: https://github.com/Dheudb/xuloom/compare/v0.1.43...v0.1.44
 [0.1.43]: https://github.com/Dheudb/xuloom/compare/v0.1.42...v0.1.43
 [0.1.42]: https://github.com/Dheudb/xuloom/compare/v0.1.41...v0.1.42
 [0.1.41]: https://github.com/Dheudb/xuloom/compare/v0.1.40...v0.1.41

@@ -17,6 +17,7 @@
 ```bash
 pip install xuloom                 # 核心库与 CLI
 pip install "xuloom[mcp,otel]"     # 可选：MCP 客户端、OpenTelemetry 导出
+pip install "xuloom[pdf]"          # 可选：读取 PDF（PyMuPDF，AGPL-3.0 许可，约 200 MB）
 ```
 
 PyPI 发布流程已经就绪，在 `xuloom` 首次发布到 PyPI 之前，请从源码安装：
@@ -148,7 +149,7 @@ Skills、子代理、MCP、SSH 远程和生成模型都在设置中配置，见 
 ## 参与开发
 
 ```bash
-pip install -e ".[dev,mcp]"
+pip install -e ".[dev,mcp,pdf]"
 ruff check . && mypy && python -m unittest discover -s tests
 ```
 

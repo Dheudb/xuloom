@@ -18,7 +18,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: python -m pip install -e ".[mcp,dev]"
+      - run: python -m pip install -e ".[mcp,dev,pdf]"
       - run: python scripts/check-python-names.py
       - uses: actions/setup-node@v4
         with:
@@ -40,7 +40,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install -e "..[mcp]"
+      - run: python -m pip install -e "..[mcp,pdf]"
       - run: npm ci
       - run: npm run build
       - run: npm test

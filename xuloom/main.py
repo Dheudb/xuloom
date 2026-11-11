@@ -956,6 +956,32 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
     await engine.aclose()
 
 
+COMMAND_SUMMARIES = {
+    "exec": "Run one task non-interactively (--json for JSON events; exit code = outcome)",
+    "goal": "Start, run or control a persisted goal",
+    "schedule": "Add, list or serve timed and conditional messages",
+    "pipeline": "Start, resume or inspect a journal-backed item pipeline",
+    "remote": "Chat with or run tasks on a configured SSH host",
+}
+
+
+def commands_epilog() -> str:
+    """``xuloom <command>`` list for --help, read from the non-interactive parser (plugin commands included)."""
+    import argparse
+    from xuloom.cli import parser as command_parser
+    rows = {}
+    for action in command_parser()._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            helps = {choice.dest: choice.help for choice in action._choices_actions}
+            for name in action.choices:
+                rows[name] = helps.get(name) or COMMAND_SUMMARIES.get(name, "")
+    width = max(map(len, rows)) + 2
+    lines = ["commands (xuloom <command> --help for details):"]
+    lines += [f"  {name.ljust(width)}{text}".rstrip() for name, text in sorted(rows.items())]
+    lines += ["", "Docs: https://github.com/Dheudb/xuloom/tree/main/docs"]
+    return "\n".join(lines)
+
+
 def main():
     # The bundled isolated interpreter ignores PYTHONIOENCODING/PYTHONUTF8.
     for stream in (sys.stdin, sys.stdout, sys.stderr):
@@ -968,7 +994,12 @@ def main():
         from xuloom.cli import main as noninteractive
         raise SystemExit(noninteractive(sys.argv[1:]))
     import argparse
-    parser = argparse.ArgumentParser(prog="xuloom", description="Xuloom Agentic CLI Engine")
+    # Listing the commands imports the CLI module, so only do it when help is requested.
+    wants_help = any(argument in ("-h", "--help") for argument in sys.argv[1:])
+    parser = argparse.ArgumentParser(prog="xuloom", description="Xuloom Agentic CLI Engine. Run without a command for the "
+                                     "interactive terminal, or use one of the commands below.",
+                                     epilog=commands_epilog() if wants_help else None,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("-c", "--continue", dest="continue_session", action="store_true",
                         help="Resume the most recent session")
     parser.add_argument("-r", "--resume", dest="resume_id", type=str, default=None,

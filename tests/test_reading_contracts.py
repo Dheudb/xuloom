@@ -6,7 +6,10 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import pymupdf
+try:
+    import pymupdf
+except ImportError:  # optional "pdf" extra
+    pymupdf = None
 from xuloom.context.file_state_cache import FileStateCache
 from xuloom.tools.file_read_tool import FileReadTool
 
@@ -65,6 +68,7 @@ class ReadingContracts(unittest.IsolatedAsyncioTestCase):
             doc.save(p)
         return p
 
+    @unittest.skipIf(pymupdf is None, "needs the pdf extra")
     async def test_pdf_route_uses_bound_context_not_process_environment(self):
         p = self.pdf()
         with patch.dict(os.environ, {'XULOOM_MODEL_PROVIDER': 'anthropic', 'ANTHROPIC_BASE_URL': ''}):
@@ -73,6 +77,7 @@ class ReadingContracts(unittest.IsolatedAsyncioTestCase):
         self.assertIn('PAGE_2_EVIDENCE', result)
         self.assertNotIn('PAGE_3_EVIDENCE', result)
 
+    @unittest.skipIf(pymupdf is None, "needs the pdf extra")
     async def test_native_pdf_contains_only_selected_pages(self):
         p = self.pdf(); self.tool.context.update(model_provider='anthropic', api_base_url='https://api.anthropic.com', model_input_modalities=['text','image','document'])
         result = await self.tool.execute(str(p), pages='2')
@@ -81,6 +86,7 @@ class ReadingContracts(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(doc), 1)
             self.assertIn('PAGE_2_EVIDENCE', doc[0].get_text())
 
+    @unittest.skipIf(pymupdf is None, "needs the pdf extra")
     async def test_scan_warns_and_explicit_page_image_is_available(self):
         p = self.pdf(image_only=True)
         with patch.dict(os.environ, {'XULOOM_MODEL_PROVIDER':'openai'}):
@@ -91,6 +97,7 @@ class ReadingContracts(unittest.IsolatedAsyncioTestCase):
         self.tool.context['model_input_modalities']=['text']
         self.assertIn('Error', str(await self.tool.execute(str(p), pages='2', pdf_mode='image')))
 
+    @unittest.skipIf(pymupdf is None, "needs the pdf extra")
     async def test_invalid_pdf_ranges_are_rejected(self):
         p=self.pdf()
         for pages in ('0','3-2','1-2-3','9','-','1-9'):

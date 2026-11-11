@@ -17,6 +17,7 @@ Python 3.10+ is required. Local code search uses [ripgrep](https://github.com/Bu
 ```bash
 pip install xuloom                 # library and CLI
 pip install "xuloom[mcp,otel]"     # optional: MCP client, OpenTelemetry export
+pip install "xuloom[pdf]"          # optional: PDF reading (PyMuPDF, AGPL-3.0 licensed, ~200 MB)
 ```
 
 The PyPI release workflow is ready. Until `xuloom` is first published to PyPI, install from source:
@@ -122,7 +123,7 @@ These work but may still change; each document states what has been verified:
 ## Contributing
 
 ```bash
-pip install -e ".[dev,mcp]"
+pip install -e ".[dev,mcp,pdf]"
 ruff check . && mypy && python -m unittest discover -s tests
 ```
 

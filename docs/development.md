@@ -6,7 +6,7 @@
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e ".[mcp]"
+.\.venv\Scripts\python.exe -m pip install -e ".[mcp,pdf]"
 cd desktop
 npm ci
 npm run dev
@@ -25,6 +25,7 @@ Python 依赖和 CLI 入口在 `setup.py`。`requirements.txt` 只引用当前�
 | `dev` | 测试与检查工具：pyflakes、paramiko、ruff、mypy、build、twine |
 | `otel` | OpenTelemetry SDK 与 OTLP 导出，见[追踪与花费](observability.md) |
 | `mcp` | MCP SDK |
+| `pdf` | PDF 读取（PyMuPDF）。PyMuPDF 为 AGPL-3.0 或商业许可：分发或对外提供包含它的服务时需遵守相应条款，因此不是默认依赖。桌面发行包内置它；测试中的 PDF 用例在未安装时跳过 |
 | `browser` | Python Playwright；还需执行 `python -m playwright install chromium` |
 | `tokenizers` | 可选的 tiktoken / Transformers Token 计数 |
 

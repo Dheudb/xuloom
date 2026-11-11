@@ -50,7 +50,7 @@ def main():
     shutil.copytree(base / "DLLs", stage / "DLLs", ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "_tkinter.pyd", "tcl*.dll", "tk*.dll"))
     shutil.copytree(base / "Lib", stage / "Lib", ignore=shutil.ignore_patterns("site-packages", "__pycache__", "*.pyc", "test", "tests", "idlelib", "tkinter", "turtledemo"))
     target = stage / "Lib" / "site-packages"
-    subprocess.run([sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "--no-compile", "--target", str(target), str(ROOT) + "[mcp]"], cwd=ROOT, check=True)
+    subprocess.run([sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "--no-compile", "--target", str(target), str(ROOT) + "[mcp,pdf]"], cwd=ROOT, check=True)
     runpy.run_path(str(Path(__file__).with_name('package_content.py')))['prune_generated_runtime'](stage)
     # A normal wheel installation, rather than a copied virtual environment,
     # keeps project and interpreter paths out of the distributed runtime.

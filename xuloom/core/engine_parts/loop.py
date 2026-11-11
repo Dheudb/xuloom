@@ -19,6 +19,12 @@ from xuloom.core.tool_execution import restore_tool_activity
 from xuloom.protocols.dsml import ToolProtocolError
 from xuloom.protocols.stream_watch import StreamInterrupted
 
+NOT_CONFIGURED_MESSAGE = (
+    "Model not configured. Python: pass EngineConfig(model=..., model_provider=\"openai\" or \"anthropic\", "
+    "api_key=..., api_base_url=...). CLI (xuloom exec/serve/eval): set OPENAI_API_KEY and OPENAI_MODEL "
+    "(or ANTHROPIC_API_KEY and ANTHROPIC_MODEL), optionally OPENAI_BASE_URL; interactive xuloom: /model. "
+    "Desktop app: Settings -> Model connections.")
+
 # Sentinel returned by loop phases: start the next loop iteration.
 _CONTINUE = object()
 
@@ -779,8 +785,7 @@ class TurnLoopMixin:
             user_input, input_blocks, display_text, selected_skills, completion, event_callback)
 
         if not self.is_configured:
-            return finish_run(self, ("Model not configured. Use /model to set protocol, model name, "
-                "base URL, and API key before sending messages."), 'not_configured'), None, None
+            return finish_run(self, NOT_CONFIGURED_MESSAGE, 'not_configured'), None, None
 
         if resume:
             user_msg = next((message for message in reversed(self.messages) if message.get("role") == "user"

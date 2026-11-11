@@ -64,7 +64,8 @@ Images are delivered visually. Notebook JSON is read as text; discover notebook 
         try:
             import pymupdf
         except ImportError:
-            raise ValueError("PDF reading requires PyMuPDF") from None
+            raise ValueError('PDF reading needs the optional PDF support: pip install "xuloom[pdf]" '
+                             "(PyMuPDF, AGPL-3.0 licensed)") from None
         if mode not in {"auto", "text", "image"}:
             raise ValueError("pdf_mode must be auto, text or image")
         if pages and (offset is not None or limit is not None):

@@ -44,7 +44,6 @@ setup(
         "ddgs>=9.16,<10",
         "gitpython",
         "wcwidth",
-        "pymupdf",
         "Pillow>=10.0",
         "PyYAML>=6.0",
     ],
@@ -59,6 +58,8 @@ setup(
         "secrets": ["cryptography>=41,<47", "SecretStorage>=3.3,<4; sys_platform == 'linux'"],
         "browser": ["playwright>=1.40"],
         "tokenizers": ["tiktoken", "transformers>=4.0"],
+        # PDF reading. PyMuPDF is AGPL-3.0 (or commercial): kept optional so the MIT core stays permissive.
+        "pdf": ["pymupdf"],
         "otel": ["opentelemetry-sdk>=1.20,<2", "opentelemetry-exporter-otlp-proto-http>=1.20,<2"],
     },
 )
