@@ -315,8 +315,8 @@ async function main() {
       .filter({ hasText: "sample-project" })
       .click();
     await page.getByRole("heading", { name: "今天想完成什么？" }).waitFor();
-    await page.getByText("project-review", { exact: true }).waitFor();
     if (await page.getByRole("button", { name: "展开能力面板", exact: true }).count()) await page.getByRole("button", { name: "展开能力面板", exact: true }).click();
+    await page.getByText("project-review", { exact: true }).waitFor();
     await page.locator(".capability-card").filter({ has: page.getByText("project-review", { exact: true }) }).getByRole("button", { name: "查看指令", exact: true }).click();
     await page
       .getByRole("dialog", { name: "技能指令" })
