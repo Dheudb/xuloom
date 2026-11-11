@@ -30,7 +30,7 @@ export default function ChangesPanel({ session, invoke, onOpen }: {
         <button className="import-button" disabled={loading} onClick={() => setRevision(revision + 1)}><RefreshCw size={14} />{loading ? t("读取中…") : t("刷新 Git 变更")}</button>
         {git?.available && (git.files.length ? <FileChanges files={git.files} project={session.project} onOpen={onOpen} compact /> : <p className="muted">{t("工作区没有未提交变更。")}</p>)}
         {git?.truncated && <p className="muted">{t("文件较多，仅显示前 500 项。")}</p>}
-        {git && !git.available && <p className="muted git-unavailable">{tx("{reason}。会话文件变更仍会正常记录。", { reason: git.reason })}</p>}
+        {git && !git.available && <p className="muted git-unavailable">{tx("{reason}。会话文件变更仍会正常记录。", { reason: tServer(git.reason) })}</p>}
       </details>
     </div>
   </>;

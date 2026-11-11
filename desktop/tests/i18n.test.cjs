@@ -66,3 +66,14 @@ test("every tool title (verb x state) has English", async () => {
 test("interface text is wrapped in t()/tx() and every message has English", () => {
   execFileSync(process.execPath, [path.join(__dirname, "../scripts/i18n-codemod.mjs"), "--check"], { stdio: "pipe" });
 });
+
+
+test("Git backend notices are translated by status surfaces, without translating repository data", async () => {
+  const { tServer } = await english();
+  assert.equal(tServer("未安装 Git"), "Git is not installed");
+  assert.equal(tServer("读取 Git 状态超时"), "Reading Git status timed out");
+  for (const [file, expression] of [["GitStatus.tsx", /tServer\(state\.reason\)/], ["ChangesPanel.tsx", /tServer\(git\.reason\)/]]) {
+    const source = require("node:fs").readFileSync(path.join(__dirname, "../src", file), "utf8");
+    assert.match(source, expression, file);
+  }
+});
