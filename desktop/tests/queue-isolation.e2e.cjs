@@ -56,7 +56,9 @@ async function send(text) {
   await page.evaluate(() => { window.queueEvents = []; window.xuloom.onEvent(event => { if (event.type === "subagent_status") window.queueEvents.push(event.agent); }); });
   await send("QUEUE_TEST 启动十个子代理，问你好并汇总所有结果");
   await page.waitForFunction(() => window.queueEvents.filter(w => w.status === "running").length >= 3);
-  await new Promise(resolve => setTimeout(resolve, 300));
+  // Runtime running means the task started; HTTP may arrive later on a busy host.
+  const requestDeadline = Date.now() + 90000;
+  while (started < 3 && Date.now() < requestDeadline) await new Promise(resolve => setTimeout(resolve, 50));
   assert.equal(started, 3); assert.equal(ended, 0);
   const states = await page.evaluate(() => { const map = new Map(); for (const w of window.queueEvents) map.set(w.agent_id, w.status); return [...map.values()]; });
   assert.equal(states.filter(s => s === "queued").length, 7);

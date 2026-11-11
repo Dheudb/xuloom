@@ -63,6 +63,11 @@ async function main(){
   fs.writeFileSync(path.join(root,'test-results/mcp-oauth-fixed-client.png'),Buffer.from(fixedPNG,'base64'));
   await dialog.getByRole('button',{name:'保存配置',exact:true}).click();
   const fixed=dialog.locator('.mcp-card.installed').filter({hasText:'fixed_oauth'});
+  const handoff=new Promise((resolve,reject)=>lines.once('line',line=>{
+    try{assert.deepEqual(JSON.parse(line),{fixed_callback_released:true});resolve();}catch(error){reject(error);}
+  }));
+  service.stdin.write('release-fixed\n');
+  await Promise.race([handoff,new Promise((_,reject)=>setTimeout(()=>reject(Error('Callback handoff timeout')),10000).unref())]);
   await fixed.getByRole('button',{name:'登录',exact:true}).click();await dialog.getByRole('button',{name:'打开授权页面'}).waitFor();
   event=await page.evaluate(()=>window.__ownedOAuth);
   assert.equal(new URL(event.url).searchParams.get('redirect_uri'),address.fixed.redirect_uri);
@@ -84,6 +89,9 @@ async function main(){
   saved=JSON.parse(fs.readFileSync(settingsPath,'utf8'));assert(!('client_secret' in saved.mcpServers.fixed_oauth.auth));
   assert.deepEqual(errors,[]);assert(!diagnostics.includes('Traceback'),diagnostics);
   console.log('PASS: hidden original/source MCP OAuth automatic and fixed-client configuration, encrypted/redacted/preserved/cleared secret, exact callback, real MCP transport, cancel/re-login, logout; no model configuration or calls');
+ }catch(error){
+  if(app){try{const page=(await app.windows())[0];console.error('Owned OAuth UI:',(await page.locator('body').innerText()).slice(-6000));}catch{}}
+  console.error('Owned service diagnostics:',diagnostics.slice(-2000));throw error;
  }finally{
   if(app)await app.close();lines.close();service.stdin.end('stop\n');
   if(service.exitCode===null)await Promise.race([new Promise(resolve=>service.once('exit',resolve)),new Promise(resolve=>setTimeout(()=>{service.kill();resolve();},5000).unref())]);
