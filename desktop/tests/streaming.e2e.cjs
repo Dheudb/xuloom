@@ -84,7 +84,13 @@ async function idle() { await page.waitForFunction(() => !document.querySelector
       const sessions = path.join(data, "history", group, "sessions");
       return fs.existsSync(sessions) ? fs.readdirSync(sessions).filter(f => f.endsWith(".json")).map(f => fs.readFileSync(path.join(sessions, f), "utf8")) : [];
     }).join("\n");
-    assert(serialized.includes('"reasoningChunks": 5')); assert(!serialized.includes("PRIVATE_REASONING"));
+    assert(serialized.includes('"reasoningChunks": 5'));
+    // Compatible thinking APIs require their protocol content on subsequent turns.
+    // Keep it only in the private protocol field, never in visible content or traces.
+    const records = serialized.split(/\n(?=\{)/).filter(Boolean).map(value => JSON.parse(value));
+    assert(records.some(record => record.messages?.some(message => message._openai_reasoning?.content?.includes("PRIVATE_REASONING"))));
+    const publicRecords = JSON.stringify(records, (key, value) => key === "_openai_reasoning" ? undefined : value);
+    assert(!publicRecords.includes("PRIVATE_REASONING"));
     assert.deepEqual(failures, []);
     console.log("PASS: live text, finish marker without EOF, reasoning progress, keepalive stall, dropped stream, bounded header wait, stop and persisted timing/partial output.");
   } finally { if (app) await app.close().catch(() => {}); server.closeAllConnections(); server.close(); }
