@@ -32,9 +32,9 @@ class UltraDecisionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.text, '4'); self.assertTrue(result.ok)
         self.assertEqual(len(self.requests), 1)
         request = self.requests[0]
-        self.assertEqual(request['tool_choice'],'required')
+        self.assertEqual(request['tool_choice'],'auto')
         names = {t['function']['name'] for t in request['tools']}
-        self.assertEqual(names,{'ultra_answer','ultra_prepare'})
+        self.assertEqual(names,{'ultra_prepare'})
         self.assertNotIn('collaboration_decision', names)
         self.assertNotIn('Ultra collaboration decision', json.dumps(request['messages']))
         self.assertNotIn('decision', self.engine.tool_context['collaboration_run'])
@@ -125,14 +125,13 @@ class UltraDecisionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.engine.subagent_registry,[])
         self.assertIn('permission_behavior: deny',json.dumps(self.requests[1]['messages']))
 
-    async def test_missing_assessment_is_repaired_instead_of_becoming_a_final_answer(self):
-        self.fixture(['PREMATURE_ANSWER',('ultra_answer','{"answer":"VALID_SIMPLE_ANSWER"}')])
+    async def test_plain_reply_is_final_without_assessment_repair(self):
+        self.fixture(['VALID_SIMPLE_ANSWER'])
         result=await self.run_task('Hello')
         self.assertTrue(result.ok,result)
         self.assertEqual(result.text,'VALID_SIMPLE_ANSWER')
-        self.assertEqual(len(self.requests),2)
-        self.assertTrue(any(e['type']=='tool_protocol_error' for e in self.events))
-        self.assertNotEqual(self.recorder.record.get('answer'),'PREMATURE_ANSWER')
+        self.assertEqual(len(self.requests),1)
+        self.assertFalse(any(e['type']=='tool_protocol_error' for e in self.events))
 
     async def test_undeclared_initial_work_cannot_bypass_assessment_or_create_side_effects(self):
         self.fixture([('record_tool','{"value":"MUST_NOT_EXECUTE"}'),('ultra_answer','{"answer":"A simple reply"}')])

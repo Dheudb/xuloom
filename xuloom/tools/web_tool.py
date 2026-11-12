@@ -1,4 +1,5 @@
 import re
+import json
 import asyncio
 import httpx
 from bs4 import BeautifulSoup
@@ -55,8 +56,37 @@ async def builtin_search(factory, query, limit, options, abort=None):
                 if abort.is_set(): raise asyncio.CancelledError()
 
 
-def extract_page(text, html):
+def extract_page(text, html, url=""):
     if not html:
+        # Apple's DocC API wraps a short article in a large JSON navigation
+        # graph. Expose the article and referenced links, not thousands of
+        # unrelated reference objects that force the agent to page raw JSON.
+        if httpx.URL(url).host == "developer.apple.com":
+            try:
+                document = json.loads(text)
+            except ValueError:
+                document = None
+            if isinstance(document, dict) and isinstance(document.get("schemaVersion"), dict) and isinstance(document.get("primaryContentSections"), list):
+                references = document.get("references", {})
+                def readable(node):
+                    if isinstance(node, list): return "".join(readable(child) for child in node)
+                    if not isinstance(node, dict): return ""
+                    kind = node.get("type")
+                    if kind == "text": return str(node.get("text", ""))
+                    if kind == "codeVoice": return str(node.get("code", ""))
+                    if kind == "reference":
+                        reference = references.get(node.get("identifier"), {}) if isinstance(references, dict) else {}
+                        title = str(reference.get("title", node.get("identifier", "")))
+                        target = str(reference.get("url", ""))
+                        if target.startswith("/"): target = "https://developer.apple.com" + target
+                        return f"{title} ({target})" if target.startswith(("https://", "http://")) else title
+                    if kind == "codeListing": return "\n" + "\n".join(map(str, node.get("code", []))) + "\n"
+                    if kind == "heading": return str(node.get("text", "")) + "\n"
+                    body = "".join(readable(node[key]) for key in ("inlineContent", "content", "items", "rows", "cells") if key in node)
+                    return body + ("\n\n" if kind in {"paragraph", "orderedList", "unorderedList", "aside"} else "")
+                article = readable(document["primaryContentSections"]).strip()
+                if article:
+                    return article, str(document.get("metadata", {}).get("title", ""))[:300]
         return text, ""
     soup = BeautifulSoup(text, 'lxml')
     title = soup.title.get_text(" ", strip=True)[:300] if soup.title else ""
@@ -169,8 +199,11 @@ Usage notes:
             if callable(options) and options()['profile']['backend'] == 'deepseek':
                 from xuloom.tools.native_search import execute
                 return await execute(self.context, prompt, 1, url=url)
-            async with httpx.AsyncClient(follow_redirects=True, timeout=15.0) as client:
-                async with client.stream("GET", url) as resp:
+            settings = options() if callable(options) else {}
+            from xuloom.core.network import model_http_client, model_network_mode
+            mode = model_network_mode(settings.get("network_mode"))
+            async with model_http_client(network_mode=mode) as client:
+                async with client.stream("GET", url, follow_redirects=True, timeout=15.0) as resp:
                     resp.raise_for_status()
                     media_type = resp.headers.get("content-type", "text/html").split(";", 1)[0].lower()
                     if not (media_type.startswith("text/") or media_type in {"application/xhtml+xml", "application/json", "application/xml"}):
@@ -181,12 +214,12 @@ Usage notes:
                             return build_tool_result(ok=False, is_error=True, content="Webpage exceeds the 5 MB response limit; no partial page was returned as complete.", metadata={"code": "response_too_large", "retryable": False})
                         body.extend(chunk)
                     source = bytes(body).decode(resp.encoding or "utf-8", errors="replace")
-            text, title = await asyncio.to_thread(extract_page, source, media_type in {"text/html", "application/xhtml+xml"})
+            text, title = await asyncio.to_thread(extract_page, source, media_type in {"text/html", "application/xhtml+xml"}, str(resp.url))
 
             result = f"Content from {resp.url}:\n\n{text}"
             if prompt:
                 result += f"\n\n---\nExtraction prompt: {prompt}"
-            return build_tool_result(ok=True, content=result, metadata={"url": str(resp.url), "source_bytes": len(body),
+            return build_tool_result(ok=True, content=result, metadata={"url": str(resp.url), "network_mode": mode, "source_bytes": len(body),
                 "content_chars": len(text), "media_type": media_type, "truncated": False,
                 "sources_in_content": True, "sources": [{"url": str(resp.url), "title": title or str(resp.url), "kind": "page"}]})
 

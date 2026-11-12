@@ -101,10 +101,12 @@ def response_from_record(record: dict):
     if stop not in {"end_turn", "tool_use", "max_tokens"}:
         stop = "tool_use" if calls else "end_turn"
     usage = record.get("usage") or {}
-    return model_response(text=text, tool_calls=calls, stop_reason=stop,
+    response = model_response(text=text, tool_calls=calls, stop_reason=stop,
                           input_tokens=usage.get("input_tokens", 0), output_tokens=usage.get("output_tokens", 0),
                           cache_read_input_tokens=usage.get("cache_read_input_tokens", 0),
                           cache_creation_input_tokens=usage.get("cache_creation_input_tokens", 0))
+    response._openai_reasoning = copy.deepcopy(record.get("_openai_reasoning"))
+    return response
 
 
 def load_cassette(path: Union[str, os.PathLike]) -> List[dict]:

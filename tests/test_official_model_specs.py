@@ -156,9 +156,9 @@ class OfficialResponsesWireTests(unittest.IsolatedAsyncioTestCase):
         def handler(request):
             self.assertEqual(str(request.url), BASE + '/responses')
             body = json.loads(request.content); requests.append(body)
-            self.assertEqual(body['tool_choice'],'required')
+            self.assertEqual(body['tool_choice'],'auto')
             names = {tool['name'] for tool in body['tools']}
-            self.assertEqual(names,{'ultra_answer','ultra_prepare'})
+            self.assertEqual(names,{'ultra_prepare'})
             self.assertNotIn('collaboration_decision',names)
             item = {'type':'function_call','id':'simple_call','call_id':'simple_call','status':'completed',
                 'name':'ultra_answer','arguments':json.dumps({'answer':'NATIVE_ULTRA'})}

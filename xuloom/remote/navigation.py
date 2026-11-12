@@ -46,7 +46,7 @@ def _public(field, key, value):
             if value.get("permissionMode", "ask") not in {"ask", "full"}: raise ValueError("invalid permission")
             machine = value.get("machine")
             if machine is not None and (not isinstance(machine, dict) or any(not isinstance(machine.get(name), str) or not machine[name] for name in ("hostname", "platform", "cwd"))): raise ValueError("invalid machine")
-            item.update(title=value.get("title") or "新会话", host=profile["host"], connection=profile["name"])
+            item.update(title=value.get("title") or "", host=profile["host"], connection=profile["name"])
         elif not re.fullmatch(r"ssh:[0-9a-f]{64}", key): raise ValueError("invalid group")
         elif "name" in value and (not isinstance(value["name"], str) or not value["name"].strip() or len(value["name"]) > 100): raise ValueError("invalid name")
         if field == "remoteProjects" and "name" in value: value["name"].encode("utf-8")

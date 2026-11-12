@@ -132,7 +132,7 @@ async def receive(engine, *, system_prompt, api_messages, tools_schema, turn_cou
     options = dict(model=model_name, instructions=system_prompt, input=inputs(engine, engine._get_messages_after_compact_boundary()), tools=tools,
         stream=True, store=False, max_output_tokens=max_tokens, include=["reasoning.encrypted_content"])
     from xuloom.agents.ultra_execution import required
-    if required(engine): options.update(tool_choice='required', parallel_tool_calls=False)
+    if required(engine): options.update(tool_choice='auto', parallel_tool_calls=False)
     if engine.reasoning_profile:
         from xuloom.core.reasoning import request_options
         if engine.reasoning_profile["adapter"] != "openai": raise ContextLimitError("Responses requires declared OpenAI reasoning controls")

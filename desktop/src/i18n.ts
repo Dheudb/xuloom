@@ -117,6 +117,11 @@ export function displayName(name: string | null | undefined) {
   return name;
 }
 
+/** A conversation title for display: stored titles as written; untitled (or unreadable) ones get the default name. */
+export function sessionTitle(row: { title?: string | null; error?: string | null }): string {
+  return row.title || (row.error ? t("无法读取的会话") : t("新会话"));
+}
+
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 let fragments: RegExp | undefined;
 function fragmentPattern() {

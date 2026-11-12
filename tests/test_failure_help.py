@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock
 import httpx
-from openai import AuthenticationError
+from openai import AuthenticationError, BadRequestError
 from tests import test_tool_recovery as recovery
 from xuloom.core.run_result import failure_help
 from xuloom.core.network import model_error_message
@@ -14,6 +14,17 @@ class FailureHelpTests(unittest.TestCase):
         self.assertEqual(failure_help('approval_required')['category'],'permission')
         self.assertEqual(failure_help('blocked')['category'],'blocked')
         self.assertIn('可能已生效',failure_help('persistence_error')['message'])
+
+    def test_documented_thinking_parameter_errors_are_actionable_without_echoing_body(self):
+        for detail, field in [("Thinking mode does not support this tool_choice", "tool_choice"),
+                              ("The reasoning_content in the thinking mode must be passed back to the API.", "reasoning_content")]:
+            error = BadRequestError(detail + " PRIVATE-KEY", response=httpx.Response(400,
+                request=httpx.Request('POST', 'https://private.invalid')), body={'error': {'message': detail, 'private': 'SECRET'}})
+            message = model_error_message(error)
+            self.assertIn(field, message)
+            self.assertIn('400', message)
+            for private in ['PRIVATE-KEY', 'SECRET', 'private.invalid']:
+                self.assertNotIn(private, message)
 
     def test_provider_error_text_omits_untrusted_response_bodies(self):
         error=AuthenticationError('PRIVATE-RESPONSE-SECRET',response=httpx.Response(401,request=httpx.Request('POST','https://fixture.invalid')),body={'private':'SECRET'})

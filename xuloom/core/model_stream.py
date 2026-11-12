@@ -59,7 +59,9 @@ class ModelStream(EngineState):
                 if tools_schema:
                     create_kwargs["tools"] = tools_schema
                 from xuloom.agents.ultra_execution import required
-                if required(self): create_kwargs.update(tool_choice='required', parallel_tool_calls=False)
+                # Thinking-capable Chat endpoints can reject forced choice. The loop
+                # still validates Ultra assessment before accepting any final answer.
+                if required(self): create_kwargs.update(tool_choice='auto', parallel_tool_calls=False)
                 profile = self.reasoning_profile if model_name == self.primary_model else configured_profile(self.model_provider, model_name, self.api_base_url)
                 if profile is not None:
                     create_kwargs.update(request_options(profile, self.model_provider,
@@ -68,6 +70,7 @@ class ModelStream(EngineState):
                     create_kwargs["reasoning_effort"] = self.reasoning_effort
 
                 text_fragments = []
+                reasoning_fragments = []
                 text_filter = ToolTextFilter()
                 tool_calls: Dict[int, Any] = {}
                 dispatched_indices = set()
@@ -188,6 +191,9 @@ class ModelStream(EngineState):
                     choice = choices[0]
                     delta = getattr(choice, "delta", None)
                     if delta is not None:
+                        reasoning = getattr(delta, "reasoning_content", None)
+                        if isinstance(reasoning, str):
+                            reasoning_fragments.append(reasoning)
                         delta_text = getattr(delta, "content", None)
                         if delta_text:
                             text_fragments.append(delta_text)
@@ -285,10 +291,14 @@ class ModelStream(EngineState):
                     "turn": turn_count,
                     "stop_reason": finish_reason,
                 })
+                from xuloom.core.request_flow import connection_id
                 return SimpleNamespace(
                     stop_reason=finish_reason,
                     content=content_blocks,
                     usage=usage_payload,
+                    _openai_reasoning=({"connection": connection_id(
+                        self.api_base_url or "", self._api_key), "model": model_name, "content": "".join(reasoning_fragments)}
+                        if reasoning_fragments else None),
                 ), tool_entries, False
 
             system_blocks = self._build_cached_system_blocks(system_prompt)

@@ -127,6 +127,12 @@ class DesktopBridge:
                 raise PersistenceError('Supplemental input trace could not be saved')
             event = {**event,'trace':copy.deepcopy(self.recorder.record)}
         if self.recorder and self.recorder.accept(event):
+            if event.get("type") == "subagents_waiting" and self.engine:
+                # Model events reach this consumer through an async queue. The
+                # producer's earlier checkpoint cannot include this projection.
+                if not self.engine.persist_session_state():
+                    from xuloom.core.run_result import PersistenceError
+                    raise PersistenceError("Could not persist the visible subagent waiting state")
             # Deliver the settled trace before turn_finished clears the UI's
             # active response index. Snapshots never enter model messages.
             self.output({"type": "turn_trace", "trace": copy.deepcopy(self.recorder.record)})

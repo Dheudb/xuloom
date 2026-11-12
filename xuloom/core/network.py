@@ -15,6 +15,13 @@ def model_error_message(error):
         return f"模型服务认证或权限失败（HTTP {status}）；请检查 Key、账号权限和 API 地址。已有结果保留。"
     if status == 429:
         return "模型服务限流或额度不足（HTTP 429）；请检查额度与连接限流设置，稍后继续。已有结果保留。"
+    if status == 400:
+        # Classify documented errors, but never echo untrusted bodies or URLs.
+        detail = str(error).lower()
+        if "tool_choice" in detail and "thinking" in detail and "support" in detail:
+            return "模型服务拒绝请求（HTTP 400）：思考模式不支持当前 tool_choice 强制工具设置。请更新程序后继续；已有结果保留。"
+        if "reasoning_content" in detail and "pass" in detail:
+            return "模型服务拒绝请求（HTTP 400）：接口要求回传 reasoning_content，当前历史可能缺少协议记录。请更新程序；旧记录无法补回时可新建会话，已有结果保留。"
     if status in (400, 404, 422):
         return f"模型服务拒绝请求（HTTP {status}）；请核对模型名、接口协议及支持的参数。已有结果保留。"
     if isinstance(status, int) and status >= 500:

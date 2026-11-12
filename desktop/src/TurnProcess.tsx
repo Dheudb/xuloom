@@ -95,7 +95,7 @@ export default function TurnProcess({ trace, sessionId }: { trace: TurnTrace; se
         ? <RetryStatus key={index} notice={step.notice} turnStatus={trace.status} />
         : step.kind === "text"
         ? step.protocolError ? <RetryStatus key={index} notice={{ status: "completed", message: step.text, ...step.protocolError }} turnStatus={trace.status} />
-          : <div className="turn-commentary markdown" key={index}><Markdown text={step.text} sessionId={sessionId} /></div>
+          : <div className="turn-commentary markdown" key={index} data-provisional={step.provisional || undefined}>{step.provisional && <small className="turn-provisional-label">{t("阶段性内容，最终结果将在子代理结束后汇总")}</small>}<Markdown text={step.text} sessionId={sessionId} /></div>
         : step.kind === "compaction" ? <CompactStatus key={step.compaction.id} notice={step.compaction} turnStatus={trace.status} />
         : <ProcessTool tool={step.tool} sessionId={sessionId} key={step.tool.id || index} />)}
       {commentary && <div className="turn-commentary markdown"><Markdown text={commentary} sessionId={sessionId} /></div>}

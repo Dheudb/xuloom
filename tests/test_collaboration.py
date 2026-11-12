@@ -362,9 +362,9 @@ class ConversationPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(system.count("# Collaboration: ultra"), 1)
         self.assertGreater(system.index("# Collaboration: ultra"), system.index("# Tool-Specific Rules"))
         names = {tool['function']['name'] for tool in request['tools']}
-        self.assertEqual(names,{'ultra_answer','ultra_prepare'})
+        self.assertEqual(names,{'ultra_prepare'})
         self.assertNotIn('collaboration_decision', names)
-        self.assertEqual(request['tool_choice'],'required')
+        self.assertEqual(request['tool_choice'],'auto')
         self.assertNotIn('decision', self.engine.tool_context['collaboration_run'])
         self.assertEqual(len(self.requests), 1)
         self.assertEqual(self.engine.subagent_registry, [])

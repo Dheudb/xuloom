@@ -166,3 +166,9 @@ test('older SSH hosts without plugins.rpc keep built-in methods and refuse plugi
  assert.deepEqual((await f.work.handle('plugins.rpc',{session:value.id})).value,{methods:[]});
  assert.deepEqual((await f.work.handle('files.read',{session:value.id,path:'a.txt'})).value,{started:true});
 });
+
+test('remote user titles matching the former default are never erased',async()=>{
+ const f=fixture(); const {value}=await f.work.handle('remote.open',{id:'lab'});
+ const saved=f.saved(); saved.remoteChats[value.id].title='新会话'; f.setSaved(saved);
+ assert.equal(f.work.projects()[0].sessions[0].title,'新会话');
+});

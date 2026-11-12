@@ -2,6 +2,8 @@
 // placeholder filled with a value that is never translated. English may use plural forms:
 // "{count, plural, one {# file} other {# files}}". `npm run i18n:check` lists messages without an entry.
 export const english: Record<string, string> = {
+  "模型服务拒绝请求（HTTP 400）：思考模式不支持当前 tool_choice 强制工具设置。请更新程序后继续；已有结果保留。": "Model service rejected the request (HTTP 400): thinking mode does not support the forced tool_choice setting. Update the app before continuing; existing results are kept.",
+  "模型服务拒绝请求（HTTP 400）：接口要求回传 reasoning_content，当前历史可能缺少协议记录。请更新程序；旧记录无法补回时可新建会话，已有结果保留。": "Model service rejected the request (HTTP 400): reasoning_content must be passed back and this history may lack the required protocol records. Update the app; if older records cannot be recovered, start a new conversation. Existing results are kept.",
   "准备中": "Preparing",
   "执行中": "Running",
   "等待批准": "Awaiting approval",
@@ -1316,6 +1318,8 @@ export const english: Record<string, string> = {
   "模型正在输出": "Model is writing",
   "正在结束接收": "Finishing",
   "等待子代理返回": "Waiting for subagents",
+  "已读取 {length} 个模型，识别 {count} 个上下文窗口；已有设置保留。": "Read {length} models and detected {count} context windows; existing settings were preserved.",
+  "阶段性内容，最终结果将在子代理结束后汇总": "Preliminary findings; final results will be synthesized after the subagents finish",
   "正在处理工具结果": "Processing tool results",
   "{value}{value2}{seconds}秒": "{value}{value2}{seconds} s",
   "正在执行": "Running",

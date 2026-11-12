@@ -292,6 +292,25 @@ class AgentLifecycle:
         ids = {r["agent_id"] for r in rows}
         return json.dumps({"agents": [r for r in self._inventory() if r["agent_id"] in ids], "resumed": len(pending)}, ensure_ascii=False)
 
+    async def _request_worker_summaries(self, identities):
+        """One safe-boundary settlement request per native worker invocation."""
+        for identity in identities:
+            row = self._worker(identity)
+            invocation = row.get("turn", 1)
+            if (row.get("backend", "native") != "native" or row.get("executor", "local") != "local"
+                    or row.get("settlement_requested_turn") == invocation):
+                continue
+            pending = list(row.get("pending_messages", []))
+            if len(pending) >= 100:
+                continue  # Never displace user instructions to make room.
+            pending.append({"id": str(uuid.uuid4()), "kind": "settle", "at": int(time.time() * 1000),
+                "text": "The parent has reached synthesis and is waiting for this assignment. "
+                        "Finish the current operation safely, then return the findings and source references you have, "
+                        "including unresolved gaps or blockers. Do not expand the scope into an exhaustive new investigation. "
+                        "If more work is essential, explain specifically what remains."})
+            await self._write_subagent_registry_record({"agent_id": identity, "pending_messages": pending,
+                "pending_message_count": len(pending), "settlement_requested_turn": invocation})
+
     def _mailbox(self, identity):
         return copy.deepcopy(self._worker(identity).get("pending_messages", []))
 

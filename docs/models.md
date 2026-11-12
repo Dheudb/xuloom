@@ -94,7 +94,14 @@ CLI 启动时，已设置的环境变量优先于从配置文件注入的值。�
 或设置对应的 `XULOOM_STREAM_FIRST_RESPONSE_TIMEOUT_SEC`、`XULOOM_STREAM_IDLE_TIMEOUT_SEC`、`XULOOM_STREAM_END_GRACE_SEC`；
 数值需大于 0、最多 3600 秒。工具执行和子代理等待采用各自的机制。
 运行时显示等待接口、推理和接收阶段，执行时长旁的提示可查看最近请求的首字耗时；
-历史保存接收时间与数量，不保存推理原文。
+历史保存接收时间与数量，不把推理原文作为回答或活动日志展示。
+对于会返回 `reasoning_content` 的 OpenAI 兼容接口，完整字段保存在本地会话的内部协议记录中，
+在后续工具请求中按原地址、Key 的哈希身份与模型回传；不会带到其他连接或模型。
+备份、共享完整会话或录像时，这些文件可能包含供应商要求保留的原始协议内容。
+
+DeepSeek 的 Chat 思考模式不接受 `tool_choice=required`；Ultra 使用 `auto`，由现有循环检查协作评估和等待结果。
+接口支持兼容协议不代表支持所有可选参数，不通过关闭思考绕过限制。
+旧程序已经丢失的协议字段不能还原；若旧会话仍提示缺少 `reasoning_content`，保留原记录并从新会话继续。
 
 ## 直连与代理
 
@@ -114,3 +121,12 @@ OpenAI Chat 尚未接入原生文档输入；PDF 仍可本地提取文本。上�
 
 自定义子代理可以选择模型 ID，连接协议和服务地址沿用父引擎，不能据此任意跨供应商切换。
 本地模型的联网搜索由 Xuloom 的独立工具或 MCP 完成，仍要求推理接口正确输出工具调用。
+
+
+## 上下文窗口自动识别
+
+窗口是每个 API 连接下每个模型的设置，不是 API Key 的全局属性。优先使用已填写的窗口；没有显式值时，官方连接使用已核对的官方规格，已知开源模型使用发布者的原生窗口，其他模型保守回退 65,536 tokens。不会自动把可通过 RoPE/YaRN 扩展的上限当作已启用容量，也不从模型名称中的参数规模猜窗口。
+
+设置中的“从 API 获取模型”复用 GET /models，同时识别 context_window、context_length、max_model_len 等明确字段（也支持 limits、top_provider、architecture、text_config 下的这些字段）。多个有效声明冲突时取较小值；最大输出和仅输入上限不冒充总窗口。只补充空窗口，已有手动值保留，点击保存后才写入配置。不后台请求模型、不消耗生成 Token，不改变思考或 Chat/Responses 协议。
+
+2026-11-12 核对的发布规格包括：[OpenAI GPT-6.1 Sol](https://developers.openai.com/api/docs/models/gpt-6.1-sol) 等已配置 GPT-6 系列（1,050,000），[DeepSeek](https://api-docs.deepseek.com/quick_start/pricing/)（接口明确返回 1,048,576），[Qwen3.6-35B-A3B](https://huggingface.co/Qwen/Qwen3.6-35B-A3B)（262,144 原生），[Agents-A1](https://huggingface.co/InternScience/Agents-A1/blob/main/config.json)（262,144），[Intern-S2-Preview-397B](https://huggingface.co/internlm/Intern-S2-Preview-397B/blob/main/config.json)（262,144），[Intern-S1](https://huggingface.co/internlm/Intern-S1/blob/main/config.json)（65,536），[GLM-5.2](https://huggingface.co/zai-org/GLM-5.2) / [GLM-5.3](https://huggingface.co/zai-org/GLM-5.3)（1,048,576），[Kimi-K2.6](https://huggingface.co/moonshotai/Kimi-K2.6)（262,144），[MiniMax-M3](https://huggingface.co/MiniMaxAI/MiniMax-M3)（1,048,576）。发布规格是未声明服务端限制时的名义默认，服务端可能部署更短窗口；可随时按实际部署调整。私人微调模型只在用户自己的配置中填写基模对应窗口，不把私人别名加入公共代码。

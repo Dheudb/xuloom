@@ -28,6 +28,7 @@ class VCRReplayResponse:
     def __init__(self, payload):
         payload = payload or {}
         self.stop_reason = payload.get("stop_reason")
+        self._openai_reasoning = copy.deepcopy(payload.get("_openai_reasoning"))
         self.content = [VCRReplayBlock(item) for item in payload.get("content", []) or []]
         self.usage = VCRReplayUsage(payload.get("usage", {}) or {})
 

@@ -99,3 +99,14 @@ def request_options(profile, provider, *, effort_override=None, max_tokens=None)
     if extra:
         options["extra_body"] = extra
     return copy.deepcopy(options)
+
+
+def transport_reasoning(engine, value):
+    """Provider-returned protocol state; never replay to another route or model."""
+    if not isinstance(value, dict) or not isinstance(value.get("content"), str) or getattr(engine, "model_provider", None) != "openai":
+        return None
+    from xuloom.core.request_flow import connection_id
+    model = engine.tool_context.get("request_model", engine.primary_model)
+    if value.get("model") != model or value.get("connection") != connection_id(engine.api_base_url or "", engine._api_key):
+        return None
+    return {key: value[key] for key in ("connection", "model", "content")}

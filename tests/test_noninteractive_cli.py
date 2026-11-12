@@ -50,7 +50,7 @@ class CliTests(unittest.TestCase):
                 if owner.mode == "hold": owner.finish_request.wait(25)
                 has_tool_result = body["messages"][-1]["role"] == "tool"
                 delta, finish = {"content": "CLI_RESULT_你好"}, "stop"
-                if body.get('tool_choice') == 'required' and any(t.get('function',{}).get('name')=='ultra_answer' for t in body.get('tools',[])):
+                if body.get('tool_choice') == 'auto' and any(t.get('function',{}).get('name')=='ultra_answer' for t in body.get('tools',[])):
                     delta,finish={'tool_calls':[{'index':0,'id':'ultra-simple','type':'function','function':{'name':'ultra_answer','arguments':json.dumps({'answer':'CLI_RESULT_你好'})}}]},'tool_calls'
                 if owner.mode == 'native-search' and len(owner.requests) <= 2:
                     name = 'tool_search_tool' if len(owner.requests) == 1 else 'web_search_tool'
@@ -242,8 +242,8 @@ class CliTests(unittest.TestCase):
         first, _, result = self.cli("exec", "Hello", "--collaboration", "ultra")
         self.assertEqual(first.returncode, 0, first.stderr)
         self.assertEqual(len(self.requests), 1)
-        self.assertEqual({'ultra_answer','ultra_prepare'},{t['function']['name'] for t in self.requests[0]['tools']})
-        self.assertEqual(self.requests[0]['tool_choice'],'required')
+        self.assertEqual({'ultra_prepare'},{t['function']['name'] for t in self.requests[0]['tools']})
+        self.assertEqual(self.requests[0]['tool_choice'],'auto')
         self.assertEqual(result["text"], "CLI_RESULT_你好")
         self.assertIn("# Collaboration: ultra", json.dumps(self.requests[-1]))
         sid = result["session_id"]

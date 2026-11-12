@@ -50,6 +50,9 @@ async function launch() {
     await page.getByRole("textbox", { name: "任务输入" }).fill("Launch and summarize three workers"); await page.getByRole("button", { name: "发送任务", exact: true }).click();
     await Promise.race([allArrived, new Promise((_, reject) => setTimeout(() => reject(new Error("Workers did not all arrive")), 30000))]);
     await page.getByText("等待 3 个子代理返回结果，全部结束后再汇总。", { exact: true }).waitFor();
+    await page.locator('.turn-provisional-label').waitFor();
+    assert((await page.locator('.turn-process[data-turn-status="running"] > summary').innerText()).includes("等待子代理返回"));
+    assert.equal(await page.locator('.message.assistant > .markdown').filter({ hasText: "PREMATURE_FINAL" }).count(), 0);
     assert.equal(mainRequests, 2); assert.equal(await page.locator(".send-button.stop").count(), 1);
     assert.equal(await page.locator('.turn-process[data-turn-status="completed"]').count(), 0);
     reply(childResponses[0], "OUTPUT_FIRST");

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Server, Plus } from "lucide-react";
 import RemoteReferences, { type ReferenceAction } from "./RemoteReferences";
-import { displayName, t, tServer } from "./i18n";
+import { sessionTitle, t, tServer } from "./i18n";
 
 type Profile = { id: string; name: string; host: string; port: number | null; cwd: string; python: string; platform: "posix" | "windows"; ssh_config: string };
 const empty = (): Profile => ({ id: "", name: "", host: "", port: null, cwd: "", python: "python3", platform: "posix", ssh_config: "" });
@@ -24,7 +24,7 @@ export default function RemoteSettings({ open, navigationAction, configurationOn
         {!configurationOnly && <button disabled={busy} onClick={() => void action(() => open(row.id))}>{t("新建远程会话")}</button>}
         {!configurationOnly && <button disabled={busy} onClick={() => void action(async () => { const value = await window.xuloom.invoke("remote.history", { id: row.id }); setHistory(previous => ({ ...previous, [row.id]: value })); })}>{t("查看远端会话")}</button>}
         <button disabled={busy} onClick={() => void action(async () => { await window.xuloom.invoke("remote.remove", { id: row.id }); await refresh(); if (form.id === row.id) setEditing(false); setStatus(t("SSH 连接配置已删除；远端文件与历史未删除")); })}>{t("删除连接配置")}</button></div>
-      {history[row.id] && <div className="remote-history">{history[row.id].length ? history[row.id].map(chat => <button disabled={busy} key={chat.id} onClick={() => void action(() => open(row.id, chat.id))}>{displayName(chat.title) || t("新会话")}</button>) : <p className="fine-print">{t("此远端目录还没有保存的会话。")}</p>}</div>}
+      {history[row.id] && <div className="remote-history">{history[row.id].length ? history[row.id].map(chat => <button disabled={busy} key={chat.id} onClick={() => void action(() => open(row.id, chat.id))}>{sessionTitle(chat)}</button>) : <p className="fine-print">{t("此远端目录还没有保存的会话。")}</p>}</div>}
     </section>)}
     {editing && <form className="extension-form" onSubmit={event => { event.preventDefault(); void action(async () => { await window.xuloom.invoke("remote.save", form); await refresh(); setEditing(false); setStatus(t("SSH 连接已保存；CLI 可使用相同连接 ID")); }); }}><fieldset disabled={busy}>
       <label>{t("连接 ID")}<input aria-label={t("SSH 连接 ID")} required maxLength={64} pattern="[a-zA-Z0-9][a-zA-Z0-9_-]*" value={form.id} onChange={e => setForm({ ...form, id: e.target.value })} /></label>

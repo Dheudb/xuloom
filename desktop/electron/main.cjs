@@ -584,7 +584,7 @@ async function invoke(method, params) {
       throw new Error("请先在设置的已归档会话页面恢复项目");
     if (params.resumeId) return selectRow(catalog.find(sessionKey(source.project, params.resumeId)));
     const empty = method !== "session.new" && scope !== "standalone" && catalog.list(source.project).find((row) => row.scope === scope && !row.archived && !row.error && !row.draft && !row.draftAttachments.length &&
-      row.title === "新会话" && !running(sessions.get(row.id) || { busy: false, workers: new Map() }) &&
+      !row.title && !running(sessions.get(row.id) || { busy: false, workers: new Map() }) &&
       JSON.parse(fs.readFileSync(catalog.file(row.project, row.sessionId), "utf8")).messages?.length === 0);
     return selectRow(empty || (scope === "standalone" ? catalog.createStandalone(source.project) : catalog.create(source.project)));
   }
@@ -798,7 +798,7 @@ async function invoke(method, params) {
     try {
       if (method === "prompt") attachments.list(row, params.attachments || []);
       const result = await source.transport.request(method, payload);
-      if (method === "prompt") await updateRow(row, { draft: "", draftEditId: "", draftAttachments: [], ...(row.title === "新会话" ? { title: String(params.text || "").split("\n")[0].slice(0, 80) || "附件会话" } : {}) });
+      if (method === "prompt") await updateRow(row, { draft: "", draftEditId: "", draftAttachments: [], ...(!row.title && String(params.text || "").trim() ? { title: String(params.text).split("\n")[0].slice(0, 80) } : {}) });
       broadcastCatalog();
       return result;
     }

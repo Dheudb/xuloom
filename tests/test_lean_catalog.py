@@ -35,7 +35,8 @@ class LeanCatalogTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_ultra_plan_and_custom_tools_remain_visible(self):
         self.engine.set_collaboration_mode('ultra', persist=False)
-        self.assertEqual(self.names(),{'ultra_answer','ultra_prepare'})
+        self.assertEqual(self.names(),{'ultra_prepare'})
+        self.assertIn('ultra_answer', self.engine.available_tools, 'Saved legacy calls remain executable, but are not advertised for greetings')
         self.engine.tool_context['collaboration_run']['assessment']={'kind':'work'}
         self.assertIn('spawn_agent', self.names())
         self.assertTrue({'web_search_tool', 'web_fetch_tool'} <= self.names())

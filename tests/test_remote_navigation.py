@@ -136,3 +136,9 @@ class RemoteNavigationTests(unittest.TestCase):
             result = navigation.forget(row["id"], row["version"], confirm=True)
             backup = json.loads(Path(result["backup"]).read_bytes()); self.assertEqual(backup["value"], before["remoteChats"][backup["key"]])
         self.assertEqual(json.loads(self.path.read_bytes()), {"remoteChats": {}})
+
+    def test_explicit_title_matching_old_default_stays_verbatim(self):
+        self.row["title"] = "新会话"
+        atomic_json(self.path, self.before)
+        selected = next(row for row in navigation.references() if row["valid"])
+        self.assertEqual(selected["title"], "新会话")

@@ -77,3 +77,9 @@ test("Git backend notices are translated by status surfaces, without translating
     assert.match(source, expression, file);
   }
 });
+
+test("untitled labels localize but explicit default-like titles stay verbatim", async () => {
+  const { sessionTitle } = await english();
+  assert.equal(sessionTitle({ title: "" }), "New conversation");
+  assert.equal(sessionTitle({ title: "新会话" }), "新会话");
+});

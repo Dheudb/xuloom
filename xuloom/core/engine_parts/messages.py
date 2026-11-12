@@ -4,6 +4,7 @@ import copy
 import json
 from types import SimpleNamespace
 from xuloom.core.engine_state import EngineState
+from xuloom.core.reasoning import transport_reasoning
 
 
 class MessageNormalizationMixin(EngineState):
@@ -98,6 +99,7 @@ class MessageNormalizationMixin(EngineState):
                         "role": "assistant",
                         "content": "".join(text_parts) if text_parts else None,
                         **({"tool_calls": tool_calls} if tool_calls else {}),
+                        **({"reasoning_content": msg["_openai_reasoning"]["content"]} if "_openai_reasoning" in msg else {}),
                     })
                 continue
 
@@ -343,6 +345,7 @@ class MessageNormalizationMixin(EngineState):
             normalized_messages.append({
                 "role": role,
                 "content": normalized_content,
+                **({"_openai_reasoning": state} if (state := transport_reasoning(self, msg.get("_openai_reasoning"))) is not None else {}),
             })
 
         normalized_messages = self._filter_incomplete_tool_messages_for_api(normalized_messages)
@@ -353,7 +356,8 @@ class MessageNormalizationMixin(EngineState):
             if not collapsed:
                 collapsed.append(msg)
                 continue
-            if collapsed[-1]["role"] == msg["role"]:
+            if (collapsed[-1]["role"] == msg["role"]
+                    and not (msg["role"] == "assistant" and ("_openai_reasoning" in msg or "_openai_reasoning" in collapsed[-1]))):
                 collapsed[-1]["content"] = self._merge_adjacent_text_blocks(
                     collapsed[-1]["content"] + msg["content"]
                 )

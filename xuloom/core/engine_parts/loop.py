@@ -11,7 +11,6 @@ from xuloom.core.reasoning import configured_profile
 from xuloom.core.run_result import PersistenceError, RunResult, finish_run
 from xuloom.core.session_lock import SessionBusyError, SessionConflictError
 from xuloom.core.tool_execution import restore_tool_activity
-from xuloom.protocols.dsml import ToolProtocolError
 from xuloom.core.engine_state import EngineState
 
 NOT_CONFIGURED_MESSAGE = (
@@ -350,10 +349,6 @@ class TurnLoopMixin(EngineState):
                 })
 
                 content_as_dicts = [self._block_to_dict(b) for b in response.content]
-                from xuloom.agents.ultra_execution import required as ultra_required
-                if ultra_required(self) and response.stop_reason != 'tool_use':
-                    raise ToolProtocolError('Ultra requires ultra_answer for a simple task or ultra_prepare for substantive work before a final response.',
-                        code='ultra_assessment_missing', raw_text='\n'.join(b.get('text','') for b in content_as_dicts if b.get('type')=='text'))
                 content_as_dicts = [b for b in content_as_dicts if b is not None]
                 assistant_message = create_assistant_message(
                     content_as_dicts,
@@ -362,6 +357,8 @@ class TurnLoopMixin(EngineState):
                 )
                 if getattr(response, "responses_output", None):
                     assistant_message["_responses_output"] = response.responses_output
+                if getattr(response, "_openai_reasoning", None) is not None:
+                    assistant_message["_openai_reasoning"] = copy.deepcopy(response._openai_reasoning)
                 self.messages.append(assistant_message)
                 self._sync_message_context()
                 # Checkpointing memory auto-flush
@@ -559,6 +556,7 @@ class TurnLoopMixin(EngineState):
         """Assemble system prompt, API messages and thinking config for one model request."""
         self._flush_hook_context()
         self._inject_turn_attachments(turn_count)
+        self.tool_context["request_model"] = loop_state["active_model"]
         # Archive oversized results before request assembly.
         from xuloom.agents import ultra_decision
         boundary_messages = ultra_decision.request_messages(self, self._get_messages_after_compact_boundary())
@@ -640,6 +638,11 @@ class TurnLoopMixin(EngineState):
         ultra_decision.receipts_saved(self, tool_results)
         self._flush_hook_context()
         self._sync_message_context()
+        if not any(item.get("_input_error") for item in tool_results):
+            from xuloom.agents.progress import observe
+            stalled = await observe(self, tool_results, loop_state, turn=turn_count, event_callback=event_callback)
+            if stalled is not None:
+                return stalled
         if any(item.get("_input_error") for item in tool_results):
             counters["input_failures"] += 1
             input_failures = counters["input_failures"]
@@ -671,6 +674,8 @@ class TurnLoopMixin(EngineState):
             content_as_dicts = [{'type':'text','text':assessment['answer']}]
             response.stop_reason = 'end_turn'
             assistant_message = create_assistant_message(content_as_dicts, model=loop_state['active_model'], stop_reason='end_turn')
+            if getattr(response, '_openai_reasoning', None) is not None:
+                assistant_message['_openai_reasoning'] = copy.deepcopy(response._openai_reasoning)
             self.messages.append(assistant_message)
             self._sync_message_context()
             await self._emit_stream_event(event_callback, {'type':'message_start','turn':turn_count})
@@ -835,7 +840,14 @@ class TurnLoopMixin(EngineState):
             await self.memory_extractor.maybe_extract(self.messages)
         self.persist_session_state()
         mailbox = self.tool_context.get("delegated_mailbox")
-        if self.user_inbox or mailbox and mailbox():
+        pending = mailbox() if mailbox else []
+        settled = {m["id"] for m in pending if m.get("kind") == "settle"}
+        if settled:
+            # This already-validated final result satisfies a settlement nudge.
+            # A real parent/user instruction still requires another turn.
+            self.tool_context["ack_delegated_mailbox"](settled)
+            pending = [m for m in pending if m["id"] not in settled]
+        if self.user_inbox or pending:
             # A message accepted while the model was streaming is
             # still part of this assignment, not a completed reply.
             return _CONTINUE

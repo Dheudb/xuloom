@@ -276,6 +276,7 @@ async def discover_models(cfg, params):
     parsed = urlsplit(base)
     url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path.rstrip("/") + "/models", parsed.query, ""))
     names = []
+    contexts = {}
     mode = params.get("networkMode", (previous or {}).get("network_mode", "direct"))
     try:
         async with httpx.AsyncClient(trust_env=mode == "system", timeout=30, follow_redirects=False) as client:
@@ -290,6 +291,13 @@ async def discover_models(cfg, params):
                     raise ValueError("此服务未返回标准模型列表，请手动填写模型 ID")
                 names.extend(row["id"] for row in rows if isinstance(row, dict) and isinstance(row.get("id"), str)
                              and row.get("type", "chat") not in {"embedding", "embeddings", "rerank", "image", "audio"})
+                from xuloom.core.model_specs import metadata_window
+                for row in rows:
+                    if not isinstance(row, dict) or row.get('id') not in names: continue
+                    window = metadata_window(row)
+                    if window:
+                        previous_window = contexts.get(row['id'], {}).get('window', window)
+                        contexts[row['id']] = {'window': min(previous_window, window), 'reserve': 0, 'keepRecent': 0, 'backend': 'summary'}
                 if provider != "anthropic" or not payload.get("has_more"):
                     break
                 next_id = payload.get("last_id")
@@ -302,4 +310,4 @@ async def discover_models(cfg, params):
         raise ValueError("无法连接模型列表接口，请检查连接方式和 API 地址；也可以手动填写模型 ID") from None
     except json.JSONDecodeError:
         raise ValueError("此服务未返回 JSON 模型列表，请手动填写模型 ID") from None
-    return {"models": model_ids(names)}
+    return {"models": model_ids(names), "modelContext": contexts}

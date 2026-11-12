@@ -130,9 +130,9 @@ async function choose(mode) {
     assert(system.includes("continue the main work yourself"));
     assert(!JSON.stringify(requests[0].messages).includes("run_in_background=false when the current answer requires"));
     const names = requests[0].tools.map(tool=>tool.function.name);
-    assert.deepEqual([...names].sort(),['ultra_answer','ultra_prepare']);
+    assert.deepEqual([...names].sort(),['ultra_prepare']);
     assert(!names.includes('collaboration_decision'));
-    assert.equal(requests[0].tool_choice, 'required', 'Ultra requires an explicit native assessment');
+    assert.equal(requests[0].tool_choice, 'auto', 'Ultra validates assessment in the loop without forcing unsupported thinking parameters');
     assert(!system.includes('# Ultra collaboration decision (this request only)'));
     const roles = requests[0].tools.find(tool=>tool.function.name==='ultra_prepare').function.parameters.$defs.Assignment.properties.subagent_type.anyOf.find(option=>option.enum).enum;
     for (const role of ["explore", "general-purpose", "plan", "verification", "software-engineer"]) assert(roles.includes(role));

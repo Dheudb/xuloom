@@ -38,7 +38,7 @@ export function SettingsDialog({
   saveDirectory: (value: string) => Promise<string>;
   catalog: SessionCatalog;
   workspaceAction: (method: string, params: Record<string, unknown>) => Promise<void>;
-  discoverModels: (value: Record<string, unknown>) => Promise<{ models: string[] }>;
+  discoverModels: (value: Record<string, unknown>) => Promise<{ models: string[]; modelContext?: ModelConfig["modelContext"] }>;
   deleteConnection: (connectionId: string) => Promise<ModelConfig>;
   extensions?: { busy: boolean; invoke: (method: string, params?: Record<string, unknown>) => Promise<any>; changed: (value: Capabilities) => void };
   openMcp: () => void;
@@ -256,8 +256,14 @@ export function SettingsDialog({
               const value = await discoverModels(form);
               const models = [...new Set([...modelsText.split(/[\n,，]/).map((name) => name.trim()).filter(Boolean), ...value.models])];
               setModelsText(models.join("\n"));
-              if (!form.model && models.length) setForm((previous) => ({ ...previous, model: models[0] }));
-              setDiscoveryStatus(t("已读取 {length} 个模型。", { length: value.models.length }));
+              setForm((previous) => {
+                const modelContext = { ...previous.modelContext };
+                for (const [name, context] of Object.entries(value.modelContext || {})) {
+                  if (!modelContext[name]?.window) modelContext[name] = { ...context, ...modelContext[name], window: context.window };
+                }
+                return { ...previous, model: previous.model || models[0] || "", modelContext };
+              });
+              setDiscoveryStatus(t("已读取 {length} 个模型，识别 {count} 个上下文窗口；已有设置保留。", { length: value.models.length, count: Object.keys(value.modelContext || {}).length }));
             } catch (e) { setError(String(e)); } finally { setDiscovering(false); }
           }}>{discovering ? t("正在获取…") : t("从 API 获取模型")}</button>
           {discoveryStatus && <span role="status">{discoveryStatus}</span>}</div>

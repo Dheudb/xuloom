@@ -339,6 +339,11 @@ class ToolOrchestrationMixin(EngineState):
         pending = active()
         waited = bool(pending)
         if pending:
+            registered = {row["agent_id"] for row in self.subagent_registry}
+            from xuloom.agents.agent_tool import AgentTool
+            agent_tool = AgentTool()
+            agent_tool.context = self.tool_context
+            await agent_tool._request_worker_summaries([identity for identity in pending if identity in registered])
             stopped = asyncio.create_task(self.abort_event.wait())
             input_ready = asyncio.create_task(self.user_input_event.wait())
             try:
@@ -349,6 +354,10 @@ class ToolOrchestrationMixin(EngineState):
                         raise AbortRequestedError("Abort requested while waiting for subagents.")
                     await self._emit_stream_event(event_callback, {"type": "subagents_waiting", "count": len(pending),
                         "agent_ids": list(pending), "message": f"等待 {len(pending)} 个子代理返回结果，全部结束后再汇总。"})
+                    # The recorder consumes the event before checkpointing.
+                    # A snapshot/restart must see waiting, not model-completed.
+                    if not self.persist_session_state():
+                        raise PersistenceError("Could not persist the subagent waiting checkpoint")
                     await asyncio.wait([*pending.values(), stopped, input_ready], return_when=asyncio.FIRST_COMPLETED)
                     if self.abort_event.is_set():
                         raise AbortRequestedError("Abort requested while waiting for subagents.")

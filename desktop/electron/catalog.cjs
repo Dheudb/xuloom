@@ -75,14 +75,16 @@ class SessionCatalog {
           const item = meta[sessionId] || {};
           return [{ id: sessionKey(project, sessionId), sessionId, project,
             scope: item.scope === "standalone" ? "standalone" : "project",
-            title: item.title || text.split("\n")[0].slice(0, 80) || "新会话",
+            // No stored title and no first message: untitled. The renderer shows the default name in the
+            // interface language; a stored title is always the user's (or derived) and shown as written.
+            title: item.title || text.split("\n")[0].slice(0, 80) || "",
             updated: stat.mtimeMs, created: item.created || stat.birthtimeMs || stat.mtimeMs,
             pinned: !!item.pinned, archived: !!item.archived, draft: item.draft || "", draftEditId: item.draftEditId || "", draftAttachments: item.draftAttachments || [], permissionMode: item.permissionMode === "full" ? "full" : "ask" }];
         } catch (error) {
           // Keep an unreadable record visible and deletable instead of hiding it.
           return [{ id: sessionKey(project, sessionId), sessionId, project,
             scope: meta[sessionId]?.scope === "standalone" ? "standalone" : "project",
-            title: meta[sessionId]?.title || "无法读取的会话", updated: 0, created: 0,
+            title: meta[sessionId]?.title || "", updated: 0, created: 0,
             pinned: !!meta[sessionId]?.pinned, archived: !!meta[sessionId]?.archived, permissionMode: meta[sessionId]?.permissionMode === "full" ? "full" : "ask",
             error: error.message }];
         }
@@ -231,7 +233,7 @@ class SessionCatalog {
       settings.standaloneDirectories = [...new Set([...(settings.standaloneDirectories || []), target])];
       this.writeSettings(settings, before);
     }
-    return { action: "fork", project: row.project, session_id: row.sessionId, target, new_id: identity, scope: row.scope, title: row.title + "（副本）" };
+    return { action: "fork", project: row.project, session_id: row.sessionId, target, new_id: identity, scope: row.scope, title: row.title ? row.title + "（副本）" : "" };
   }
   delete(row) {
     mutateSync(this, { action: "delete", sessions: [{ project: row.project, session_id: row.sessionId }] });

@@ -40,6 +40,8 @@ function remoteWorkspaces(context) {
     return ["remoteChats", "remoteProjects"].reduce((count, field) => count + (!(field in value) ? 0 : !object(value[field]) ? 1 :
       Object.entries(value[field]).filter(([id, row]) => !(field === "remoteChats" ? validRow(id, row) : validGroup(id, row))).length), 0);
   }
+  // Stored titles are data, including titles equal to an old default label.
+  const titleOf = row => row.title || "";
   const find = id => { const row = rows().find(row => row.id === id); if (!row) throw new Error("远端会话不存在"); return row; };
   function writable(path) {
     const value = settings();
@@ -89,7 +91,7 @@ function remoteWorkspaces(context) {
       const remote = { connectionId: row.binding.id, host: row.binding.host, name: row.binding.name, key, hostname: row.machine?.hostname };
       if (!groups.has(path)) groups.set(path, { path, name: meta.name || row.binding.name || row.binding.id, open: meta.open !== false,
         collapsed: !!meta.collapsed, pinned: !!meta.pinned, archived: !!meta.archived, remote, sessions: [] });
-      groups.get(path).sessions.push({ id: row.id, project: row.project, sessionId: row.sessionId, title: row.title || "新会话",
+      groups.get(path).sessions.push({ id: row.id, project: row.project, sessionId: row.sessionId, title: titleOf(row),
         created: row.created || 0, updated: row.updated || 0, pinned: !!row.pinned, archived: !!row.archived, scope: "project", remote });
     }
     return [...groups.values()];
@@ -98,7 +100,7 @@ function remoteWorkspaces(context) {
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(sessionId)) throw new Error("远端返回了无效的会话 ID");
     const id = `ssh:${keyOf(profile)}:${sessionId}`, old = rows().find(row => row.id === id);
     return writeRow({ ...old, id, binding: profile, machine, sessionId, project: initial.project, scope: "project",
-      title: old?.title || title || initial.history.find(row => row.role === "user")?.text?.split("\n")[0]?.slice(0, 80) || "新会话",
+      title: (old && titleOf(old)) || title || initial.history.find(row => row.role === "user")?.text?.split("\n")[0]?.slice(0, 80) || "",
       created: old?.created || Date.now(), updated: old?.updated || Date.now(), permissionMode: old?.permissionMode || "ask",
       draft: old?.draft || "", draftEditId: old?.draftEditId || "", draftAttachments: old?.draftAttachments || [], pinned: !!old?.pinned, archived: !!old?.archived });
   }
@@ -119,14 +121,14 @@ function remoteWorkspaces(context) {
       const connection = await pipe.request("remote.connection");
       const sid = newChat || !row.sessionId ? (await pipe.request("sessions.create")).sessionId : row.sessionId;
       const initial = await pipe.request("initialize", { sessionId: sid, permissionMode: row.permissionMode || "ask" });
-      row = add(connection.profile, connection.machine, sid, initial, newChat ? "新会话" : row.title);
+      row = add(connection.profile, connection.machine, sid, initial, newChat ? "" : titleOf(row));
       id = row.id;
       sessions.set(id, { transport: pipe, project: initial.project, resumeId: sid, scope: "project", ...(initial.controlledExecution ? { controlledExecution: true } : {}), remote: { connectionId: row.binding.id, name: row.binding.name, host: row.binding.host, key: keyOf(row.binding), hostname: connection.machine.hostname, ...(connection.machine.attachments === 1 ? { attachments: true } : {}) }, busy: false, workers: new Map() });
       updateProject(`ssh:${keyOf(row.binding)}`, { open: true, collapsed: false });
       activate(id); saveWorkspace();
       const ids = row.draftAttachments || [];
       const savedAttachments = !ids.length ? [] : connection.machine.attachments === 1 ? (await pipe.request("attachments.list", { ids })).items : ids.map(id => ({ id, name: "待恢复附件 " + id.slice(0, 8), kind: "file", size: 0, path: "", available: false, state: "interrupted" }));
-      return { ...initial, id, title: row.title, scope: "project", remote: sessions.get(id).remote, savedDraft: row.draft, savedDraftEditId: row.draftEditId, savedAttachments, activeId: id, catalog: broadcast() };
+      return { ...initial, id, title: titleOf(row), scope: "project", remote: sessions.get(id).remote, savedDraft: row.draft, savedDraftEditId: row.draftEditId, savedAttachments, activeId: id, catalog: broadcast() };
     } catch (error) { await pipe.close().catch(() => {}); throw error; }
   }
   // Plugin methods of an SSH conversation are whatever that remote host loaded,
@@ -278,7 +280,7 @@ function remoteWorkspaces(context) {
       source.busy = true;
       try {
         const value = await source.transport.request(method, payload), row = find(session);
-        if (method === "prompt") update(session, { draft: "", draftEditId: "", draftAttachments: [], updated: Date.now(), ...(row.title === "新会话" ? { title: String(params.text || "").split("\n")[0].slice(0, 80) } : {}) });
+        if (method === "prompt") update(session, { draft: "", draftEditId: "", draftAttachments: [], updated: Date.now(), ...(!titleOf(row) && String(params.text || "").trim() ? { title: String(params.text).split("\n")[0].slice(0, 80) } : {}) });
         broadcast(); return { handled: true, value };
       } catch (error) { source.busy = false; throw error; }
     }

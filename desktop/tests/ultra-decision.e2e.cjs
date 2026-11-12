@@ -31,16 +31,16 @@ const server = http.createServer((req, res) => {
       const task = human.findLast(m => m.content.startsWith('ULTRA_'))?.content || '';
       if (task.startsWith('ULTRA_SIMPLE')) {
         simpleCalls++;
-        assert.equal(body.tool_choice,'required');
+        assert.equal(body.tool_choice,'auto');
         const names = body.tools.map(t=>t.function.name);
         assert(!names.includes('collaboration_decision'));
-        assert.deepEqual([...names].sort(),['ultra_answer','ultra_prepare']);
+        assert.deepEqual([...names].sort(),['ultra_prepare']);
         return reply(res, null, 'ultra_answer', {answer:'SIMPLE_PASS'});
       }
       if (task.startsWith('ULTRA_COMPLEX')) {
         switch (++calls) {
           case 1:
-            assert.equal(body.tool_choice,'required');
+            assert.equal(body.tool_choice,'auto');
             assert(body.tools.some(t=>t.function.name==='ultra_prepare'));
             return reply(res, null, 'ultra_prepare', {task_type:'multi_path',main_task:'Organize the main note',evidence:'provided',rationale:'Independent supplied sources',workers:[
               {description:'第一来源',prompt:'CHILD_FIRST: check source one'},

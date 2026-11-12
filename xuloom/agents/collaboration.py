@@ -67,7 +67,7 @@ def instructions(profile, *, assessment=False):
             "Use sequential only for dependent work; never invent workers to meet a quota. Collect results before synthesis.",
     }[mode]
     if mode == 'ultra' and assessment:
-        principle += (' First use ultra_answer only for genuinely simple, self-contained tasks; '
+        principle += (' Answer simple, self-contained tasks directly; '
             'use ultra_prepare for research, substantial comparisons and multiple substantive ideas or approaches.')
     return (f"# Collaboration: {mode}\n{principle}\n"
             "Give self-contained assignments and avoid duplicate work. "

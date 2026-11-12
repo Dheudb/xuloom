@@ -193,7 +193,7 @@ async def execute_tool(self, tool_block, sys_print_callback=print, *, turn: int 
         try:
             from xuloom.agents.ultra_execution import required, NAMES
             if user_turn_id and required(self) and tool_name not in NAMES:
-                raise ValueError('Complete the Ultra assessment with ultra_answer or ultra_prepare before executing work. This call was not executed.')
+                raise ValueError('Use ultra_prepare before starting substantive work in Ultra. This call was not executed.')
             effective_tools = self._get_effective_tools()
             if tool_name not in effective_tools:
                 raise KeyError(f"Tool '{tool_name}' is not available in current mode.")
@@ -369,8 +369,16 @@ async def execute_tool(self, tool_block, sys_print_callback=print, *, turn: int 
     media = archive_images(native_content, artifact_directory(self.session_cwd) / media_owner,
         name=os.path.basename(str(tool_inputs.get("file_path") or tool_inputs.get("path") or ""))) if native_content is not None else []
     self.in_progress_tools.pop(tool_id, None)
+    observation = {}
+    from xuloom.agents.progress import EVIDENCE_TOOLS
+    if self.agent_depth and tool_name in EVIDENCE_TOOLS and handler_invoked:
+        # Hash before archival: spill filenames and request timings are not new
+        # evidence. Full text remains in the existing tool-result archive.
+        content = raw_result.get("content", "") if isinstance(raw_result, dict) else raw_result
+        observation["observation_digest"] = hashlib.sha256(
+            json.dumps(content, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
     self.recent_tool_activity.insert(0, {"tool_name": tool_name, "tool_use_id": tool_id, "status": status,
-        "result_preview": str(res_text)[:280], "tool_result": receipt, "user_turn_id": user_turn_id, "input_digest": digest, "media": media})
+        "result_preview": str(res_text)[:280], "tool_result": receipt, "user_turn_id": user_turn_id, "input_digest": digest, "media": media, **observation})
     # Retain every receipt in the active turn, including batches larger than the UI preview limit.
     current = [row for row in self.recent_tool_activity if row.get("user_turn_id") == user_turn_id]
     older = [row for row in self.recent_tool_activity if row.get("user_turn_id") != user_turn_id]

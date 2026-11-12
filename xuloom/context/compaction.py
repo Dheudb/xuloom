@@ -53,15 +53,15 @@ def policy(engine, model=None):
     override = os.environ.get("XULOOM_CONTEXT_WINDOW", "")
     if override and (not override.isdigit() or int(override) < 4096):
         raise ValueError("XULOOM_CONTEXT_WINDOW must be a token count of at least 4096")
-    from xuloom.core.model_specs import official
-    spec = official(engine.model_provider, model or engine.primary_model, engine.api_base_url)
+    from xuloom.core.model_specs import context_spec
+    spec = context_spec(engine.model_provider, model or engine.primary_model, engine.api_base_url)
     window = profile["window"] or (int(override) if override else spec['window'] if spec else 65536)
     reserve = profile["reserve"] or min(16384, max(1024, window // 8))
     if reserve >= window: raise ContextLimitError("Output reserve exceeds the configured model window")
     budget = window - reserve
     recent = min(profile["keepRecent"] or min(20000, window // 4), max(512, budget // 2))
     return dict(profile, window=window, reserve=reserve, keepRecent=recent, inputBudget=budget,
-        source="model" if profile["window"] else "environment" if override else "official_spec" if spec else "conservative_default")
+        source="model" if profile["window"] else "environment" if override else spec['source'] if spec else "conservative_default")
 
 
 def request_parts(engine):

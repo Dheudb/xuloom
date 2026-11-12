@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Archive, ArchiveRestore, Folder, MessageSquare, RefreshCw, Search } from "lucide-react";
 import type { SessionCatalog } from "./types";
-import { displayName, t, tServer, tx } from "./i18n";
+import { sessionTitle, t, tServer, tx } from "./i18n";
 export default function ArchivePanel({ catalog, action }: {
   catalog: SessionCatalog;
   action: (method: string, params: Record<string, unknown>) => Promise<void>;
@@ -27,8 +27,8 @@ export default function ArchivePanel({ catalog, action }: {
   const matches = (...values: string[]) => !needle || values.some((value) => value.toLocaleLowerCase().includes(needle));
   const projects = catalog.projects.filter((project) => project.archived && matches(project.name, project.path));
   const sessions = [...catalog.projects.flatMap((project) => project.sessions.filter((row) => row.archived &&
-    matches(row.title, project.name, project.path)).map((row) => ({ row, project }))),
-    ...(catalog.standalone || []).filter((row) => row.archived && matches(row.title, t("独立会话"), row.project))
+    matches(sessionTitle(row), project.name, project.path)).map((row) => ({ row, project }))),
+    ...(catalog.standalone || []).filter((row) => row.archived && matches(sessionTitle(row), t("独立会话"), row.project))
       .map((row) => ({ row, project: { name: t("独立会话"), path: row.project, archived: false } }))]
     .sort((a, b) => b.row.updated - a.row.updated);
   const count = catalog.projects.reduce((total, project) => total + project.sessions.filter((row) => row.archived).length, 0) + (catalog.standalone || []).filter((row) => row.archived).length;
@@ -51,10 +51,10 @@ export default function ArchivePanel({ catalog, action }: {
     </section>}
     {!!sessions.length && <section aria-label={t("归档会话列表")}><h4>{t("会话")}</h4>
       {sessions.map(({ row, project }) => <article className="archive-row" key={row.id} data-archived-session={row.id}>
-        <MessageSquare size={18} /><div className="archive-row-info"><strong>{displayName(row.title)}</strong>
+        <MessageSquare size={18} /><div className="archive-row-info"><strong>{sessionTitle(row)}</strong>
           <span title={project.path}>{project.name} · {project.path}</span>
           <small>{row.updated ? new Date(row.updated).toLocaleString("zh-CN") : t("时间未知")}{row.error ? t(" · 记录读取失败") : ""}{project.archived ? t(" · 恢复此会话时也将恢复所属项目") : ""}</small></div>
-        <button disabled={busy} aria-label={t("恢复会话 {title}", { title: displayName(row.title) })} onClick={() => void run("archive.restore", { id: row.id }, t("已恢复会话："), row.title)}><ArchiveRestore size={15} />{t("恢复")}</button>
+        <button disabled={busy} aria-label={t("恢复会话 {title}", { title: sessionTitle(row) })} onClick={() => void run("archive.restore", { id: row.id }, t("已恢复会话："), sessionTitle(row))}><ArchiveRestore size={15} />{t("恢复")}</button>
       </article>)}
     </section>}
     {!projects.length && !sessions.length && <div className="archive-empty"><Archive size={32} />

@@ -15,7 +15,7 @@ def visible(engine):
     effective = engine._get_effective_tools()
     from xuloom.agents.ultra_execution import required, NAMES
     if required(engine):
-        return {name:engine.available_tools[name] for name in NAMES}
+        return {"ultra_prepare": engine.available_tools["ultra_prepare"]}
     builtin = getattr(engine, "builtin_tool_names", set())
     selected = CORE_TOOLS | engine.activated_tools | engine.tool_context.get('role_declared_tools', frozenset())
     if getattr(engine, 'collaboration_mode', '') == 'ultra':

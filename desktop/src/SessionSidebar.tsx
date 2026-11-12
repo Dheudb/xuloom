@@ -1,4 +1,4 @@
-import { displayName, t, tServer, tx } from "./i18n";
+import { sessionTitle, t, tServer, tx } from "./i18n";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useDialogFocus } from "./useDialogFocus";
@@ -74,19 +74,19 @@ export default function SessionSidebar({ catalog, activeId, live, opening, actio
   };
   const sortRows = (rows: CatalogSession[]) => [...rows].sort((a, b) => {
     if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-    if (catalog.view.sort === "name") return a.title.localeCompare(b.title, "zh-CN");
+    if (catalog.view.sort === "name") return sessionTitle(a).localeCompare(sessionTitle(b), "zh-CN");
     if (catalog.view.sort === "oldest") return a.updated - b.updated;
     if (catalog.view.sort === "created") return b.created - a.created;
     return b.updated - a.updated;
   });
   const needle = query.trim().toLocaleLowerCase();
   const allRows = [...(catalog.standalone || []).filter((row) => !row.archived), ...catalog.projects.filter((entry) => !entry.archived).flatMap((entry) => entry.sessions.filter((row) => !row.archived))];
-  const standalone = sortRows((catalog.standalone || []).filter((row) => !row.archived && (!needle || row.title.toLocaleLowerCase().includes(needle))));
+  const standalone = sortRows((catalog.standalone || []).filter((row) => !row.archived && (!needle || sessionTitle(row).toLocaleLowerCase().includes(needle))));
   const selectedRows = allRows.filter((row) => selected.includes(row.id));
   const projects = catalog.projects.filter((entry) => !entry.archived)
     .sort((a, b) => Number(b.pinned) - Number(a.pinned));
   const visibleProjects = projects.filter((entry) => !needle || entry.name.toLocaleLowerCase().includes(needle) ||
-    entry.sessions.some((row) => !row.archived && row.title.toLocaleLowerCase().includes(needle)));
+    entry.sessions.some((row) => !row.archived && sessionTitle(row).toLocaleLowerCase().includes(needle)));
   async function submitDialog() {
     setWorking(true); setError("");
     try {
@@ -151,13 +151,13 @@ export default function SessionSidebar({ catalog, activeId, live, opening, actio
         setDragging(row.id); setMenu(null); }}
       onDragEnd={() => { setDragging(""); setDropTarget(""); }}
       onContextMenu={(e) => openMenu(e, { kind: "session", row })}>
-      {choosing && <input type="checkbox" aria-label={t("选择会话 {title}", { title: displayName(row.title) })} disabled={opening} checked={selected.includes(row.id)} onChange={() => toggleSelected(row.id)} />}
-      <button className="session-select" title={row.error || row.title} disabled={opening} onClick={() => choosing ? toggleSelected(row.id) : run("session.select", { id: row.id })}>
+      {choosing && <input type="checkbox" aria-label={t("选择会话 {title}", { title: sessionTitle(row) })} disabled={opening} checked={selected.includes(row.id)} onChange={() => toggleSelected(row.id)} />}
+      <button className="session-select" title={row.error || sessionTitle(row)} disabled={opening} onClick={() => choosing ? toggleSelected(row.id) : run("session.select", { id: row.id })}>
         {busy(row.id) ? <LoaderCircle size={14} className="spin" /> : <MessageSquare size={14} />}
-        <span><strong>{displayName(row.title)}</strong><small className={row.error || row.draft || row.draftAttachments?.length ? "session-note" : "session-date"}>{row.error ? t("读取失败") : row.draft || row.draftAttachments?.length ? t("有草稿") : row.updated ? new Date(row.updated).toLocaleDateString("zh-CN") : ""}</small></span>
+        <span><strong>{sessionTitle(row)}</strong><small className={row.error || row.draft || row.draftAttachments?.length ? "session-note" : "session-date"}>{row.error ? t("读取失败") : row.draft || row.draftAttachments?.length ? t("有草稿") : row.updated ? new Date(row.updated).toLocaleDateString("zh-CN") : ""}</small></span>
         {row.pinned && <Pin size={11} />}{row.archived && <Archive size={11} />}
       </button>
-      <button className="icon-button row-menu-trigger" aria-label={t("会话操作 {title}", { title: displayName(row.title) })} onClick={(e) => openMenu(e, { kind: "session", row })}><MoreHorizontal size={15} /></button>
+      <button className="icon-button row-menu-trigger" aria-label={t("会话操作 {title}", { title: sessionTitle(row) })} onClick={(e) => openMenu(e, { kind: "session", row })}><MoreHorizontal size={15} /></button>
       {renderMenu({ kind: "session", row })}
     </div>;
   }
@@ -185,7 +185,7 @@ export default function SessionSidebar({ catalog, activeId, live, opening, actio
       {visibleProjects.map((project) => {
         const projectMatches = project.name.toLocaleLowerCase().includes(needle);
         const rows = sortRows(project.sessions.filter((row) => !row.archived &&
-          (!needle || projectMatches || row.title.toLocaleLowerCase().includes(needle))));
+          (!needle || projectMatches || sessionTitle(row).toLocaleLowerCase().includes(needle))));
         if (needle && !projectMatches && !rows.length) return null;
         const dragged = allRows.find((row) => row.id === dragging);
         const acceptsDrop = !!dragged && !dragged.remote && !project.remote && !opening && (dragged.scope === "standalone" || dragged.project !== project.path);
@@ -219,7 +219,7 @@ export default function SessionSidebar({ catalog, activeId, live, opening, actio
     {(rename || remove || move) && <div className="overlay" onClick={() => { if (!working) { setRename(null); setRemove(null); setMove(null); } }}>
       <section ref={dialogRef} className="dialog" role="dialog" aria-modal="true" aria-label={move ? t("移动会话") : rename ? t("重命名") : t("移除项目")} onClick={(e) => e.stopPropagation()}>
         <header><h2>{move ? t("移动会话") : rename ? t("重命名") : remove?.deleteHistory ? t("删除项目会话记录") : t("从列表移除项目")}</h2></header>
-        {move && <><p>{displayName(move.title)}</p><label>{t("目标项目")}<select aria-label={t("目标项目")} value={destination} onChange={(event) => setDestination(event.target.value)}>
+        {move && <><p>{sessionTitle(move)}</p><label>{t("目标项目")}<select aria-label={t("目标项目")} value={destination} onChange={(event) => setDestination(event.target.value)}>
           {projects.filter((project) => !project.remote && (move.scope === "standalone" || project.path !== move.project)).map((project) => <option key={project.path} value={project.path}>{project.name}</option>)}
         </select></label><p className="fine-print">{t("保留历史和草稿，后续任务使用目标项目的目录、Skill、子代理和 MCP 配置。")}</p></>}
         {rename && <label>{t("名称")}<input autoFocus aria-label={t("新名称")} value={name} maxLength={rename.kind === "session" ? 200 : 100} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && name.trim() && !working) void submitDialog(); }} /></label>}

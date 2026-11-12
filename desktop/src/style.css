@@ -2030,6 +2030,7 @@ body.panel-resizing iframe { pointer-events: none; }
 .turn-step-count { margin-left: auto; font-size: 12px; }
 .turn-process-content { padding: 12px 0 3px; display: grid; gap: 14px; min-width: 0; }
 .turn-commentary { font-size: 14px; line-height: 1.75; }
+.turn-provisional-label { display: block; margin-bottom: 8px; color: var(--muted); font-size: 12px; }
 .turn-commentary > :first-child { margin-top: 0; }
 .turn-commentary > :last-child { margin-bottom: 0; }
 .turn-retry { color: var(--text-muted, var(--text-secondary)); font-size: 13px; min-width: 0; }

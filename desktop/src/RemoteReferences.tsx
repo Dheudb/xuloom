@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { displayName, t, tServer } from "./i18n";
+import { sessionTitle, t, tServer } from "./i18n";
 
-type Reference = { id: string; version: string; title: string; valid: boolean; message: string; host?: string; connection?: string };
+type Reference = { id: string; version: string; title: string; valid: boolean; message: string; host?: string; connection?: string; chatId?: string };
 export type ReferenceAction = (method: string, params: Record<string, unknown>) => Promise<void>;
 
 export default function RemoteReferences({ action }: { action: ReferenceAction }) {
@@ -27,7 +27,7 @@ export default function RemoteReferences({ action }: { action: ReferenceAction }
     <p className="fine-print">{t("离线也可清理。移除会同时清除此引用保存的本机草稿，并备份原始设置；不会删除远端历史、文件或 SSH 连接配置。远端任务需先停止。")}</p>
     <button disabled={loading || pending} onClick={() => void refresh()}>{t("刷新本机引用")}</button>
     {loading ? <p role="status">{t("正在读取本机引用…")}</p> : rows.length === 0 ? <p>{t("没有本机 SSH 导航引用。")}</p> : rows.map(row => <section className="extension-row" key={row.id} data-navigation-reference={row.id}>
-      <strong>{displayName(row.title)}</strong>{row.host && <small>{row.connection} · {row.host}</small>}
+      <strong>{row.chatId ? sessionTitle(row) : row.title}</strong>{row.host && <small>{row.connection} · {row.host}</small>}
       <p className={row.valid ? "fine-print" : "error"}>{tServer(row.message)}</p>
       {confirm === row.id ? <div className="actions"><button disabled={pending} onClick={() => void forget(row)}>{t("确认移除本机引用")}</button><button disabled={pending} onClick={() => setConfirm("")}>{t("保留引用")}</button></div> :
         <button disabled={pending} onClick={() => { setConfirm(row.id); setError(""); }}>{t("移除本机引用")}</button>}

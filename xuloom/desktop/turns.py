@@ -43,9 +43,10 @@ class TurnRecorder:
                     notice["status"] = status if status in {"error", "cancelled"} else "completed"
         self.record["runtimeStatus"] = status
 
-    def flush(self):
+    def flush(self, *, provisional=False):
         if self.record["pendingText"].strip():
-            self.record["steps"].append({"kind": "text", "text": self.record["pendingText"]})
+            self.record["steps"].append({"kind": "text", "text": self.record["pendingText"],
+                                         **({"provisional": True} if provisional else {})})
         self.record["pendingText"] = ""
         self.answer_prefix = ""
 
@@ -96,6 +97,11 @@ class TurnRecorder:
                 streams.append(entry)
             entry.update(event["metrics"])
             status = event["metrics"].get("status")
+            if status == "completed":
+                # A model HTTP stream ending is not the task ending. Keep its
+                # terminal metrics, but never overwrite an outstanding join.
+                if record.get("runtimeStatus") != "waiting_subagents": self.progress("waiting")
+                return True
             if status in {"reasoning", "receiving", "finishing", "completed", "error", "cancelled"}:
                 self.progress(status)
             elif record.get("runtimeStatus") != "retrying":
@@ -187,8 +193,10 @@ class TurnRecorder:
                 if event["reason"] == "continuation_substitution" else "交回模型处理 · " + reasons.get(detail, detail))
             record["steps"].append({"kind": "text", "text": text})
         elif kind == "subagents_waiting":
+            if event.get("agent_id"): return False
             record["runtimeStatus"] = "waiting_subagents" if event.get("count") else "waiting"
-            self.flush()
+            record["outputChannel"] = "commentary"
+            self.flush(provisional=bool(event.get("count")))
             record["steps"].append({"kind": "text", "text": event["message"]})
         elif kind == "permission":
             classifier = event.get("request", {}).get("classifier_input", {})

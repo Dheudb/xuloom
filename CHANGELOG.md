@@ -4,6 +4,21 @@
 
 ## [未发布]
 
+## [0.1.47] - 2026-11-12
+
+### 修复
+- 无标题会话按界面语言显示默认名称；分支请求显式传递空标题，修复无标题会话分叉失败，并保留远端用户主动命名的“新会话”等原文。
+- 上下文窗口按官方连接、已核对的开源模型原生规格或模型列表元数据识别；DeepSeek 官方模型不再落入未知模型的 64K 默认值，且不会因此切换协议或推理参数。
+- “从 API 获取模型”同时提取 `max_model_len`、`context_window` 等明确窗口字段并填入空配置，保留手动窗口；不把最大输出长度当作上下文，不发送生成请求探测容量。
+- 子代理汇合前通过现有邮箱发送一次收尾请求；原生只读调查连续重复读取同一证据时先请求汇总，仍无进展则以 `blocked` 返回并保留记录，不用时间或请求总数截断正常研究。
+- 等待子代理立即保存检查点，模型流结束不再显示成任务完成；临时稿标明阶段性内容，最终回答仍须等实际子代理回执汇总。
+- 网页抓取显式使用连接配置的直连／系统代理，避免搜索与抓取使用不同线路；不修改用户保存的网络设置。
+- Apple DocC 官方文档 JSON 提取正文、代码与正文引用链接，避免把庞大导航索引当作文章反复分页读取；普通 JSON 保持原样。
+- Ultra 闲聊允许普通文本直接完成，不再强制调用 `ultra_answer` 或因缺少评估回执触发重试；复杂任务仍提供 `ultra_prepare` 规划入口，原有回执和权限继续生效。
+- OpenAI 兼容 Chat 的 Ultra 初始协作评估改用 `tool_choice=auto`，由现有执行循环验证评估回执；避免 DeepSeek 思考模式拒绝 `required` 导致 HTTP 400，保留思考和协作约束。
+- 保存并按原连接与模型回传接口实际返回的 `reasoning_content`，覆盖工具回合、普通回复、JSON 会话恢复与录像；不作为回答/活动文字展示，不跨地址、Key 或模型回传。旧记录已丢失的字段不能自动重建。
+- 已知的强制工具选择、缺少 `reasoning_content` 错误显示明确原因，仍不回显服务端原始错误、密钥或 URL。
+
 ## [0.1.46] - 2026-11-12
 
 ### 新增
@@ -96,7 +111,8 @@
 - 引擎拆分为 `xuloom/core/engine_parts/` 下的多个 mixin，主循环拆成多个阶段方法。
 - 新增不可变的 `EngineConfig` 和顶层公开 API（`from xuloom import ...`）。
 
-[未发布]: https://github.com/Dheudb/xuloom/compare/v0.1.46...HEAD
+[未发布]: https://github.com/Dheudb/xuloom/compare/v0.1.47...HEAD
+[0.1.47]: https://github.com/Dheudb/xuloom/compare/v0.1.46...v0.1.47
 [0.1.45]: https://github.com/Dheudb/xuloom/compare/v0.1.44...v0.1.45
 [0.1.44]: https://github.com/Dheudb/xuloom/compare/v0.1.43...v0.1.44
 [0.1.43]: https://github.com/Dheudb/xuloom/compare/v0.1.42...v0.1.43

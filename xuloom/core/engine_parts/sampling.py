@@ -37,6 +37,7 @@ class ModelSamplingMixin(EngineState):
                 if block
             ],
             "usage": self._serialize_response_usage(response),
+            **({"_openai_reasoning": response._openai_reasoning} if getattr(response, "_openai_reasoning", None) is not None else {}),
         }
 
     async def _replay_vcr_response_events(self, response, *, turn_count: int, event_callback=None):
@@ -127,8 +128,7 @@ class ModelSamplingMixin(EngineState):
         # A draft generated before outstanding evidence is collected is process
         # commentary, even when the provider ends that model message normally.
         workers = self.tool_context["subagent_tasks"]
-        from xuloom.agents.ultra_execution import required as ultra_required
-        provisional = ultra_required(self) or any(not task.done() for task in workers.tasks.values()) or bool(set(workers.results) - workers.delivered)
+        provisional = any(not task.done() for task in workers.tasks.values()) or bool(set(workers.results) - workers.delivered)
         callback = kwargs.get("event_callback")
         if provisional and callable(callback):
             async def commentary(event):

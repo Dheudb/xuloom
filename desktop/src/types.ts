@@ -84,7 +84,7 @@ export type TurnTrace = {
   usage?: { inputTokens: number; outputTokens: number; requests: number; unpricedRequests: number; estimated: boolean; costUsd?: number };
   answer?: string;
   pendingText?: string;
-  steps: ({ kind: "text"; text: string; protocolError?: { retrying?: boolean; detail?: string; diagnostic?: string } } | { kind: "tool"; tool: ToolActivity } | { kind: "compaction"; compaction: CompactionNotice } | { kind: "notice"; notice: RetryNotice })[];
+  steps: ({ kind: "text"; text: string; provisional?: boolean; protocolError?: { retrying?: boolean; detail?: string; diagnostic?: string } } | { kind: "tool"; tool: ToolActivity } | { kind: "compaction"; compaction: CompactionNotice } | { kind: "notice"; notice: RetryNotice })[];
 };
 export type Attachment = { id: string; name: string; path: string; size: number; kind: "image" | "file"; preview?: string; available?: boolean; state?: string };
 export type HistoryItem = { id?: string; role: "user" | "assistant"; text: string; trace?: TurnTrace; attachments?: Attachment[] };
