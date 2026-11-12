@@ -131,9 +131,7 @@ class TurnLoopMixin(EngineState):
         max_turns = int(env_max) if env_max.isdigit() else 1000
         if hasattr(self, "_max_turns_override") and self._max_turns_override:
             max_turns = self._max_turns_override
-        output_budget = 200000
-        if hasattr(self, "_output_budget_override") and self._output_budget_override:
-            output_budget = self._output_budget_override
+        output_budget = getattr(self, "_output_budget_override", None) or None
         return {
             "max_turns": max_turns,
             "turn_count": 0,
@@ -258,7 +256,7 @@ class TurnLoopMixin(EngineState):
                 await self._apply_layered_compaction_if_needed(sys_print_callback, event_callback=event_callback)
                 if self.user_inbox: continue
                 remaining_output_budget = self._remaining_output_budget(loop_state)
-                if remaining_output_budget <= 0:
+                if remaining_output_budget is not None and remaining_output_budget <= 0:
                     await self._record_loop_transition(
                         "session_output_budget_exhausted",
                         turn=turn_count,
@@ -267,7 +265,7 @@ class TurnLoopMixin(EngineState):
                         output_tokens_used=self.session_token_usage.get("output_tokens", 0),
                     )
                     self.persist_session_state()
-                    return finish_run(self, ("Session output token budget exhausted before another turn could start."), 'budget_exhausted')
+                    return finish_run(self, "已达到已设置的输出 Token 预算，已有结果已保存。", 'budget_exhausted')
                 blocked = self.cost_meter.blocked_reason(loop_state.get("active_model"))
                 if blocked:  # compaction may have spent the rest of the budget
                     return await self._stop_for_cost(blocked, turn_count, event_callback)
@@ -589,7 +587,7 @@ class TurnLoopMixin(EngineState):
                 for item in loaded_memory_files
             ],
         })
-        max_tokens = min(loop_state["max_tokens"], remaining_output_budget)
+        max_tokens = loop_state["max_tokens"] if remaining_output_budget is None else min(loop_state["max_tokens"], remaining_output_budget)
         vcr_payload = self.vcr_manager.build_request_payload(
             provider=self.model_provider,
             model=loop_state["active_model"],

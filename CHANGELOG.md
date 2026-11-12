@@ -4,6 +4,12 @@
 
 ## [未发布]
 
+## [0.1.48] - 2026-11-12
+
+### 修复
+- 普通会话不再受隐藏的 200,000 累计输出 Token 上限限制；保留历史用量统计，旧会话超过该值或因该限制停止后仍能继续。模型单次输出限制、显式目标／委派预算和费用上限继续生效。
+- 无输出预算时使用空值而非无穷大，避免恢复事件产生非标准 JSON；显式预算耗尽返回明确中文说明。
+
 ## [0.1.47] - 2026-11-12
 
 ### 修复
@@ -111,7 +117,8 @@
 - 引擎拆分为 `xuloom/core/engine_parts/` 下的多个 mixin，主循环拆成多个阶段方法。
 - 新增不可变的 `EngineConfig` 和顶层公开 API（`from xuloom import ...`）。
 
-[未发布]: https://github.com/Dheudb/xuloom/compare/v0.1.47...HEAD
+[未发布]: https://github.com/Dheudb/xuloom/compare/v0.1.48...HEAD
+[0.1.48]: https://github.com/Dheudb/xuloom/compare/v0.1.47...v0.1.48
 [0.1.47]: https://github.com/Dheudb/xuloom/compare/v0.1.46...v0.1.47
 [0.1.45]: https://github.com/Dheudb/xuloom/compare/v0.1.44...v0.1.45
 [0.1.44]: https://github.com/Dheudb/xuloom/compare/v0.1.43...v0.1.44

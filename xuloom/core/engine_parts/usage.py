@@ -80,18 +80,18 @@ class UsageAccountingMixin(EngineState):
             "xuloom.replayed": replayed,
         }
 
-    def _remaining_output_budget(self, loop_state: dict) -> int:
+    def _remaining_output_budget(self, loop_state: dict) -> Optional[int]:
         from xuloom.core.output_limits import active_budgets
         from xuloom.features.goals import available_output
         budgets = active_budgets(self.tool_context.get("goal_budget"))
         if budgets:
-            return min(available_output(budget) for budget in budgets)
-        remaining = max(
-            0,
-            int(loop_state.get("session_output_budget", 0) or 0)
-            - int(self.session_token_usage.get("output_tokens", 0) or 0),
-        )
-        return remaining
+            return min((available_output(budget) for budget in budgets
+                        if budget["budget"]["output_tokens"] is not None), default=None)
+        # Lifetime usage is accounting, never an implicit conversation quota.
+        limit = loop_state.get("session_output_budget")
+        if limit is None:
+            return None
+        return max(0, int(limit) - int(self.session_token_usage.get("output_tokens", 0) or 0))
 
     async def _stop_for_cost(self, reason, turn_count, event_callback):
         await self._record_loop_transition(

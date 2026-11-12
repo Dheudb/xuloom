@@ -81,6 +81,7 @@ class StatusMixin(EngineState):
         return "\n".join(lines)
 
     def get_runtime_summary(self) -> str:
+        output_remaining = self._remaining_output_budget(self._build_loop_state())
         self.refresh_memory_files()
         shell_tasks = self.shell_task_manager.list_tasks()
         running_shell_tasks = [item for item in shell_tasks if item.get("status") == "running"]
@@ -150,7 +151,7 @@ class StatusMixin(EngineState):
             f"Session cost: ${float(self.session_cost.get('usd', 0.0) or 0.0):.4f}"
             + (f" (+{self.session_cost.get('unpriced_requests')} unpriced requests)" if self.session_cost.get('unpriced_requests') else ""),
             f"Task cost limit: {'none' if self.cost_meter.limit_usd is None else f'${self.cost_meter.limit_usd:.4f}'}",
-            f"Remaining output budget: {self._remaining_output_budget(self._build_loop_state())}",
+            f"Remaining output budget: {'unlimited' if output_remaining is None else output_remaining}",
             f"In-progress tools: {len(self.in_progress_tools)}",
             f"Running shell tasks: {len(running_shell_tasks)}",
             f"Running subagents: {len(running_subagents)}",

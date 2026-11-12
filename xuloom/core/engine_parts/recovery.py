@@ -63,7 +63,7 @@ class TurnRecoveryMixin(EngineState):
             await self._cancel_streaming_tool_tasks(streaming_tool_entries)
         loop_state["max_tokens_recovery_attempts"] += 1
         remaining_output_budget = self._remaining_output_budget(loop_state)
-        if remaining_output_budget <= 0:
+        if remaining_output_budget is not None and remaining_output_budget <= 0:
             await self._record_loop_transition(
                 "session_output_budget_exhausted",
                 turn=turn_count,
@@ -72,7 +72,7 @@ class TurnRecoveryMixin(EngineState):
                 output_tokens_used=self.session_token_usage.get("output_tokens", 0),
             )
             self.persist_session_state()
-            return finish_run(self, ("Session output token budget exhausted before continuation."), 'budget_exhausted')
+            return finish_run(self, "已达到已设置的输出 Token 预算，已有结果已保存。", 'budget_exhausted')
         transition_reason = "max_output_tokens_recovery"
         if (
             loop_state["max_tokens_recovery_attempts"] >= 2
@@ -81,7 +81,8 @@ class TurnRecoveryMixin(EngineState):
             loop_state["max_tokens"] = 64000
             loop_state["max_tokens_escalations"] += 1
             transition_reason = "max_output_tokens_escalate"
-        loop_state["max_tokens"] = min(loop_state["max_tokens"], remaining_output_budget)
+        if remaining_output_budget is not None:
+            loop_state["max_tokens"] = min(loop_state["max_tokens"], remaining_output_budget)
         self.messages.append(create_user_message(
             self._build_continuation_prompt(),
             is_continuation=True,

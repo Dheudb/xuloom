@@ -2,6 +2,8 @@
 // placeholder filled with a value that is never translated. English may use plural forms:
 // "{count, plural, one {# file} other {# files}}". `npm run i18n:check` lists messages without an entry.
 export const english: Record<string, string> = {
+  "已达到已设置的输出 Token 预算，已有结果已保存。": "The configured output-token budget has been reached; existing results are saved.",
+  "已达到已设置的执行预算；已有结果保留，调整对应任务或委派预算后再继续。": "The configured execution budget has been reached. Existing results are kept; adjust the task or delegation budget before continuing.",
   "模型服务拒绝请求（HTTP 400）：思考模式不支持当前 tool_choice 强制工具设置。请更新程序后继续；已有结果保留。": "Model service rejected the request (HTTP 400): thinking mode does not support the forced tool_choice setting. Update the app before continuing; existing results are kept.",
   "模型服务拒绝请求（HTTP 400）：接口要求回传 reasoning_content，当前历史可能缺少协议记录。请更新程序；旧记录无法补回时可新建会话，已有结果保留。": "Model service rejected the request (HTTP 400): reasoning_content must be passed back and this history may lack the required protocol records. Update the app; if older records cannot be recovered, start a new conversation. Existing results are kept.",
   "准备中": "Preparing",
