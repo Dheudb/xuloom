@@ -923,7 +923,7 @@ class DesktopBridge:
                 params.get("version"), params.get("offset", 0), params.get("length", 262144))
         if method in {"session.transcript", "session.transcriptImage"}:
             from xuloom.features.agent_history import inspect
-            sid = self.engine.session_id if self.engine else self.resume_id
+            sid = params.get("sessionId", self.engine.session_id if self.engine else self.resume_id)
             if not sid:
                 raise ValueError("请先打开已保存的会话")
             if method == "session.transcriptImage" and params.get("imageIndex") is None:

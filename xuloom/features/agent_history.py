@@ -354,8 +354,7 @@ async def inspect(cwd, session_id, *, agent_id=None, cursor=None, limit=40, imag
         client = SSHClient(target, lambda _: None)
         try:
             await client.start()
-            await client.request('initialize', {'sessionId': remote_session})
-            params = {'cursor': cursor, 'limit': limit, 'imageIndex': image_index, 'version': version}
+            params = {'sessionId': remote_session, 'cursor': cursor, 'limit': limit, 'imageIndex': image_index, 'version': version}
             return await client.request('session.transcriptImage' if image_index is not None else 'session.transcript', params)
         finally:
             await client.aclose()

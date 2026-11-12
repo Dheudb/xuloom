@@ -1,4 +1,5 @@
 """Chat addresses select known history/SSH targets; never commands or new paths."""
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -166,3 +167,22 @@ def _resolve_remote(key, sid, *, require_openable):
         raise ChatLinkError("archived", "此远端会话或工作区已归档，请先在设置中恢复")
     return {"transport": "ssh", "id": identity, "session_id": sid, "connection_id": current["id"],
             "binding": current, "machine": machine, "archived": archived, "remote_verified": False}
+
+
+async def read_link(url, *, cursor=None, limit=40, agent_id=None):
+    """Read a saved transcript without opening, initializing or resuming its engine."""
+    resolved = await asyncio.to_thread(resolve_link, url)
+    if resolved.get("transport") == "ssh":
+        from xuloom.remote.proxy import SSHBridge
+        bridge = SSHBridge(resolved["connection_id"], resolved["binding"], resolved["machine"], lambda _: None)
+        try:
+            page = await bridge.dispatch("session.transcript", {"sessionId": resolved["session_id"],
+                "cursor": cursor, "limit": limit, "agentId": agent_id})
+        finally:
+            await bridge.close()
+        return {**page, "url": url, "transport": "ssh", "archived": resolved["archived"]}
+    from xuloom.features.agent_history import inspect
+    page = await inspect(resolved["project"], resolved["session_id"], cursor=cursor, limit=limit, agent_id=agent_id)
+    return {**page, "url": url, "transport": "local", "project": resolved["project"],
+            "archived": resolved["archived"], "moved": resolved["moved"],
+            "workspaceExists": resolved["workspace_exists"]}

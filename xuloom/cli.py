@@ -78,7 +78,9 @@ def parser():
     selection.add_argument("--all", action="store_true", help="All saved turns in this conversation")
     transcript = sub.add_parser("transcript", help="Read a saved conversation or registered child history without executing it")
     transcript.add_argument("--cwd", default=os.getcwd())
-    transcript.add_argument("--session", required=True)
+    source = transcript.add_mutually_exclusive_group(required=True)
+    source.add_argument("--session")
+    source.add_argument("--link", help="Read a local or configured SSH xuloom://chat/ link")
     transcript.add_argument("--agent", help="Registered subagent ID in this parent conversation")
     transcript.add_argument("--cursor", help="Continue the exact read-only history snapshot")
     transcript.add_argument("--limit", type=int, default=40)
@@ -438,8 +440,10 @@ async def dispatch(args, emit):
         return {"ok": True, "reason": "completed", **read_tree(args.cwd, args.session, args.run_id)}
     if args.command == "transcript":
         from xuloom.features.agent_history import inspect
-        return {"ok": True, "reason": "completed", "transcript": await inspect(args.cwd, args.session,
-            agent_id=args.agent, cursor=args.cursor, limit=args.limit)}
+        from xuloom.features.chat_links import read_link
+        page = (await read_link(args.link, agent_id=args.agent, cursor=args.cursor, limit=args.limit) if args.link
+                else await inspect(args.cwd, args.session, agent_id=args.agent, cursor=args.cursor, limit=args.limit))
+        return {"ok": True, "reason": "completed", "transcript": page}
     if args.command not in BUILTIN_COMMANDS and args.command in plugin_commands():
         _, handler, _ = plugin_commands()[args.command]
         return {"ok": True, "reason": "completed", **await handler(args, emit)}

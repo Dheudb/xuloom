@@ -468,6 +468,8 @@ class TurnLoopMixin(EngineState):
                 user_msg["_display_text"] = display_text
             self.messages.append(user_msg)
             self._append_hook_messages("UserPromptSubmit", prompt_hook.context)
+        if "xuloom://chat/" in str(user_msg.get("_display_text", user_msg.get("content", ""))):
+            self.activate_tools(["chat_read_tool"])
         if self.active_turn_trace is not None:
             self.active_turn_trace["userMessageId"] = get_msg_uuid(user_msg)
         self._sync_message_context()

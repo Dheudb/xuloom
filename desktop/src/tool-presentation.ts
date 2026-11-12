@@ -30,6 +30,8 @@ export function toolPresentation(tool: Pick<ToolActivity, "name" | "status" | "i
   } else if (/search|grep|glob/.test(name)) {
     kind = "search"; action = name === "web_search_tool" ? N_("搜索网页") : name === "tool_search_tool" ? N_("查找工具") : N_("搜索文件");
     brief = String(input.query || input.pattern || input.description || "");
+  } else if (name === "chat_read_tool") {
+    kind = "file"; action = N_("读取会话"); brief = String(input.url || "");
   } else if (name === "file_read_tool") {
     kind = "file"; action = N_("读取文件"); brief = basename(input.file_path || input.path);
   } else if (/fetch|browser/.test(name)) {

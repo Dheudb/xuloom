@@ -68,7 +68,7 @@ class ToolSearchTool(BaseAgenticTool):
         matches = []
         terms = set(re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]+", query_lower))
         terms -= {"the", "a", "an", "for", "to", "of", "and", "or", "with", "use", "tool", "tools", "access", "information", "request", "please"}
-        aliases = {"续跑": {"sequence"}, "工具序列": {"sequence"}, "条件执行": {"sequence"}, "联网": {"web", "search"}, "搜索网页": {"web", "search"}, "网页": {"web", "fetch"},
+        aliases = {"聊天": {"chat", "history"}, "会话": {"chat", "history"}, "历史": {"history"}, "续跑": {"sequence"}, "工具序列": {"sequence"}, "条件执行": {"sequence"}, "联网": {"web", "search"}, "搜索网页": {"web", "search"}, "网页": {"web", "fetch"},
                    "浏览器": {"browser"}, "笔记本": {"notebook"}, "internet": {"web"}, "url": {"fetch"}, "browse": {"browser"},
                    "图片": {"image", "generate"}, "视频": {"video", "generate"}, "音乐": {"music"}, "语音": {"speech"}, "音效": {"sound"}}
         for alias, expanded in aliases.items():

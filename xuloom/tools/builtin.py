@@ -12,6 +12,7 @@ from xuloom.tools.bash_tool import BashTool
 from xuloom.tools.brief_tool import BriefTool
 from xuloom.tools.browser_tool import BrowserTool
 from xuloom.tools.command_tool import CommandTool
+from xuloom.tools.chat_read_tool import ChatReadTool
 from xuloom.tools.file_edit_tool import FileEditTool
 from xuloom.tools.file_read_tool import FileReadTool
 from xuloom.tools.file_write_tool import FileWriteTool
@@ -35,7 +36,7 @@ from xuloom.tools.web_tool import WebFetchTool, WebSearchTool
 __all__ = ["default_tools", "LATENT_TOOL_NAMES"]
 
 LATENT_TOOL_NAMES = frozenset({
-    "tool_sequence",
+    "tool_sequence", "chat_read_tool",
     "goal_report_tool",
     "schedule_tool",
     "browser_tool",
@@ -51,6 +52,7 @@ def default_tools() -> dict:
     tools = {
         "bash_tool": BashTool(),
         "command_tool": CommandTool(),
+        "chat_read_tool": ChatReadTool(),
         "file_read_tool": FileReadTool(),
         "file_edit_tool": FileEditTool(),
         "file_write_tool": FileWriteTool(),

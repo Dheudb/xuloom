@@ -4,6 +4,11 @@
 
 ## [未发布]
 
+## [0.1.49] - 2026-11-12
+
+### 新增
+- 只读会话工具 `chat_read_tool`：模型可按用户提供的聊天链接分页读取其他项目的已保存历史。工具按需加载，不增加默认 Prompt；CLI `transcript --link` 使用同一入口。SSH 只连接已配置目标，不初始化或重放会话。
+
 ## [0.1.48] - 2026-11-12
 
 ### 修复
@@ -117,7 +122,8 @@
 - 引擎拆分为 `xuloom/core/engine_parts/` 下的多个 mixin，主循环拆成多个阶段方法。
 - 新增不可变的 `EngineConfig` 和顶层公开 API（`from xuloom import ...`）。
 
-[未发布]: https://github.com/Dheudb/xuloom/compare/v0.1.48...HEAD
+[未发布]: https://github.com/Dheudb/xuloom/compare/v0.1.49...HEAD
+[0.1.49]: https://github.com/Dheudb/xuloom/compare/v0.1.48...v0.1.49
 [0.1.48]: https://github.com/Dheudb/xuloom/compare/v0.1.47...v0.1.48
 [0.1.47]: https://github.com/Dheudb/xuloom/compare/v0.1.46...v0.1.47
 [0.1.45]: https://github.com/Dheudb/xuloom/compare/v0.1.44...v0.1.45

@@ -37,6 +37,25 @@ Python 接口为 `xuloom.features.chat_links.chat_link(cwd, session_id)` 和 `re
 
 终端远端聊天支持 `/link`、`/status`、`/git`、`/skills`、`/agents`、`/files`、`/read`、`/model list|status|use N`、`/thinking enabled|disabled`、`/effort LEVEL`、`/permission ask|full`、`/collaboration solo|auto|ultra`、`/sandbox host|workspace`、`/plan on|off`、`/continue` 和 `/quit`。`$` 补全读取远端技能快照。选择题和审批要实际输入后才回传；空输入不默认批准。Ctrl+C 停止本连接拥有的任务，`/continue` 使用远端原回合恢复，不追加合成提示词。非交互批处理继续使用 `remote exec --json`；`remote chat --json` 在连接前明确拒绝。
 
+## 模型按链接只读历史
+
+在 CLI 或桌面聊天中粘贴有效聊天链接并要求读取，框架会按需暴露 `chat_read_tool`；平时它仍隐藏，可用现有工具搜索发现。不会增加系统 Prompt，也不会自动读取所有链接。模型实际调用时取得已保存的用户/助手消息和工具回执；历史是参考数据，不能替代当前用户授权。不会切换当前项目、恢复目标任务或获取目标会话的写锁。
+
+非交互读取不需要模型配置：
+
+```shell
+xuloom transcript --link "xuloom://chat/v1/项目标识/会话ID" --limit 40 --json
+xuloom transcript --link "xuloom://chat/v1/项目标识/会话ID" --cursor "上一页的nextCursor" --json
+```
+
+`--link` 与原来的 `--session` 二选一；`--agent` 仍只能读取目标会话登记的子代理。Python 异步接口是 `await xuloom.features.chat_links.read_link(url, cursor=None, limit=40, agent_id=None)`。分页复用既有快照校验，历史变化后旧游标明确失败，重新从第一页读取。只返回可展示历史，不返回系统提示、连接配置或内部协议字段；用户自己写进消息的敏感内容仍属于历史正文。
+
+归档或工作目录丢失时，中央存储中的历史仍可只读查询，不恢复归档、不创建目录。删除、损坏、迁移歧义、错误链接明确报错。图片只返回已有历史标记，不自动下载图片或附件。工作区系统隔离与禁用工具规则仍然适用，不通过此工具绕过跨目录限制。
+
+SSH 链接仅支持本机已经配置并验证目标的连接，推理与任务均不会启动。远端需要包含显式 `sessionId` 只读接口的新版 Xuloom；旧远端或网络失败会报错，不退回本地、不重发任务。聊天链接本身不携带内容，来自另一台未配置机器的本机链接仍不能读取。
+
+验证使用隔离历史、本地假模型和隐藏 Electron；覆盖跨项目读取、分页变化、归档/目录丢失、禁用工具、子代理归属、SSH 失败关闭、正式 CLI 和桌面调用，不调用远端模型。
+
 ## 边界
 
 - 严格接受本机 v1 与 SSH v1 地址，拒绝查询参数、片段、凭据、编码路径、其他 scheme 和超长 ID。链接不能指定 Shell、工作目录或新权限。
