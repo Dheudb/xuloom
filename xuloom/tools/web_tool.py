@@ -19,6 +19,11 @@ SEARCH_RETRY_DELAY = 0.75
 
 async def builtin_search(factory, query, limit, options, abort=None):
     mode, proxies, route = search_network(options.get("network_mode"))
+    if mode == "auto":
+        from xuloom.core.network_routes import preferred_route, route_file
+        from xuloom.core.request_flow import connection_id
+        identity = connection_id(options["base_url"], options.get("api_key", "")) if options.get("base_url") else None
+        _, proxies, route = search_network(preferred_route(route_file(identity)))
     secrets = diagnostic_secrets(options, proxies)
     deadline = asyncio.get_running_loop().time() + SEARCH_TOTAL_TIMEOUT
     failures = []

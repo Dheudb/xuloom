@@ -1,4 +1,5 @@
 """Explicit model networking, shared by main agents, workers and compaction."""
+import importlib
 import os
 import inspect
 import uuid
@@ -6,10 +7,16 @@ import uuid
 import httpx
 
 from xuloom.core.config import load_config
+from xuloom.core.network_routes import MODES, automatic_transport, exhausted_routes
 
 
 def model_error_message(error):
     """Do not expose response bodies, credentials or signed URLs in API failures."""
+    failure = exhausted_routes(error)
+    if failure:
+        labels = {"direct": "直连", "system": "系统代理"}
+        details = "、".join(f"{labels[route]}（{reason}）" for route, reason in failure.failures)
+        return f"模型连接失败，已尝试{details}。请检查网络、代理和 API 地址。已有结果保留。"
     status = getattr(error, "status_code", None)
     if status in (401, 403):
         return f"模型服务认证或权限失败（HTTP {status}）；请检查 Key、账号权限和 API 地址。已有结果保留。"
@@ -35,28 +42,30 @@ def model_error_message(error):
 
 def model_network_mode(value=None):
     mode = value if value is not None else os.environ.get("XULOOM_NETWORK_MODE") or load_config().get("network_mode", "direct")
-    if mode not in {"direct", "system"}:
+    if mode not in MODES:
         raise ValueError("Unknown model network mode")
     return mode
 
 
-def model_http_client(client_type=None, *, network_mode=None, flow=None, request_owner=None):
-    # httpx also reads the Windows registry when trust_env=True. A system
-    # proxy can silently break otherwise reachable local/custom model APIs.
+def model_http_client(client_type=None, *, network_mode=None, flow=None, request_owner=None, route_identity=None, timeout=None):
+    mode = model_network_mode(network_mode)
+    base = client_type or httpx.AsyncClient
+    options = {"trust_env": mode == "system", "follow_redirects": False,
+               "event_hooks": {"request": [_remove_empty_account_headers]}}
+    if mode == "auto":
+        library = importlib.import_module(next(cls.__module__.split('.')[0] for cls in base.__mro__
+            if cls.__module__.split('.')[0] in {"httpx", "httpx2"}))
+        options["transport"] = automatic_transport(library, route_identity or (flow.root.name if flow else None))
     if flow is not None:
         from xuloom.core.request_flow import http_client_type
-        client_type = http_client_type(client_type or httpx.AsyncClient, flow, request_owner or uuid.uuid4().hex)
-    if client_type is not None:
-        # SDK factories supply their own timeout/limits and the HTTP library
-        # version they require (recent Anthropic SDKs use httpx2).
-        return client_type(trust_env=model_network_mode(network_mode) == "system", follow_redirects=False,
-                           event_hooks={"request": [_remove_empty_account_headers]})
-    return httpx.AsyncClient(
-        trust_env=model_network_mode(network_mode) == "system",
-        timeout=httpx.Timeout(600, connect=10),
-        follow_redirects=False,
-        event_hooks={"request": [_remove_empty_account_headers]},
-    )
+        base = http_client_type(base, flow, request_owner or uuid.uuid4().hex)
+    if timeout is not None:
+        options["timeout"] = timeout
+    elif client_type is None and flow is None:
+        options["timeout"] = httpx.Timeout(600, connect=10)
+    client = base(**options)
+    client.xuloom_network_mode = mode
+    return client
 
 
 async def _remove_empty_account_headers(request):

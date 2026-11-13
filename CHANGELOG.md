@@ -4,6 +4,12 @@
 
 ## [未发布]
 
+## [0.1.50] - 2026-11-13
+
+### 新增
+- 桌面右侧的上下文标签页用分段条和分类表展示消息、系统工具、MCP 工具、系统提示、记忆及可用空间。待加载工具单独计数，展开可查看 MCP 工具和记忆文件。
+- 新建模型连接默认自动选择直连或系统代理，记住每条 API 连接的成功线路。连接失败后尝试另一条可用线路，获取模型列表与对话共享记录。
+
 ## [0.1.49] - 2026-11-12
 
 ### 新增
@@ -122,7 +128,8 @@
 - 引擎拆分为 `xuloom/core/engine_parts/` 下的多个 mixin，主循环拆成多个阶段方法。
 - 新增不可变的 `EngineConfig` 和顶层公开 API（`from xuloom import ...`）。
 
-[未发布]: https://github.com/Dheudb/xuloom/compare/v0.1.49...HEAD
+[未发布]: https://github.com/Dheudb/xuloom/compare/v0.1.50...HEAD
+[0.1.50]: https://github.com/Dheudb/xuloom/compare/v0.1.49...v0.1.50
 [0.1.49]: https://github.com/Dheudb/xuloom/compare/v0.1.48...v0.1.49
 [0.1.48]: https://github.com/Dheudb/xuloom/compare/v0.1.47...v0.1.48
 [0.1.47]: https://github.com/Dheudb/xuloom/compare/v0.1.46...v0.1.47

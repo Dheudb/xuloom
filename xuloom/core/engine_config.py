@@ -104,7 +104,7 @@ class EngineConfig:
     fallback_model: Optional[str] = None
     """Model retried when the primary model fails; defaults to the primary model."""
     network_mode: Optional[str] = None
-    """``"direct"``, ``"system"`` or ``None`` for the configured default."""
+    """``"auto"``, ``"direct"``, ``"system"`` or ``None`` for the configured default."""
     model_contract: Optional[Mapping[str, Any]] = None
     """Exact capability contract of a saved connection (reasoning/search/inputs)."""
 

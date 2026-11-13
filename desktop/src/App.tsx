@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowUp,
   ArrowUpRight,
@@ -40,7 +40,6 @@ import ComposerMenu from "./ComposerMenu";
 import ExecutionDialog from "./ExecutionDialog";
 import SchedulePanel from "./SchedulePanel";
 import GoalEditor from "./GoalEditor";
-import ContextDialog from "./ContextDialog";
 import CreateProjectDialog from "./CreateProjectDialog";
 import GoalStrip from "./GoalStrip";
 import GitStatus from "./GitStatus";
@@ -75,7 +74,6 @@ export default function App() {
   const [modelChanging, setModelChanging] = useState(false);
   const [permissionChanging, setPermissionChanging] = useState(false);
   const [goalDialog, setGoalDialog] = useState<"goal" | "all" | null>(null);
-  const [contextOpen, setContextOpen] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [collaborationChanging, setCollaborationChanging] = useState(false);
   const [executionDialog, setExecutionDialog] = useState(false);
@@ -247,9 +245,8 @@ export default function App() {
       ),
     );
   }
-  async function invoke(method: string, params: Record<string, unknown> = {}) {
-    return window.xuloom.invoke(method, { session: activeId, ...params });
-  }
+  const invoke = useCallback((method: string, params: Record<string, unknown> = {}) =>
+    window.xuloom.invoke(method, { session: activeId, ...params }), [activeId]);
   async function workspaceAction(method: string, params: Record<string, unknown>) {
     const preferenceWrite = method === "catalog.view" ? preferences.current.begin(params as Partial<SessionCatalog["view"]>) : undefined;
     if (preferenceWrite) setCatalog(preferenceWrite.catalog);
@@ -326,7 +323,7 @@ export default function App() {
     } });
   }
   function composerAction(name: string) {
-    if (name === "context") { setContextOpen(true); return; }
+    if (name === "context") { setFilePreview(undefined); setPanelTab("context"); setPanelOpen(true); return; }
     if (name === "isolation") { setExecutionDialog(true); return; }
     if (name === "files") fileInput.current?.click();
     else if (name === "goal") {
@@ -370,7 +367,7 @@ export default function App() {
     finally { setSteeringSending(false); }
   }
   async function send() {
-    if (active?.controlledExecution) return;
+    if (active?.controlledExecution || active?.contextCompacting) return;
     if (active?.busy && active.steering) { await appendInput(); return; }
     if (resumeAvailable) { await resume(); return; }
     if (active?.pendingInputs?.length && !active.busy) { onError(t("还有未送达的补充要求，请继续原任务，或先取消这些消息再开始新任务。")); return; }
@@ -910,7 +907,7 @@ export default function App() {
                     className={"send-button" + (resumeAvailable ? " resume" : "")}
                     aria-label={resumeAvailable ? t("继续执行") : t("发送任务")}
                     title={resumeAvailable ? t("继续原任务，不新增消息") : t("发送任务")}
-                    disabled={opening || importing || modelChanging || permissionChanging || collaborationChanging || !!active?.controlledExecution || !!active?.attachments.some(item => item.available === false) || (!resumeAvailable && !active?.draft.trim() && !active?.attachments.length)}
+                    disabled={opening || importing || modelChanging || permissionChanging || collaborationChanging || !!active?.controlledExecution || !!active?.contextCompacting || !!active?.attachments.some(item => item.available === false) || (!resumeAvailable && !active?.draft.trim() && !active?.attachments.length)}
                     onClick={() => void send()}
                   >
                     {resumeAvailable ? <Play size={16} fill="currentColor" /> : <ArrowUp size={19} />}
@@ -948,7 +945,6 @@ export default function App() {
       </div>}
       {executionDialog && active && <ExecutionDialog key={active.id} invoke={invoke} close={() => setExecutionDialog(false)} saved={(mode) => update({ executionMode: mode })} onError={onError} />}
       {createProjectOpen && <CreateProjectDialog create={(name, path) => workspaceAction("project.create", { name, path })} close={() => setCreateProjectOpen(false)} />}
-      {contextOpen && active && <ContextDialog key={activeId} invoke={invoke} busy={active.busy || !!runningWorkers || !!runningCommands} close={() => setContextOpen(false)} />}
       {goalDialog && active && <div className="overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setGoalDialog(null); }}>
         <section className="dialog composer-goal-dialog" role="dialog" aria-modal="true" aria-label={goalDialog === "goal" ? t("调整目标") : t("定时唤醒")}
           onKeyDown={(event) => {
@@ -976,6 +972,7 @@ export default function App() {
           key={activeId || "empty"}
           session={active}
           activityQuery={activityQuery}
+          contextBusy={opening || modelChanging || !!active?.busy || !!runningWorkers || !!runningCommands || !!active?.controlledExecution}
           tab={panelTab}
           setTab={setPanelTab}
           invoke={invoke}

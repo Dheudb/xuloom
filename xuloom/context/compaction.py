@@ -64,10 +64,12 @@ def policy(engine, model=None):
         source="model" if profile["window"] else "environment" if override else spec['source'] if spec else "conservative_default")
 
 
-def request_parts(engine):
-    engine.refresh_memory_files()
+def request_parts(engine, *, memory=None):
+    if memory is None:
+        engine.refresh_memory_files()
+        memory = engine.get_memory_summary()
     system = engine.context_builder.generate_system_prompt(session_summary=engine.plan_manager.render_prompt_summary(),
-        todo_summary=engine.todo_manager.render_prompt_summary(), memory_summary=engine.get_memory_summary(),
+        todo_summary=engine.todo_manager.render_prompt_summary(), memory_summary=memory,
         structured_output_summary=engine.structured_output_manager.render_prompt_summary(),
         tool_prompt_summary=engine._build_tool_prompt_summary(), collaboration_summary=engine._collaboration_instructions(),
         mcp_instructions=engine._build_mcp_instructions()) + engine._get_coordinator_system_prompt_addon()
@@ -113,13 +115,39 @@ def route(engine):
 
 def status(engine):
     spec = policy(engine)
-    system, tools, thinking = request_parts(engine)
+    engine.refresh_memory_files()
+    memory = engine.get_memory_summary()
+    system, tools, thinking = request_parts(engine, memory=memory)
     messages = engine._get_messages_after_compact_boundary()
     total = measure(engine, messages, system, tools, thinking)
     count = engine.compactor.estimate_request_tokens
+    system_tokens = count([], system=system) if system else 0
+    tool_tokens = count([], tools=tools) if tools else 0
+    memory_tokens = min(system_tokens, engine.compactor._estimate_text_tokens(memory)) if memory else 0
+    conversation = max(0, total - system_tokens - tool_tokens)
+    files = engine.memory_file_manager.loaded_files
+
+    from xuloom.protocols.mcp_bridge import MCPToolWrapper
+    def is_mcp(tool):
+        return isinstance(tool, MCPToolWrapper)
+
+    catalog = {**engine._get_effective_tools(), **engine.latent_tools}
+    active_names = {definition.get("function", definition)["name"] for definition in tools}
+    mcp_names = {name for name, tool in catalog.items() if is_mcp(tool)}
+    mcp_tools = [definition for definition in tools if definition.get("function", definition)["name"] in mcp_names]
+    mcp_tokens = min(tool_tokens, count([], tools=mcp_tools)) if mcp_tools else 0
+    from xuloom.agents.ultra_execution import NAMES
+    deferred = catalog.keys() - active_names - NAMES
+    deferred_mcp = len(deferred & mcp_names)
     return dict(spec, estimatedTokens=total, availableTokens=max(0, spec["window"]-total),
-        components=dict(system=count([], system=system), tools=count([], tools=tools),
-            conversation=max(0, total-count([], system=system)-count([], tools=tools)), memoryCharacters=sum(item.get("chars", 0) for item in engine.memory_file_manager.loaded_files)),
+        components=dict(system=system_tokens, tools=tool_tokens, conversation=conversation,
+                        memoryCharacters=sum(item.get("chars", 0) for item in files)),
+        breakdown=dict(messages=conversation, tools=tool_tokens - mcp_tokens, mcp=mcp_tokens,
+                       system=system_tokens - memory_tokens, memory=memory_tokens,
+                       deferredTools=len(deferred) - deferred_mcp, deferredMcp=deferred_mcp,
+                       mcpTools=[{"name": name, "active": name in active_names} for name in sorted(mcp_names)],
+                       memoryFiles=[{"path": item["path"], "truncated": item.get("truncated", False)}
+                                                             for item in files]),
         last=copy.deepcopy(getattr(engine, "last_compaction", None)),
         auxiliary=copy.deepcopy(getattr(engine, "auxiliary_usage", {})), estimator=engine.compactor._local_estimator_mode(),
         cost=dict(getattr(engine, "session_cost", None) or {"usd": 0.0, "unpriced_requests": 0},

@@ -14,6 +14,7 @@ import {
   Activity,
   X,
   FolderTree,
+  ChartPie,
 } from "lucide-react";
 import type { SessionView, Skill, FileChange } from "./types";
 import ChangesPanel from "./ChangesPanel";
@@ -23,6 +24,7 @@ import ActivityPanel from "./ActivityPanel";
 import WorkspaceTree from "./WorkspaceTree";
 import WorkerHistory from "./WorkerHistory";
 import PipelineTree from "./PipelineTree";
+import ContextPanel from "./ContextPanel";
 import { t, tServer, tx } from "./i18n";
 
 export default function CapabilityPanel({
@@ -36,6 +38,7 @@ export default function CapabilityPanel({
   onOpenFile,
   onNavigateChat,
   activityQuery,
+  contextBusy,
 }: {
   session?: SessionView;
   tab: string;
@@ -47,6 +50,7 @@ export default function CapabilityPanel({
   onOpenFile: (path: string, change?: FileChange) => void;
   onNavigateChat: (url: string) => void;
   activityQuery?: string;
+  contextBusy: boolean;
 }) {
   const [preview, setPreview] = useState<{ name: string; text: string; kind?: "agent" } | null>(
     null,
@@ -86,11 +90,13 @@ export default function CapabilityPanel({
           { id: "activity", label: t("活动"), icon: Activity },
           { id: "changes", label: t("变更"), icon: FileDiff },
           { id: "files", label: t("文件"), icon: FolderTree },
+          { id: "context", label: t("上下文"), icon: ChartPie },
         ].map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             className={tab === id ? "active" : ""}
             title={label}
+            aria-label={label}
             aria-pressed={tab === id}
             onClick={() => setTab(id)}
           >
@@ -343,6 +349,9 @@ export default function CapabilityPanel({
           )}
           {tab === "changes" && <ChangesPanel key={session.id} session={session} invoke={invoke} onOpen={onOpenFile} />}
           {tab === "files" && <WorkspaceTree sessionId={session.id} project={session.project} changes={session.fileChanges} onOpen={onOpenFile} />}
+          {tab === "context" && <ContextPanel invoke={invoke} busy={contextBusy} working={!!session.contextCompacting}
+            model={session.config} compactError={session.contextCompactError}
+            setCompaction={(contextCompacting, contextCompactError) => update({ contextCompacting, contextCompactError })} />}
         </>
       )}
       {guide && session && <CapabilityGuide kind={guide} session={session} invoke={invoke} update={update} close={() => setGuide(null)} />}

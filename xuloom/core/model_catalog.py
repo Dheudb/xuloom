@@ -49,7 +49,7 @@ def active_connection(cfg):
     items = connections(cfg)
     if not items:
         return {"id": "", "name": "", "provider": cfg.get("model_provider") if cfg.get("model_provider") in {"openai", "anthropic"} else "openai",
-                "model": "", "models": [], "base_url": "", "api_key": "", "network_mode": "direct"}
+                "model": "", "models": [], "base_url": "", "api_key": "", "network_mode": "auto"}
     return next((item for item in items if item["id"] == cfg.get("active_model_connection")), None) or next(
         (item for item in items if item["provider"] == (cfg.get("model_provider") or os.environ.get("XULOOM_MODEL_PROVIDER", "anthropic"))), items[0])
 
@@ -149,15 +149,14 @@ def save_connection(cfg, params):
     if not model:
         raise ValueError("Model ID is required")
     base = normalize_api_base_url(provider, params.get("baseUrl", ""))
-    mode = params.get("networkMode", "direct")
-    if mode not in {"direct", "system"}:
-        raise ValueError("Unknown network mode")
     items = connections(cfg)
     active = active_connection(cfg)
     identity = params.get("connectionId") or (active["id"] if active["provider"] == provider and active["id"] else "legacy-" + provider)
     if not isinstance(identity, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", identity):
         raise ValueError("API 连接 ID 无效")
     previous = next((item for item in items if item["id"] == identity), {})
+    from xuloom.core.network import model_network_mode
+    mode = model_network_mode(params.get("networkMode", previous.get("network_mode", "auto")))
     key = params.get("apiKey") or (previous.get("api_key", "") if previous.get("provider") == provider else "")
     from xuloom.security.credentials import api_key as checked_key
     key = checked_key(key)
@@ -254,7 +253,7 @@ def sync_legacy_connection(cfg):
     active = active_connection(cfg)
     identity = active["id"] if active["provider"] == provider else "legacy-" + provider
     return save_connection(cfg, {"connectionId": identity, "provider": provider, "model": cfg.get(provider + "_model", ""),
-        "baseUrl": cfg.get(provider + "_base_url", ""), "apiKey": cfg.get(provider + "_api_key", ""), "networkMode": cfg.get("network_mode", "direct")})
+        "baseUrl": cfg.get(provider + "_base_url", ""), "apiKey": cfg.get(provider + "_api_key", ""), "networkMode": cfg.get("network_mode", "auto")})
 
 
 async def discover_models(cfg, params):
@@ -277,9 +276,12 @@ async def discover_models(cfg, params):
     url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path.rstrip("/") + "/models", parsed.query, ""))
     names = []
     contexts = {}
-    mode = params.get("networkMode", (previous or {}).get("network_mode", "direct"))
+    from xuloom.core.network import model_http_client, model_error_message
+    from xuloom.core.network_routes import RoutesUnavailable
+    from xuloom.core.request_flow import connection_id
+    mode = params.get("networkMode", (previous or {}).get("network_mode", "auto"))
     try:
-        async with httpx.AsyncClient(trust_env=mode == "system", timeout=30, follow_redirects=False) as client:
+        async with model_http_client(network_mode=mode, route_identity=connection_id(base, key), timeout=30) as client:
             after = None
             for _ in range(20):
                 response = await client.get(url, headers=headers, params={"after_id": after} if after else None)
@@ -306,6 +308,8 @@ async def discover_models(cfg, params):
                 after = next_id
             else:
                 raise ValueError("模型列表过长，请手动填写需要的模型 ID")
+    except RoutesUnavailable as error:
+        raise ValueError(model_error_message(error)) from None
     except (httpx.HTTPError, TypeError, KeyError):
         raise ValueError("无法连接模型列表接口，请检查连接方式和 API 地址；也可以手动填写模型 ID") from None
     except json.JSONDecodeError:

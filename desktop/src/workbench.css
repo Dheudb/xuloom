@@ -238,7 +238,8 @@ a, .markdown-link, .inline-file-link { color: var(--link); text-decoration-color
 .inspector > .panel-tabs button { flex: 1; min-width: 0; gap: 4px; padding: 0 4px; font-size: 12px; color: var(--text-muted); }
 .panel-tabs button.active { color: var(--text); font-weight: 550; }
 .inspector > .panel-tabs button:hover { background: var(--surface-soft); color: var(--text); }
-.inspector > .panel-tabs button svg { width: 15px; height: 15px; }
+.inspector > .panel-tabs button svg { width: 14px; height: 14px; flex: none; }
+.inspector > .panel-tabs button span { overflow: hidden; text-overflow: ellipsis; }
 .panel-tabs button.active:after { height: 2px; left: 12px; right: 12px; bottom: 9px; border-radius: 2px; background: var(--brand); }
 .panel-title { margin: 25px 22px 18px; }
 .panel-title h3 { font-size: 15px; font-weight: 600; }
@@ -341,6 +342,7 @@ a, .markdown-link, .inline-file-link { color: var(--link); text-decoration-color
 .attachment-preview > header button { border: 0; background: transparent; }
 .attachment-preview > img { display: block; max-width: 85vw; max-height: 75vh; object-fit: contain; }
 @container (max-width: 340px) {
+  .inspector > .panel-tabs button { gap: 0; padding: 0 1px; }
   .inspector > .panel-tabs button svg { display: none; }
 }
 @media (max-width: 1200px) {

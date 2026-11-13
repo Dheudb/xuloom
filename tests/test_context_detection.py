@@ -68,8 +68,8 @@ class MetadataTests(unittest.IsolatedAsyncioTestCase):
                 {'id': 'bad', 'context_window': True},
                 {'id': 'embed', 'type': 'embedding', 'context_length': 8192}]})
         real = httpx.AsyncClient
-        with patch('xuloom.core.model_catalog.httpx.AsyncClient', side_effect=lambda **kw:
-                   real(transport=httpx.MockTransport(respond), **kw)):
+        with patch('xuloom.core.network.model_http_client', side_effect=lambda **kw:
+                   real(transport=httpx.MockTransport(respond), timeout=kw["timeout"])):
             result = await discover_models(cfg, {'connectionId': 'gateway'})
         self.assertEqual(result['modelContext']['a']['window'], 1048576)
         self.assertEqual(result['modelContext']['b']['window'], 262144)

@@ -14,7 +14,8 @@ class OpenAIAdapter(ModelAdapter):
     def create_client(self, *, model, api_base_url, api_key, http_client):
         from openai import AsyncOpenAI
         from xuloom.core.network import openai_credentials
-        return AsyncOpenAI(base_url=api_base_url or self.default_base_url, http_client=http_client,
+        retries = {"max_retries": 0} if getattr(http_client, "xuloom_network_mode", None) == "auto" else {}
+        return AsyncOpenAI(**retries, base_url=api_base_url or self.default_base_url, http_client=http_client,
                            **openai_credentials(api_key, AsyncOpenAI))
 
     def sdk_http_client_type(self):
@@ -30,7 +31,8 @@ class AnthropicAdapter(ModelAdapter):
     def create_client(self, *, model, api_base_url, api_key, http_client):
         from anthropic import AsyncAnthropic
         from xuloom.core.network import anthropic_credentials
-        return AsyncAnthropic(base_url=api_base_url or self.default_base_url, http_client=http_client,
+        retries = {"max_retries": 0} if getattr(http_client, "xuloom_network_mode", None) == "auto" else {}
+        return AsyncAnthropic(**retries, base_url=api_base_url or self.default_base_url, http_client=http_client,
                               **anthropic_credentials(api_key))
 
     def sdk_http_client_type(self):

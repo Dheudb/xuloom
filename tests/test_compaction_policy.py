@@ -29,6 +29,29 @@ class CompactionPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.engine.persist_session_state())
         return copy.deepcopy(self.engine.messages)
 
+    async def test_context_breakdown_separates_loaded_and_deferred_tools_and_memory(self):
+        from xuloom.protocols.mcp_bridge import MCPToolWrapper
+
+        self.setup_history()
+        path = str(self.root / "MEMORY.md")
+        files = [{"path": path, "content": "Saved test evidence", "chars": 19, "truncated": True}]
+        with patch.object(self.engine.memory_file_manager, "refresh", return_value=files):
+            self.engine.memory_file_manager.loaded_files = files
+            for name in ("fixture_read", "fixture_deferred"):
+                tool = MCPToolWrapper.__new__(MCPToolWrapper)
+                tool.name, tool.description, tool.raw_schema = name, "Read fixture", {"type": "object"}
+                self.engine.register_mcp_tools({name: tool})
+            self.engine.activate_tools(["fixture_read"])
+            snapshot = ctx.status(self.engine)
+        usage = snapshot["breakdown"]
+        self.assertEqual(sum(usage[key] for key in ("messages", "tools", "mcp", "system", "memory")), snapshot["estimatedTokens"])
+        self.assertGreater(usage["mcp"], 0)
+        self.assertGreater(usage["memory"], 0)
+        self.assertEqual(usage["deferredMcp"], 1)
+        self.assertEqual(usage["mcpTools"], [{"name": "fixture_deferred", "active": False}, {"name": "fixture_read", "active": True}])
+        self.assertEqual(usage["memoryFiles"], [{"path": path, "truncated": True}])
+        self.assertNotIn("Saved test evidence", json.dumps(snapshot))
+
     async def test_notice_spans_real_summary_and_only_completes_after_checkpoint(self):
         self.setup_history()
         entered, release = asyncio.Event(), asyncio.Event()

@@ -98,6 +98,8 @@ class ModelSamplingMixin(EngineState):
         return min(default_tokens, DEFAULT_CAPPED_MAX_TOKENS)
 
     def _is_model_fallback_error(self, error: Exception) -> bool:
+        if self.network_mode == "auto":
+            return False  # The HTTP transport owns retries and preserves uncertain outcomes.
         adapter = self._model_adapter()
         if adapter is not None and not adapter.native and adapter.is_transient_error(error):
             return True

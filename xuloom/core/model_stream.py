@@ -446,7 +446,7 @@ class ModelStream(EngineState):
                 disable_fallback = os.environ.get(
                     "XULOOM_DISABLE_NONSTREAMING_FALLBACK", ""
                 )
-                if disable_fallback:
+                if disable_fallback or self.network_mode == "auto":
                     raise
 
                 sys_print_callback(

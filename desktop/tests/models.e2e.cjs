@@ -113,6 +113,7 @@ async function main() {
     await save();
     const secondId = readConfig().active_model_connection;
     assert.equal(readConfig().model_connections.length, 2);
+    assert.equal(readConfig().model_connections.find(row => row.id === secondId).network_mode, "auto");
     await send("切到另一个 API", "other");
     assert(requests.some((request) => request.server === "second" && request.body?.model === "other"));
     const publicConfig = await page.evaluate(() => window.xuloom.invoke("config.get"));

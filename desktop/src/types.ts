@@ -57,7 +57,7 @@ export type ModelConfig = {
   hasKey: boolean;
   credentialUnavailable?: boolean;
   credentialStorage?: { mode: string; unavailable: string[] };
-  networkMode?: "direct" | "system";
+  networkMode?: "auto" | "direct" | "system";
   models?: string[];
   modelInputs?: Record<string, ("text" | "image" | "document")[]>;
   modelReasoning?: Record<string, ReasoningProfile>;
@@ -191,6 +191,8 @@ export type SessionView = InitialSession & {
   busy: boolean;
   error: string;
   messages: HistoryItem[];
+  contextCompacting?: boolean;
+  contextCompactError?: string;
   streamIndex: number | null;
   tools: ToolActivity[];
   workers: Worker[];

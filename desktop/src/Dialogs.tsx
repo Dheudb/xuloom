@@ -71,7 +71,7 @@ export function SettingsDialog({
     baseUrl: config?.baseUrl || "",
     hasKey: !!config?.hasKey,
     apiKey: "",
-    networkMode: config?.networkMode || "direct",
+    networkMode: config?.networkMode || "auto",
     modelInputs: config?.modelInputs || {} as NonNullable<ModelConfig["modelInputs"]>,
     modelReasoning: config?.modelReasoning || {} as NonNullable<ModelConfig["modelReasoning"]>,
     modelContext: config?.modelContext || {} as NonNullable<ModelConfig["modelContext"]>,
@@ -172,7 +172,7 @@ export function SettingsDialog({
               {!config?.connections?.some((connection) => connection.connectionId === form.connectionId) && <option value={form.connectionId}>{displayName(form.connectionName)}</option>}
             </select></label>
             <button aria-label={t("新增 API")} disabled={discovering || saving} onClick={() => {
-              setForm({ connectionId: crypto.randomUUID(), connectionName: t("新 API"), provider: "openai", model: "", baseUrl: "", hasKey: false, apiKey: "", networkMode: "direct", modelInputs: {}, modelReasoning: {}, modelContext: {}, nativeSearch: { backend: 'builtin', model: '', baseUrl: '' } });
+              setForm({ connectionId: crypto.randomUUID(), connectionName: t("新 API"), provider: "openai", model: "", baseUrl: "", hasKey: false, apiKey: "", networkMode: "auto", modelInputs: {}, modelReasoning: {}, modelContext: {}, nativeSearch: { backend: 'builtin', model: '', baseUrl: '' } });
               setModelsText(""); setDiscoveryStatus(""); setError(""); setDeleteId("");
             }}><Plus size={14} />{t("新增")}</button>
             <button aria-label={t("删除 API")} title={t("删除此连接")} className="danger" disabled={!savedConnection || saving || discovering || deleting} onClick={() => { setDeleteId(form.connectionId); setError(""); }}><Trash2 size={15} /></button>
@@ -275,7 +275,8 @@ export function SettingsDialog({
             <ContextSettings provider={form.provider} value={form.modelContext[form.model]} spec={savedConnection?.baseUrl === form.baseUrl && savedConnection?.provider === form.provider ? savedConnection.modelSpecs?.[form.model] : undefined} change={value => setForm({ ...form, modelContext: { ...form.modelContext, [form.model]: value } })} />
             <section className="model-option-section"><h4>{t("连接选项")}</h4><div className="model-options-grid">          <label>{t("连接名称")}<input aria-label={t("连接名称")} value={form.connectionName} onChange={(event) => setForm({ ...form, connectionName: event.target.value })} /></label>
           <label>{t("连接方式")}<select aria-label={t("连接方式")} value={form.networkMode}
-              onChange={(e) => setForm({ ...form, networkMode: e.target.value as "direct" | "system" })}>
+              onChange={(e) => setForm({ ...form, networkMode: e.target.value as NonNullable<ModelConfig["networkMode"]> })}>
+              <option value="auto">{t("自动（记住可用线路）")}</option>
               <option value="direct">{t("直接连接")}</option>
               <option value="system">{t("系统代理")}</option>
             </select>

@@ -109,7 +109,7 @@ class ModelCatalogTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(request.headers["authorization"], "Bearer first-secret")
             return httpx.Response(200, json={"data": [{"id": "one"}, {"id": "new", "type": "chat"}, {"id": "one"}, {"id": "embed", "type": "embedding"}]})
         factory = httpx.AsyncClient
-        with patch("xuloom.core.model_catalog.httpx.AsyncClient", side_effect=lambda **kwargs: factory(transport=httpx.MockTransport(handler), **kwargs)):
+        with patch("xuloom.core.network.model_http_client", side_effect=lambda **kwargs: factory(transport=httpx.MockTransport(handler), timeout=kwargs["timeout"])):
             result = await discover_models(cfg, {"connectionId": "legacy-openai", "baseUrl": "https://first.invalid/v1/chat/completions"})
         self.assertEqual(result["models"], ["one", "new"])
         self.assertEqual(json.dumps(cfg), original)
@@ -125,10 +125,10 @@ class ModelCatalogTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(request.headers["x-api-key"], "anthropic-secret")
             return httpx.Response(200, json={"data": [{"id": "b" if len(calls) == 2 else "a"}], "has_more": len(calls) == 1, "last_id": "a"})
         factory = httpx.AsyncClient
-        with patch("xuloom.core.model_catalog.httpx.AsyncClient", side_effect=lambda **kwargs: factory(transport=httpx.MockTransport(handler), **kwargs)):
+        with patch("xuloom.core.network.model_http_client", side_effect=lambda **kwargs: factory(transport=httpx.MockTransport(handler), timeout=kwargs["timeout"])):
             self.assertEqual((await discover_models(cfg, {"connectionId": "anthropic-test"}))["models"], ["a", "b"])
         self.assertEqual(calls[1].url.params["after_id"], "a")
-        with patch("xuloom.core.model_catalog.httpx.AsyncClient", side_effect=lambda **kwargs: factory(transport=httpx.MockTransport(lambda request: httpx.Response(401, text="anthropic-secret")), **kwargs)):
+        with patch("xuloom.core.network.model_http_client", side_effect=lambda **kwargs: factory(transport=httpx.MockTransport(lambda request: httpx.Response(401, text="anthropic-secret")), timeout=kwargs["timeout"])):
             with self.assertRaises(ValueError) as error:
                 await discover_models(cfg, {"connectionId": "anthropic-test"})
         self.assertNotIn("anthropic-secret", str(error.exception))

@@ -36,9 +36,14 @@ async function launch() {
 async function openContext() {
   await page.getByRole('button', { name: '添加工具与模式', exact: true }).click();
   await page.getByRole('menuitem', { name: '上下文 查看用量或手动压缩' }).click();
-  await page.getByRole('dialog', { name: '上下文用量' }).waitFor();
-  await page.waitForFunction(() => document.querySelector('.context-total') || document.querySelector('.context-dialog [role="alert"]'));
-  if (await page.locator('.context-dialog [role="alert"]').count()) throw new Error(await page.locator('.context-dialog [role="alert"]').innerText());
+  const panel = page.locator('.inspector').getByRole('region', { name: '上下文用量' });
+  await panel.waitFor();
+  assert.equal(await page.getByRole('dialog', { name: '上下文用量' }).count(), 0);
+  assert.equal(await page.locator('.panel-tabs button.active').innerText(), '上下文');
+  await page.getByRole('textbox', { name: '任务输入' }).focus();
+  assert(await page.getByRole('textbox', { name: '任务输入' }).evaluate(element => element === document.activeElement));
+  await page.waitForFunction(() => document.querySelector('.context-total') || document.querySelector('.context-panel [role="alert"]'));
+  if (await page.locator('.context-panel [role="alert"]').count()) throw new Error(await page.locator('.context-panel [role="alert"]').innerText());
   await page.locator('.context-total').waitFor();
 }
 async function snapshot() {
@@ -59,25 +64,34 @@ async function snapshot() {
     await openContext(); assert.equal(requests.length, 1, 'Inspecting must not call a model');
     const initial = await snapshot();
     assert.equal(initial.window, 32768);
+    const detail = initial.breakdown;
+    assert.equal(detail.messages + detail.tools + detail.mcp + detail.system + detail.memory, initial.estimatedTokens);
+    const meter = page.getByRole('meter', { name: '上下文占用比例' });
+    assert.equal(await meter.getAttribute('aria-valuemax'), '32768');
+    assert.equal(await meter.getAttribute('aria-valuenow'), String(initial.estimatedTokens));
+    assert(await meter.locator('[data-context-kind="messages"]').count());
+    assert(await meter.locator('[data-context-kind="reserve"]').count());
+    assert(await meter.locator('[data-context-kind="free"]').count());
+    assert.equal(await page.locator('.context-deferred [data-context-kind]').count(), 0);
     await page.getByLabel('压缩保留重点', { exact: true }).fill('Keep evidence and authorization');
     await page.getByRole('button', { name: '压缩上下文', exact: true }).click();
-    await page.waitForFunction(() => document.querySelector('.context-dialog')?.textContent.includes('上次压缩：') || document.querySelector('.context-dialog [role="alert"]'));
-    if (await page.locator('.context-dialog [role="alert"]').count()) throw new Error(await page.locator('.context-dialog [role="alert"]').innerText());
+    await page.waitForFunction(() => document.querySelector('.context-panel')?.textContent.includes('上次压缩：') || document.querySelector('.context-panel [role="alert"]'));
+    if (await page.locator('.context-panel [role="alert"]').count()) throw new Error(await page.locator('.context-panel [role="alert"]').innerText());
     await page.getByText(/上次压缩：/).waitFor();
     const report = await snapshot();
     assert(report.last.after < report.last.before); assert(report.last.after <= report.inputBudget);
     assert.equal(report.auxiliary.compaction.calls, 1); assert.equal(report.auxiliary.compaction.input_tokens, 2000);
     assert(fs.existsSync(report.last.archive)); assert(requests[1].messages[0].content.includes('Keep evidence and authorization'));
-    const bounds = await page.locator('.context-dialog').evaluate(element => ({ right: element.getBoundingClientRect().right, width: innerWidth, overflow: element.scrollWidth > element.clientWidth + 1 }));
-    assert(!bounds.overflow && bounds.right <= bounds.width);
+    const bounds = await page.locator('.context-panel').evaluate(element => ({ right: element.getBoundingClientRect().right, width: innerWidth, client: element.clientWidth, scroll: element.scrollWidth, children: [...element.querySelectorAll("*")].filter(child => child.getBoundingClientRect().right > element.getBoundingClientRect().right + 1).slice(0, 8).map(child => [child.tagName, child.className, child.getBoundingClientRect().right]), overflow: element.scrollWidth > element.clientWidth + 1 }));
+    assert(!bounds.overflow && bounds.right <= bounds.width + 1, JSON.stringify(bounds));
     fs.mkdirSync(path.join(root, 'test-results'), { recursive: true });
     const png = await app.evaluate(async ({ BrowserWindow }) => (await BrowserWindow.getAllWindows()[0].webContents.capturePage(undefined, { stayHidden: true, stayAwake: true })).toPNG().toString('base64'));
-    fs.writeFileSync(path.join(root, 'test-results/context-compaction.png'), Buffer.from(png, 'base64'));
-    await page.getByRole('button', { name: '关闭上下文', exact: true }).click();
+    fs.writeFileSync(path.join(root, 'test-results/context-sidebar.png'), Buffer.from(png, 'base64'));
+    await page.getByRole('button', { name: '收起能力面板', exact: true }).click();
     await app.close(); app = null; await launch(); await openContext();
     assert.equal((await snapshot()).last.after, report.last.after);
     assert.equal(requests.length, 2, 'Restart and inspection must not infer or compact again');
-    await page.getByRole('button', { name: '关闭上下文', exact: true }).click();
+    await page.getByRole('button', { name: '收起能力面板', exact: true }).click();
     await page.getByRole('button', { name: '设置与模型', exact: true }).click();
     await page.locator('.model-options > summary').click();
     assert.equal(await page.getByLabel('模型上下文窗口', { exact: true }).inputValue(), '32768');
@@ -93,6 +107,8 @@ async function snapshot() {
     await page.getByRole('button', { name: '压缩上下文', exact: true }).click();
     for (let attempt = 0; attempt < 100 && !summaryEntered; attempt++) await page.waitForTimeout(50);
     assert(summaryEntered, 'The owned summary request must start before cancellation');
+    await page.locator('.panel-tabs').getByRole('button', { name: '活动', exact: true }).click();
+    await page.locator('.panel-tabs').getByRole('button', { name: '上下文', exact: true }).click();
     await page.getByRole('button', { name: '停止压缩', exact: true }).click();
     await page.getByRole('alert').filter({ hasText: '上下文压缩已取消' }).waitFor();
     assert.equal((await snapshot()).estimatedTokens, beforeCancel.estimatedTokens, 'Cancellation must retain the uncompressed conversation');

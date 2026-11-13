@@ -54,7 +54,7 @@ async function checkLayout() {
   assert(result.scrollWidth <= result.viewport, "App must not overflow horizontally");
   assert(result.input.left >= result.main.left && result.input.right <= result.main.right, "Composer must stay within conversation");
   if (result.panel) {
-    assert.deepEqual(await page.locator('.panel-tabs button').allTextContents(), ['Skills', '代理', '活动', '变更', '文件']);
+    assert.deepEqual(await page.locator('.panel-tabs button').allTextContents(), ['Skills', '代理', '活动', '变更', '文件', '上下文']);
     assert(result.tabs.every((tab) => tab.left >= result.panel.left && tab.right <= result.panel.right), "All panel tabs must fit");
     const overflow = await page.locator(".panel-tabs").evaluate(element => element.scrollWidth > element.clientWidth);
     assert.equal(overflow, false, "Tab labels must stay on a single row without clipping");
