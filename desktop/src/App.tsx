@@ -58,6 +58,7 @@ import { clampPanelWidth, clampSidebarWidth, defaultSidebarWidth, DEFAULT_PANEL_
 import useConversationScroll from "./useConversationScroll";
 import Attachments, { AttachmentPreview } from "./Attachments";
 import { displayName, t, tServer, tx } from "./i18n";
+import { notifyOnFinish, type TurnOutcome } from "./turn-notify";
 const basename = (value: string) =>
   value.split(/[\\/]/).filter(Boolean).pop() || value;
 
@@ -101,6 +102,7 @@ export default function App() {
   const [filePreview, setFilePreview] = useState<{ path: string; change?: FileChange; initialView: "diff" | "content"; line?: number; column?: number; directory?: boolean; ownerId?: string }>();
   const input = useRef<HTMLTextAreaElement>(null);
   const navigation = useRef(0);
+  const turnOutcomes = useRef(new Map<string, TurnOutcome>());
   const active = sessions.find((item) => item.id === activeId);
   const selectedModel = active?.config || globalModel;
   const conversationScroll = useConversationScroll(activeId, active?.messages, active?.interactions);
@@ -158,6 +160,11 @@ export default function App() {
         navigateChat.current(event.url);
         return;
       }
+      if (event.type === "notification_open") {
+        setActiveId(event.session);
+        return;
+      }
+      if (event.session) notifyOnFinish(turnOutcomes.current, event);
       if (event.type === "session_loaded") {
         setSessions(previous => previous.some(session => session.id === event.initial.id) ? previous : [...previous, createSession(event.initial)]);
         return;

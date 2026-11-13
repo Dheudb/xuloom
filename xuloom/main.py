@@ -289,6 +289,14 @@ def print_welcome_screen():
     console.print()
 
 
+BELL_AFTER_SECONDS = 10
+
+
+def should_ring_bell(elapsed: float, is_terminal: bool) -> bool:
+    """Ring after long turns so a backgrounded terminal can flash; XULOOM_TERMINAL_BELL=0 disables it."""
+    return is_terminal and elapsed >= BELL_AFTER_SECONDS and os.environ.get("XULOOM_TERMINAL_BELL", "1") != "0"
+
+
 def run_command_palette(tui: InteractiveTerminalTUI) -> str:
     choice = tui.choose_menu(
         title="Command Palette",
@@ -911,6 +919,7 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
             turn_was_aborted = False
             tui.reset_turn(turn_options.get("display_text", user_input))
             tui.start_streaming()
+            turn_started = time.monotonic()
 
             try:
                 async for event in engine.submit_message(user_input, sys_print_callback=agent_events_callback, **turn_options):
@@ -949,6 +958,8 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
 
             if display_text and display_text.strip() != tui.current_turn_text.strip():
                 console.print(Panel(TerminalMarkdown(display_text, engine.session_cwd, links=terminal_links(console)), border_style="green", expand=False))
+            if should_ring_bell(time.monotonic() - turn_started, console.is_terminal):
+                console.bell()
 
         except KeyboardInterrupt:
             current_time = time.time()

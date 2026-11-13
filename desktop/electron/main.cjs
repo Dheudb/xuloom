@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, protocol, nativeImage, clipboard } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, shell, protocol, nativeImage, clipboard, Notification } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
 const { SessionCatalog, projectKey, sessionKey } = require("./catalog.cjs");
@@ -17,6 +17,9 @@ const mediaPreviews = new MediaPreviews();
 const { BrowserCaptures } = require("./browser-capture.cjs");
 const browserCaptures = new BrowserCaptures();
 app.setName("Xuloom");
+if (process.platform === "win32") app.setAppUserModelId("Xuloom");
+// A notification that is garbage-collected drops its click handler.
+const notifications = new Set();
 if (process.env.XULOOM_USER_DATA)
   app.setPath("userData", process.env.XULOOM_USER_DATA);
 const requestedDataRoot = process.env.XULOOM_DATA_DIR || process.env.XULOOM_USER_DATA;
@@ -408,8 +411,30 @@ async function fallback(project, excluded = [], scope = "project") {
   saveWorkspace();
   return { activeId: "", catalog: broadcastCatalog() };
 }
+function notifyFinished(id, body) {
+  if (!window || window.isDestroyed() || window.isFocused() || typeof body !== "string" || process.env.XULOOM_TEST_HEADLESS === "1") return false;
+  window.flashFrame(true);
+  if (!Notification.isSupported()) return false;
+  let title = "";
+  try { title = (remote.remoteId(id) ? remote.find(id) : catalog.find(id)).title || ""; } catch {}
+  const note = new Notification({ title: (title || "Xuloom").slice(0, 120), body: body.slice(0, 240) });
+  const release = () => notifications.delete(note);
+  note.on("click", () => {
+    release();
+    if (window.isDestroyed()) return;
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
+    window.webContents.send("workbench:event", { type: "notification_open", session: id });
+  });
+  note.on("close", release);
+  notifications.add(note);
+  note.show();
+  return true;
+}
 async function invoke(method, params) {
   if (method === "app.ready") { uiReady = true; deliverLinks(); return true; }
+  if (method === "app.notify") return notifyFinished(params.session, params.body);
   const routed = await remote.handle(method, params);
   if (routed.handled) return routed.value;
   if (method === "chat.copy") {
@@ -884,6 +909,7 @@ app.whenReady().then(() => {
     event.returnValue = saved;
   });
   window.on("focus", () => {
+    window.flashFrame(false);
     try { if (restoration) broadcastCatalog(); }
     catch (error) { settingsFailure(error); }
   });
