@@ -307,6 +307,7 @@ def run_command_palette(tui: InteractiveTerminalTUI) -> str:
             {"value": "/tools", "label": "View tool activity"},
             {"value": "/todos", "label": "View structured todos"},
             {"value": "/mode", "label": "View current mode"},
+            {"value": "/review", "label": "Review uncommitted Git changes"},
             {"value": "/plan", "label": "Enable plan mode"},
             {"value": "/plan off", "label": "Disable plan mode"},
             {"value": "/coordinator", "label": "Enable coordinator mode"},
@@ -600,6 +601,7 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
                 user_input = selected
 
             normalized_input = user_input.strip().lower()
+            turn_options = {}
 
             if normalized_input in {"/quit", "/q", "/exit"}:
                 console.print("[dim]Session terminated.[/dim]")
@@ -619,6 +621,10 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
                     "  /plan show        Show current plan\n"
                     "  /plan clear       Clear current plan\n"
                     "  /ultraplan <desc> Deep planning via dedicated sub-agent\n\n"
+                    "[bold white]Review[/bold white]\n"
+                    "  /review           Review uncommitted Git changes\n"
+                    "  /review <rev>     Review a commit or range, e.g. HEAD~3..HEAD or main...HEAD\n"
+                    "  /review ... -- <notes>  Add focus notes for the reviewer\n\n"
                     "[bold white]Multi-Agent[/bold white]\n"
                     "  /team             View team status\n"
                     "  /coordinator      Toggle coordinator mode\n"
@@ -891,14 +897,23 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
                 else:
                     await _interactive_model_switch(engine, tui)
                 continue
+            elif normalized_input == "/review" or normalized_input.startswith("/review "):
+                from xuloom.features.review import SKILL, review_request
+                try:
+                    engine.tool_context["skill_registry"].resolve(SKILL)
+                    review_input, turn_options = await review_request(engine.session_cwd, user_input.strip()[len("/review"):])
+                except ValueError as error:
+                    console.print("Review: " + str(error), markup=False)
+                    continue
+                turn_options["display_text"], user_input = user_input.strip(), review_input
 
             final_answer = ""
             turn_was_aborted = False
-            tui.reset_turn(user_input)
+            tui.reset_turn(turn_options.get("display_text", user_input))
             tui.start_streaming()
 
             try:
-                async for event in engine.submit_message(user_input, sys_print_callback=agent_events_callback):
+                async for event in engine.submit_message(user_input, sys_print_callback=agent_events_callback, **turn_options):
                     tui.track_stream_event(event)
                     event_type = event.get("type")
                     if event_type == "auto_commit_proposal":
