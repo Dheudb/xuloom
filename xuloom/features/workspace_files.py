@@ -73,8 +73,9 @@ async def git(cwd, *args, env_overrides=None):
     return process.returncode, output.decode("utf-8", errors="replace"), error.decode("utf-8", errors="replace")
 
 
-async def git_status(cwd, *, read_git=git):
+async def git_status(cwd, *, read_git=None):
     """Read-only repository snapshot, without model, session, diff or network requests."""
+    read_git = read_git or git
     if not Path(cwd).is_dir():
         return {"available": False, "code": "workspace_missing", "reason": "工作目录不存在"}
     try:
