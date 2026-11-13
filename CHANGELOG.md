@@ -4,6 +4,10 @@
 
 ## [未发布]
 
+## [0.2.0] - 2026-11-13
+
+本版将 v0.1.52 的功能与修复提升为 v0.2.0，交互式 CLI 的只读审查、运行中追加指令与恢复，以及桌面后台通知均包含在内。完整变更见 [0.1.52]。
+
 ## [0.1.52] - 2026-11-13
 
 ### 新增
@@ -149,7 +153,8 @@
 - 引擎拆分为 `xuloom/core/engine_parts/` 下的多个 mixin，主循环拆成多个阶段方法。
 - 新增不可变的 `EngineConfig` 和顶层公开 API（`from xuloom import ...`）。
 
-[未发布]: https://github.com/Dheudb/xuloom/compare/v0.1.52...HEAD
+[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Dheudb/xuloom/compare/v0.1.52...v0.2.0
 [0.1.52]: https://github.com/Dheudb/xuloom/compare/v0.1.51...v0.1.52
 [0.1.51]: https://github.com/Dheudb/xuloom/compare/v0.1.50...v0.1.51
 [0.1.50]: https://github.com/Dheudb/xuloom/compare/v0.1.49...v0.1.50
