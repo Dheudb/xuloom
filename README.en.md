@@ -109,7 +109,7 @@ xuloom serve --root ./work                                    # HTTP + SSE API, 
 
 ## Desktop workbench
 
-The Windows x64 desktop app runs the same engine and ships its own Python runtime. Download `Xuloom-v<version>-windows-x64.zip` from [Releases](https://github.com/Dheudb/xuloom/releases), extract the whole archive and run `Xuloom.exe`. Then enter your API endpoint, key and model under **Settings → Model connections**. The interface is in Chinese by default; switch to English under **设置 → 工作区 → 界面语言 / Language** (Settings → Workspace). Each reply shows its tokens and cost; set model prices and a per-task cost cap under Settings → Cost (use 0 for local models). There is no desktop build for Linux or macOS yet, and no signed installer or auto-update; on those platforms use the library and the CLI.
+The Windows x64 desktop app runs the same engine and ships its own Python runtime. Download `Xuloom-v<version>-windows-x64.zip` from [Releases](https://github.com/Dheudb/xuloom/releases), extract the whole archive and run `Xuloom.exe`. Then enter your API endpoint, key and model under **Settings → Model connections**. The interface is in Chinese by default; switch to English under the **Language** selector at the top of Settings. Each reply shows its tokens and cost; set model prices and a per-task cost cap under Settings → Cost (use 0 for local models). There is no desktop build for Linux or macOS yet, and no signed installer or auto-update; on those platforms use the library and the CLI.
 
 ## Experimental
 

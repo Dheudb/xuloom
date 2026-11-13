@@ -7,6 +7,7 @@
 | [桌面 App](desktop.md) / [CLI](cli.md) | 安装、模型配置、会话与操作入口 |
 | [模型连接](models.md) / [凭据](credentials.md) | 支持协议、Key、代理与能力声明 |
 | [Skills 与子代理](capabilities.md) / [MCP](mcp.md) | 配置、发现、角色与工具连接 |
+| [Computer Use](computer-use.md) | Windows 窗口截图和鼠标键盘操作 |
 | [框架接口](framework.md) / [开发者扩展](extensions.md) | 公开程序入口、工具注册、事件、取消与恢复 |
 | [English: getting started](en/getting-started.md) / [extending](en/extending.md) | 英文入门与扩展指南 |
 | [插件](plugins.md) / [生命周期 Hook](hooks.md) / [模型适配器](model-adapters.md) | 打包扩展、在固定节点介入任务、接入任意模型 API |

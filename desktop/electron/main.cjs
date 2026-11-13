@@ -524,6 +524,7 @@ async function invoke(method, params) {
   if (method === "config.models") return globalConfig().request(method, params);
   // Prices and the task cost cap live in ~/.xuloom/pricing.json (shared with the CLI). After saving,
   // every open local conversation reloads them so its next request uses the new values.
+  if (["computerUse.get", "computerUse.set"].includes(method)) return globalConfig().request(method, params);
   if (method === "pricing.get") return globalConfig().request(method, {});
   if (method === "pricing.save") {
     const result = await globalConfig().request(method, params);

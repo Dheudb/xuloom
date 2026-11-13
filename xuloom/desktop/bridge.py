@@ -520,6 +520,9 @@ class DesktopBridge:
                 "capFromEnvironment": bool(os.environ.get("XULOOM_MAX_COST_USD"))}
 
     async def dispatch(self, method, params):
+        if method in {"computerUse.get", "computerUse.set"}:
+            from xuloom.computer_use.plugin import settings
+            return settings(method, params)
         if method == 'task.readiness':
             from .readiness import inspect
             return await asyncio.to_thread(inspect,self.config(),self.execution_mode)

@@ -4,6 +4,14 @@
 
 ## [未发布]
 
+## [0.1.51] - 2026-11-13
+
+### 新增
+- Windows 本机 Computer Use：可选工具支持授权窗口截图、移动光标、点击、输入、滚动和常用按键。默认关闭，桌面和交互式 CLI 共用。
+
+### 优化
+- OpenAI 兼容流默认等 8 分钟接收首个有效响应。超过 30 秒先显示中英文等待提示。界面语言可在设置窗口顶部切换。
+
 ## [0.1.50] - 2026-11-13
 
 ### 新增
@@ -128,7 +136,8 @@
 - 引擎拆分为 `xuloom/core/engine_parts/` 下的多个 mixin，主循环拆成多个阶段方法。
 - 新增不可变的 `EngineConfig` 和顶层公开 API（`from xuloom import ...`）。
 
-[未发布]: https://github.com/Dheudb/xuloom/compare/v0.1.50...HEAD
+[未发布]: https://github.com/Dheudb/xuloom/compare/v0.1.51...HEAD
+[0.1.51]: https://github.com/Dheudb/xuloom/compare/v0.1.50...v0.1.51
 [0.1.50]: https://github.com/Dheudb/xuloom/compare/v0.1.49...v0.1.50
 [0.1.49]: https://github.com/Dheudb/xuloom/compare/v0.1.48...v0.1.49
 [0.1.48]: https://github.com/Dheudb/xuloom/compare/v0.1.47...v0.1.48

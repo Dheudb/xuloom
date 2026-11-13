@@ -146,10 +146,9 @@ async def receive(engine, *, system_prompt, api_messages, tools_schema, turn_cou
     response, stream = None, None
     try:
         await watch.status("waiting", force=True)
-        stream = await watch.wait(engine.client.responses.create(**options))
+        stream = await watch.wait(engine.client.responses.create(**options, **watch.request_options()))
         engine.active_stream = stream
-        watch.metrics["connectedMs"] = watch.ms()
-        await watch.status("connected", force=True)
+        await watch.connected()
         await emit({"type": "message_start", "turn": turn_count})
         iterator = stream.__aiter__()
         while True:

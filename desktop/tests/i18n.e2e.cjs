@@ -61,10 +61,24 @@ async function collect(screen) {
   }] }));
   try {
     await launch();
-    // Default stays Chinese; switch through Settings → Workspace.
+    // The language picker is visible on the settings header.
     await page.getByRole('button', { name: '设置与模型' }).click();
-    await page.locator('#settings-tab-workspace').click();
-    await Promise.all([page.waitForEvent('load'), page.locator('.language-setting select').selectOption('en')]);
+    await page.getByRole('combobox', { name: '界面语言 / Language' }).waitFor();
+    if (process.platform === 'win32') {
+      await page.locator('#settings-tab-workspace').click();
+      const computerUse = page.getByRole('checkbox', { name: '启用 Windows 桌面操控' });
+      await computerUse.waitFor();
+      assert.equal(await computerUse.isChecked(), false);
+      await computerUse.click();
+      await page.waitForFunction(() => document.querySelector('.computer-use-toggle input')?.checked);
+      await page.locator('#settings-tab-model').click();
+      await page.locator('#settings-tab-workspace').click();
+      await computerUse.waitFor();
+      assert.equal(await computerUse.isChecked(), true);
+      await computerUse.click();
+      await page.waitForFunction(() => document.querySelector('.computer-use-toggle input')?.checked === false);
+    }
+    await Promise.all([page.waitForEvent('load'), page.getByRole('combobox', { name: '界面语言 / Language' }).selectOption('en')]);
     await page.waitForFunction(() => document.querySelector('.new-task')?.disabled === false);
     assert.equal(await page.evaluate(() => document.documentElement.lang), 'en');
     await page.getByRole('button', { name: 'New conversation' }).first().waitFor();
@@ -91,8 +105,7 @@ async function collect(screen) {
     await page.locator('#settings-tab-model').click();
     await shot('i18n-settings.png');
     // Switching back restores Chinese.
-    await page.locator('#settings-tab-workspace').click();
-    await Promise.all([page.waitForEvent('load'), page.locator('.language-setting select').selectOption('zh')]);
+    await Promise.all([page.waitForEvent('load'), page.getByRole('combobox', { name: 'Language', exact: true }).selectOption('zh')]);
     await page.getByRole('button', { name: '新建会话' }).first().waitFor();
 
     if (report) {

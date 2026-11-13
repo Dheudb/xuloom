@@ -13,6 +13,7 @@ import TaskReadiness from './TaskReadiness';
 import CostSettings from "./CostSettings";
 import { displayName, getLanguage, setLanguage, t, tServer, tx, untranslated, type Language } from "./i18n";
 import BuildDetails from './BuildDetails';
+import ComputerUseSettings from "./ComputerUseSettings";
 
 export function SettingsDialog({
   config,
@@ -134,9 +135,17 @@ export function SettingsDialog({
             <span className="eyebrow">WORKBENCH SETTINGS</span>
             <h2>{tx("设置{value}", { value: targetLabel ? " · " + targetLabel : "" })}</h2>
           </div>
-          <button className="icon-button" aria-label={t("关闭设置")} onClick={close}>
-            <X size={18} />
-          </button>
+          <div className="settings-header-actions">
+            <label className="settings-language">
+              <span>{t("界面语言 / Language")}</span>
+              <select value={getLanguage()} title={t("切换后界面会重新加载；对话内容和模型回复不受影响。")} onChange={event => setLanguage(event.target.value as Language)}>
+                <option value="zh">{untranslated("中文")}</option><option value="en">English</option>
+              </select>
+            </label>
+            <button className="icon-button" aria-label={t("关闭设置")} onClick={close}>
+              <X size={18} />
+            </button>
+          </div>
         </header>
         <div className="settings-layout">
           <nav role="tablist" aria-label={t("设置分类")} className="settings-nav" aria-orientation="vertical"
@@ -328,13 +337,8 @@ export function SettingsDialog({
           </fieldset>
         </div>
         <div className="form-section" role="tabpanel" id="settings-panel-workspace" aria-labelledby="settings-tab-workspace" hidden={tab !== "workspace"}>
-          <section className="language-setting">
-            <label>{t("界面语言 / Language")}<select aria-label={t("界面语言 / Language")} value={getLanguage()} onChange={event => setLanguage(event.target.value as Language)}>
-              <option value="zh">{untranslated("中文")}</option><option value="en">English</option>
-            </select></label>
-            <p className="fine-print">{t("切换后界面会重新加载；对话内容和模型回复不受影响。")}</p>
-          </section>
           <BuildDetails />
+          {tab === "workspace" && <ComputerUseSettings />}
           <h3><Link2 size={16} /> {t("聊天链接")}</h3>
           <p className="fine-print">{t("右键会话可复制本机或 SSH 聊天链接。链接不包含聊天正文或凭据；远端地址只使用已配置的 SSH 目标，不自动导入主机。")}</p>
           <label>{t("打开聊天链接")}<input aria-label={t("聊天链接")} placeholder="xuloom://chat/…" value={chatUrl} onChange={event => setChatUrl(event.target.value)} /></label>

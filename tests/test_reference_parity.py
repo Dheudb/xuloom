@@ -108,7 +108,7 @@ class ParityTests(unittest.IsolatedAsyncioTestCase):
 
     async def fetch(self, response):
         client = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: response))
-        with patch("xuloom.tools.web_tool.httpx.AsyncClient", return_value=client):
+        with patch("xuloom.core.network.model_http_client", return_value=client):
             return await WebFetchTool().execute("https://example.invalid/paper")
 
     async def test_web_fetch_full_text_is_archived_without_silent_truncation(self):

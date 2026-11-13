@@ -151,10 +151,9 @@ class ModelStream(EngineState):
                     await self._emit_stream_event(event_callback, {"type": "stream_status", "turn": turn_count, "metrics": metrics})
                 openai_watch = StreamWatch(self.abort_event, stream_status)
                 await openai_watch.status("waiting", force=True)
-                stream = await openai_watch.wait(self.client.chat.completions.create(**create_kwargs))
+                stream = await openai_watch.wait(self.client.chat.completions.create(**create_kwargs, **openai_watch.request_options()))
                 self.active_stream = stream
-                openai_watch.metrics["connectedMs"] = openai_watch.ms()
-                await openai_watch.status("connected", force=True)
+                await openai_watch.connected()
                 await self._emit_stream_event(event_callback, {
                     "type": "message_start",
                     "turn": turn_count,

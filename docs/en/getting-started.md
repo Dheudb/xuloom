@@ -28,7 +28,7 @@ export OPENAI_BASE_URL=http://localhost:11434/v1     # only for non-OpenAI endpo
 ```
 
 In Python, pass the same settings in an `EngineConfig` (next step). The desktop app has a settings dialog instead;
-its interface defaults to Chinese and switches to English under **设置 → 工作区 → 界面语言 / Language**.
+its interface defaults to Chinese and switches to English using the **Language** selector at the top of Settings.
 
 ## 3. Run a task
 

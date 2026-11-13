@@ -2170,4 +2170,12 @@ body.panel-resizing iframe { pointer-events: none; }
 .cost-footer button { flex: none; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
 
 .language-setting { display: grid; gap: 6px; margin-bottom: 18px; }
-.language-setting select { max-width: 220px; }
+.settings-header-actions, .settings-language { display: flex; align-items: center; gap: 10px; }
+.settings-header-actions { flex-shrink: 0; }
+.settings-language { font-size: 12px; color: var(--text-muted); }
+.settings-language select { width: auto; min-width: 80px; }
+@media (max-width: 540px) {
+  .settings-language > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+}
+.form-section .computer-use-toggle { display: flex; align-items: center; gap: 8px; }
+.form-section .computer-use-toggle input { width: 14px; height: 14px; margin: 0; accent-color: var(--action); }

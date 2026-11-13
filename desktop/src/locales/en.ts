@@ -2,6 +2,8 @@
 // placeholder filled with a value that is never translated. English may use plural forms:
 // "{count, plural, one {# file} other {# files}}". `npm run i18n:check` lists messages without an entry.
 export const english: Record<string, string> = {
+  "启用 Windows 桌面操控": "Enable Windows Computer Use",
+  "对新开的本机会话生效。操作前会请求窗口授权，截图会发送给所选模型。操作时使用你的鼠标和键盘，可随时停止任务。": "Applies to new local chats. Xuloom asks for window access and sends screenshots to the selected model. Actions use your mouse and keyboard. Stop the task at any time.",
   "读取会话": "Reading conversation",
   "已读取会话": "Read conversation",
   "读取会话失败": "Conversation read failed",
@@ -1332,7 +1334,12 @@ export const english: Record<string, string> = {
   "正在调用工具": "Calling tools",
   "正在制定协作决策": "Deciding how to collaborate",
   "等待接口响应": "Waiting for the API",
+  "；{value}": ". {value}",
   "等待模型输出": "Waiting for model output",
+  "响应比预期更久，仍在等待…": "Taking longer than expected… Still waiting.",
+  "等待模型首个有效响应超过": "No initial model response after",
+  "秒，已停止等待。可以稍后重试或切换模型。": "seconds. Try again later or switch models.",
+  "查看活动和已有回执；确认当前状态后再继续。": "Check the activity and saved results before continuing.",
   "模型正在思考": "Model is thinking",
   "模型正在输出": "Model is writing",
   "正在结束接收": "Finishing",

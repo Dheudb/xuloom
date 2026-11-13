@@ -107,7 +107,8 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(engine.plugins, [])
             self.assertNotIn("system_info", engine.available_tools)
         rows = {row["name"]: row for row in available_plugins()}
-        self.assertEqual(set(rows), {"media", "ollama-native"})
+        self.assertEqual(set(rows), {"media", "computer-use", "ollama-native"})
+        self.assertFalse(rows["computer-use"]["enabled"])
         self.assertFalse(rows["ollama-native"]["enabled"])
         self.assertTrue(rows["media"]["enabled"] and rows["media"]["bundled"])
 

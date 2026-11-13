@@ -34,8 +34,9 @@ __all__ = ["PluginAPI", "RpcContext", "LoadedPlugin", "PluginError", "load_plugi
            "plugins_home", "BUNDLED_PLUGINS", "ENTRY_POINT_GROUP"]
 
 ENTRY_POINT_GROUP = "xuloom.plugins"
-#: Plugins shipped with Xuloom. They are on by default; users may disable them.
-BUNDLED_PLUGINS = {"media": "xuloom.media.plugin"}
+#: Plugins shipped with Xuloom. Sensitive capabilities can require opt-in.
+BUNDLED_PLUGINS = {"media": "xuloom.media.plugin", "computer-use": "xuloom.computer_use.plugin"}
+_OPT_IN_BUNDLED = frozenset({"computer-use"})
 _NAME = re.compile(r"[a-z][a-z0-9_-]{0,63}")
 _logger = logging.getLogger("xuloom.plugins")
 
@@ -226,8 +227,9 @@ def _read_plugin_settings(home: Optional[Path]) -> dict:
 
 
 def enabled_plugin_names(home: Optional[Path] = None) -> List[str]:
-    """Installed (non-bundled) plugins the user enabled."""
-    return [name for name in _read_plugin_settings(home)["enabled"] if name not in BUNDLED_PLUGINS]
+    """Installed plugins and opt-in bundled plugins the user enabled."""
+    return [name for name in _read_plugin_settings(home)["enabled"]
+            if name not in BUNDLED_PLUGINS or name in _OPT_IN_BUNDLED]
 
 
 def disabled_plugin_names(home: Optional[Path] = None) -> List[str]:
@@ -240,11 +242,12 @@ def default_plugin_names(home: Optional[Path] = None, *, bundled: bool = True, u
     """Names an app session loads: bundled plugins (unless disabled) then the user's enabled plugins."""
     skip = set(exclude)
     names = []
+    settings = _read_plugin_settings(home) if user else {"enabled": [], "disabled": []}
     if bundled:
-        disabled = set(disabled_plugin_names(home)) if user else set()
-        names += [name for name in BUNDLED_PLUGINS if name not in disabled]
+        names += [name for name in BUNDLED_PLUGINS if name not in settings["disabled"]
+                  and (name not in _OPT_IN_BUNDLED or name in settings["enabled"])]
     if user:
-        names += enabled_plugin_names(home)
+        names += [name for name in settings["enabled"] if name not in BUNDLED_PLUGINS]
     return [name for name in dict.fromkeys(names) if name not in skip]
 
 
@@ -255,7 +258,7 @@ def set_plugin_enabled(name: str, enabled: bool, home: Optional[Path] = None) ->
     settings = _read_plugin_settings(home)
     if name in BUNDLED_PLUGINS:
         settings["disabled"] = [item for item in settings["disabled"] if item != name] + ([] if enabled else [name])
-    else:
+    if name not in BUNDLED_PLUGINS or name in _OPT_IN_BUNDLED:
         settings["enabled"] = [item for item in settings["enabled"] if item != name] + ([name] if enabled else [])
     path = plugins_home(home) / "plugins.json"
     path.parent.mkdir(parents=True, exist_ok=True)

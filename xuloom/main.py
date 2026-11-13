@@ -442,7 +442,7 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
     tui = InteractiveTerminalTUI(console, lambda: engine)
 
     def permission_prompt(request):
-        if auto_approve:
+        if auto_approve and not request.classifier_input.get("forced_prompt_reasons"):
             console.print(f"[dim]Auto-approved: {request.tool_name}[/dim]")
             return "y"
         decision = tui.choose_menu(

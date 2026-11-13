@@ -15,7 +15,7 @@ const server = http.createServer((req, res) => {
     const taskMessage = [...body.messages].reverse().find(m => m.role === "user" && typeof m.content === "string" && m.content.includes("STREAM_"))?.content || "";
     const task = taskMessage.match(/STREAM_[A-Z]+/g)?.at(-1);
     calls[task] = (calls[task] || 0) + 1;
-    if (["STREAM_HEADERS", "STREAM_STOP"].includes(task)) return; // Deliberately never send headers.
+    if (["STREAM_HEADERS", "STREAM_ENGLISH", "STREAM_STOP"].includes(task)) return; // Deliberately never send headers.
     res.writeHead(200, { "Content-Type": "text/event-stream" });
     const chunk = (delta, finish_reason = null) => res.write("data: " + JSON.stringify({ id: "fixture", choices: [{ index: 0, delta, finish_reason }] }) + "\n\n");
     if (task === "STREAM_FINISH") {
@@ -29,6 +29,10 @@ const server = http.createServer((req, res) => {
         else { clearInterval(timer); chunk({ content: "REASONING_DONE" }); chunk({}, "stop"); res.end("data: [DONE]\n\n"); }
       }, 180);
       res.on("close", () => clearInterval(timer));
+    } else if (task === "STREAM_SLOW") {
+      res.flushHeaders();
+      const timer = setTimeout(() => { chunk({ content: "SLOW_REPLY" }); chunk({}, "stop"); res.end("data: [DONE]\n\n"); }, 2400);
+      res.on("close", () => clearTimeout(timer));
     } else if (task === "STREAM_IDLE") {
       chunk({ content: "RETAIN_THIS_PARTIAL" });
       const timer = setInterval(() => res.write('data: {"id":"fixture","choices":[]}\n\n: keepalive\n\n'), 60);
@@ -54,7 +58,7 @@ async function idle() { await page.waitForFunction(() => !document.querySelector
   try {
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     atomicJSON(path.join(config, "config.json"), { model_provider: "openai", openai_model: "fixture", openai_api_key: "fixture", openai_base_url: `http://127.0.0.1:${server.address().port}/v1`,
-      stream_first_response_timeout_sec: 1.5, stream_idle_timeout_sec: 2, stream_end_grace_sec: .1 });
+      stream_first_response_timeout_sec: 3.5, stream_idle_timeout_sec: 2, stream_end_grace_sec: .1 });
     await launch(); await page.locator(".new-task").click(); await page.locator(".session-item.active").waitFor();
     await send("STREAM_FINISH");
     await page.getByText("VISIBLE_BEFORE_FINISH", { exact: true }).waitFor();
@@ -70,8 +74,12 @@ async function idle() { await page.waitForFunction(() => !document.querySelector
     assert.equal(calls.STREAM_IDLE, 1, "Stalled requests must not silently replay");
     await send("STREAM_DROPPED"); await page.getByText(/收到结束标记前断开/).waitFor(); await idle();
     await page.getByText("DROPPED_PARTIAL", { exact: true }).waitFor();
+    await send("STREAM_SLOW");
+    await page.getByText(/响应比预期更久，仍在等待/).waitFor();
+    await page.getByText("SLOW_REPLY", { exact: true }).waitFor(); await idle();
+    assert.equal(calls.STREAM_SLOW, 1);
     await send("STREAM_HEADERS"); await page.locator('.turn-process').filter({ hasText: "等待接口响应" }).waitFor();
-    await page.getByText(/首个有效响应超过 1.5 秒/).waitFor(); await idle();
+    await page.getByText(/首个有效响应超过 3.5 秒/).waitFor(); await idle();
     await send("STREAM_STOP"); await page.locator('.turn-process').filter({ hasText: "等待接口响应" }).last().waitFor();
     const stop = page.getByRole("button", { name: "停止任务", exact: true });
     assert(await stop.isEnabled()); await stop.click({ force: true }); await idle();
@@ -91,7 +99,17 @@ async function idle() { await page.waitForFunction(() => !document.querySelector
     assert(records.some(record => record.messages?.some(message => message._openai_reasoning?.content?.includes("PRIVATE_REASONING"))));
     const publicRecords = JSON.stringify(records, (key, value) => key === "_openai_reasoning" ? undefined : value);
     assert(!publicRecords.includes("PRIVATE_REASONING"));
+    await page.getByRole("button", { name: "设置与模型" }).click();
+    await Promise.all([page.waitForEvent("load"), page.getByRole("combobox", { name: "界面语言 / Language" }).selectOption("en")]);
+    await page.waitForFunction(() => document.querySelector(".new-task")?.disabled === false);
+    await page.locator(".new-task").click();
+    await page.locator(".session-item.active").waitFor();
+    await page.getByRole("textbox", { name: "Task input" }).fill("STREAM_ENGLISH");
+    await page.getByRole("button", { name: "Send task", exact: true }).click();
+    await page.getByText(/Taking longer than expected/).waitFor();
+    await page.getByRole("alert").filter({ hasText: /No initial model response after 3\.5 seconds/ }).waitFor();
+    assert.equal(calls.STREAM_ENGLISH, 1, "The timeout must not replay the request");
     assert.deepEqual(failures, []);
-    console.log("PASS: live text, finish marker without EOF, reasoning progress, keepalive stall, dropped stream, bounded header wait, stop and persisted timing/partial output.");
+    console.log("PASS: slow response notice in Chinese and English, delayed success without replay, timeout, stop, and persisted partial output.");
   } finally { if (app) await app.close().catch(() => {}); server.closeAllConnections(); server.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });
