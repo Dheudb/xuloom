@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import sys
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "tests")]
@@ -36,6 +37,8 @@ async def main():
                 values=values, text=phase.upper() + "_CATALOG_COMPLETE", identity="parent_" + phase + "_" + str(parent_counts[phase]))
         fixture.parent_handler = respond
         engine = fixture.engine()
+        engine.set_collaboration_mode("auto")
+        engine.activate_tools(["agent_tool"])
         result = await engine.run(user_input="Inspect discovered worker", sys_print_callback=lambda _: None)
         assert result.ok, result
         row = engine.subagent_registry[0]; assert row["status"] == "completed", row
@@ -45,10 +48,10 @@ async def main():
         assert len(before["metadata"]["tool_activity"]["recent"]) == 2
         await engine.aclose()
         config = fixture.root / "config"; config.mkdir(exist_ok=True)
-        save_config({"model_connections": [{"id": "local-fixture", "name": "Local protocol fixture", "provider": "anthropic",
-            "model": fixtures.MODEL, "models": [fixtures.MODEL], "api_key": "fixture-only", "base_url": fixture.base, "network_mode": "direct"}],
-            "active_model_connection": "local-fixture"})
-        (config / "config.json").write_bytes((fixture.root / "config.json").read_bytes())
+        with patch("xuloom.core.config.CONFIG_FILE", config / "config.json"):
+            save_config({"model_connections": [{"id": "local-fixture", "name": "Local protocol fixture", "provider": "anthropic",
+                "model": fixtures.MODEL, "models": [fixtures.MODEL], "api_key": "fixture-only", "base_url": fixture.base, "network_mode": "direct"}],
+                "active_model_connection": "local-fixture"})
         phase = "app"
         print(json.dumps({"home": str(fixture.root), "project": str(fixture.root), "data": str(fixture.root / "data"), "config": str(config),
             "sessionId": identity, "workerId": worker_id, "baseUrl": fixture.base}), file=PROTOCOL, flush=True)
