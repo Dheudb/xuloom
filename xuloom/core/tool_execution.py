@@ -79,6 +79,11 @@ async def execute_tool(self, tool_block, sys_print_callback=print, *, turn: int 
         return {"type": "tool_result", "tool_use_id": self._tb_get(tool_block, "id", ""), "content": str(error), "is_error": True}
     tool_name = self._tb_get(tool_block, "name", "")
     tool_id = self._tb_get(tool_block, "id", "")
+    if self.tool_context.get("review_scope") and tool_name not in self._get_effective_tools():
+        reason = "This tool is outside the read-only review scope."
+        await self._emit_stream_event(event_callback, {"type": "tool_result", "tool_name": tool_name,
+            "tool_use_id": tool_id, "result": reason, "is_error": True, "status": "error"})
+        return {"type": "tool_result", "tool_use_id": tool_id, "content": reason, "is_error": True}
     from xuloom.core.steering import pending, deferred_result
     if pending(self):
         receipt = deferred_result(tool_id)
@@ -166,7 +171,7 @@ async def execute_tool(self, tool_block, sys_print_callback=print, *, turn: int 
         res_text = serialize_tool_result(build_tool_result(ok=False, is_error=True,
             content="A hook changed a literal sequence action. Return to the model before executing it.",
             metadata={"executed": False, "code": "literal_action_changed"}))
-    elif tool_name not in self.available_tools:
+    elif tool_name not in self.available_tools and not self.tool_context.get("review_scope"):
         input_error = True
         res_text = serialize_tool_result(build_tool_result(ok=False,
             content=f"Tool '{tool_name}' is unavailable. This call was not executed. Use a currently declared tool or discover it with search_tool.",
@@ -202,7 +207,8 @@ async def execute_tool(self, tool_block, sys_print_callback=print, *, turn: int 
             if tool_name in getattr(self, 'builtin_tool_names', ()) and tool_name not in CORE_TOOLS:
                 self.activated_tools.add(tool_name)
             confinement = self.execution_sandbox
-            confinement.check_tool(tool_name)
+            if tool_name != "review_git" or not self.tool_context.get("review_scope"):
+                confinement.check_tool(tool_name)
             normalized_input = tool_inputs
             if hasattr(handler, "input_schema"):
                 validated_input = handler.input_schema(**tool_inputs)
@@ -217,7 +223,7 @@ async def execute_tool(self, tool_block, sys_print_callback=print, *, turn: int 
             validation_error = validate_input(**normalized_input) if callable(validate_input) else None
             if isinstance(validation_error, str) and validation_error.strip():
                 raise ToolProtocolError(validation_error)
-            if has_declaration:
+            if has_declaration and not self.tool_context.get("review_scope"):
                 register(self, tool_block, declaration)
             permission = await self.permission_manager.authorize(
                 handler,

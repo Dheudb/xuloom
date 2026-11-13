@@ -769,7 +769,26 @@ class QueryEngine(
         finally:
             self.active_run_task = None
 
-    async def submit_message(self, user_input: str, sys_print_callback=print, input_blocks=None, attachments=None, display_text=None, selected_skills=None, resume=False):
+    async def _run_streamed_turn(self, user_input, *, review_scope, **options):
+        if review_scope is None:
+            return await self._run_loop(user_input, **options)
+        from xuloom.core.hooks import suppress_review_hooks
+        from xuloom.features.review import ReviewGitTool, can_use_review_path
+        if not can_use_review_path(self, review_scope):
+            return RunResult("The Git repository is outside the isolated workspace.", "unsupported_input",
+                             session_id=self.session_id, agent_id=self.agent_id)
+        review_tool = ReviewGitTool()
+        review_tool.context = self.tool_context
+        self.tool_context.update(review_scope=copy.deepcopy(review_scope), review_git_tool=review_tool)
+        token = suppress_review_hooks.set(True)
+        try:
+            return await self._run_loop(user_input, **options)
+        finally:
+            suppress_review_hooks.reset(token)
+            self.tool_context.pop("review_scope", None)
+            self.tool_context.pop("review_git_tool", None)
+
+    async def submit_message(self, user_input: str, sys_print_callback=print, input_blocks=None, attachments=None, display_text=None, selected_skills=None, resume=False, *, review_scope=None):
         if self.has_active_turn() or getattr(self, "_goal_task", None) is not None and asyncio.current_task() not in (self._goal_task, getattr(self, "_goal_turn_task", None)):
             result = RunResult("A turn is already running in this engine; wait or cancel it first.", "session_busy", session_id=self.session_id, agent_id=self.agent_id)
             yield {"type": "final", "text": result.text, "result": result.to_dict()}
@@ -783,18 +802,18 @@ class QueryEngine(
         async def emit(payload: dict):
             await queue.put(payload)
 
-        task = asyncio.create_task(
-            self._run_loop(
-                user_input,
-                sys_print_callback=sys_print_callback,
-                event_callback=emit,
-                input_blocks=input_blocks,
-                attachments=attachments,
-                display_text=display_text,
-                selected_skills=selected_skills,
-                resume=resume,
-            )
-        )
+        if resume:
+            from xuloom.core.messages import original_user_message
+            original = original_user_message(self.messages) or {}
+            review_scope = original.get("_review_scope")
+            if not review_scope and str(original.get("_display_text", "")).lower().split(maxsplit=1)[:1] == ["/review"]:
+                result = RunResult("Run /review again to establish a read-only scope.", "input_required")
+                yield {"type": "final", "text": result.text, "result": result.to_dict()}
+                return
+        task = asyncio.create_task(self._run_streamed_turn(
+            user_input, sys_print_callback=sys_print_callback, event_callback=emit, input_blocks=input_blocks,
+            attachments=attachments, display_text=display_text, selected_skills=selected_skills,
+            resume=resume, review_scope=review_scope))
         self.active_run_task = task
 
         try:

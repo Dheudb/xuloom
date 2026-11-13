@@ -1,4 +1,5 @@
 from xuloom.utils.shell import decode_output, process_options, terminate_process_tree
+from contextvars import ContextVar
 import asyncio
 import json
 import os
@@ -12,6 +13,7 @@ from xuloom.branding import configuration_file
 
 HOOK_EXECUTION_TIMEOUT_S = 120
 _logger = logging.getLogger("xuloom.core.hooks")
+suppress_review_hooks = ContextVar("suppress_review_hooks", default=False)
 
 
 class _SafeFormatDict(dict):
@@ -154,6 +156,8 @@ class HookManager:
         outcome = HookOutcome()
         allowed = set(HOOK_EVENTS[event][1])
         current_input = copy.deepcopy(payload.get("tool_input")) if "updated_input" in allowed else None
+        if suppress_review_hooks.get():
+            return outcome
         for registration in list(self._callbacks):
             if registration.event != event:
                 continue
@@ -630,6 +634,8 @@ class HookManager:
     # ── Shared utilities ────────────────────────────────────────────────
 
     def _load_config(self) -> Dict[str, list]:
+        if suppress_review_hooks.get():
+            return {}
         if not os.path.exists(self.config_path):
             return {}
         with open(self.config_path, "r", encoding="utf-8") as f:

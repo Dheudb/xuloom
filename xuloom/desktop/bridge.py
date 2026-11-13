@@ -1030,9 +1030,8 @@ class DesktopBridge:
             engine = await self.ensure_engine(write=True)
             if getattr(engine, "goal", None) and engine.goal["status"] not in {"completed", "cancelled", "budget_exhausted"}:
                 raise ValueError("请使用目标条的恢复操作继续当前目标")
-            human = next((message for message in reversed(engine.messages) if message.get("role") == "user"
-                and message.get("_origin", "human") == "human" and not message.get("_is_meta") and not message.get("_is_tool_result")
-                and not any(block.get("type") == "tool_result" for block in message.get("content", []) if isinstance(block, dict))), None)
+            from xuloom.core.messages import original_user_message
+            human = original_user_message(engine.messages)
             previous = next((trace for trace in reversed(engine.turn_traces)
                 if trace.get("userMessageId") == (human or {}).get("_uuid")), None)
             if not human or not previous or previous.get("status") not in {"cancelled", "interrupted", "running"}:

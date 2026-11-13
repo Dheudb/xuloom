@@ -13,6 +13,8 @@ BRIEFS = {
 
 def visible(engine):
     effective = engine._get_effective_tools()
+    if engine.tool_context.get("review_scope"):
+        return effective
     from xuloom.agents.ultra_execution import required, NAMES
     if required(engine):
         return {"ultra_prepare": engine.available_tools["ultra_prepare"]}

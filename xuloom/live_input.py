@@ -24,6 +24,7 @@ class LiveInput:
         self.engine = None
         self.stopped = False
         self._task = None
+        self._abort_task = None
         self._stdout = None
         self._draft = ""
         self._lock = asyncio.Lock()
@@ -39,8 +40,15 @@ class LiveInput:
         try:
             yield self
         finally:
-            await self._suspend()
-            self.engine = None
+            try:
+                await self._suspend()
+            finally:
+                abort_task, self._abort_task = self._abort_task, None
+                try:
+                    if abort_task is not None:
+                        await abort_task
+                finally:
+                    self.engine = None
 
     @asynccontextmanager
     async def paused(self):
@@ -80,7 +88,7 @@ class LiveInput:
                 text = await self.session.prompt_async(PROMPT, default=draft, bottom_toolbar=self._toolbar,
                                                        refresh_interval=0.5)
             except KeyboardInterrupt:
-                await self.stop()
+                self.stop()
                 return
             except EOFError:
                 continue
@@ -109,7 +117,9 @@ class LiveInput:
         self.console.print("已加入补充要求，将在当前步骤结束后送达。", style="dim", markup=False)
         return receipt
 
-    async def stop(self):
+    def stop(self):
+        if self.stopped:
+            return
         self.stopped = True
         self.console.print("正在停止当前任务…", style="yellow", markup=False)
-        await self.engine.request_abort()
+        self._abort_task = asyncio.create_task(self.engine.request_abort())

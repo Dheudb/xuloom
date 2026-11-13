@@ -25,6 +25,8 @@ class ModesMixin(EngineState):
         return copy.deepcopy(profile)
 
     def _collaboration_instructions(self) -> str:
+        if self.tool_context.get("review_scope"):
+            return ""
         from xuloom.agents.collaboration import instructions
         from xuloom.agents.ultra_execution import required
         return instructions(self.tool_context["collaboration"],assessment=required(self))
@@ -34,6 +36,8 @@ class ModesMixin(EngineState):
         policy = self.permission_manager.approval_policy.mode
         sections = [("Full access: do not ask for duplicate tool approval; role/Plan restrictions still apply."
             if policy == "full" else "The runtime requests tool approval when required; do not duplicate it with a question.")]
+        if self.tool_context.get("review_scope"):
+            return "Read-only Git review: use only the supplied tools to inspect evidence."
         sections.append(PROTOCOL)
         if self.execution_sandbox.enabled:
             sections.append("System workspace isolation: file tools, command_tool and repl_tool run in restricted OS processes. "
@@ -85,6 +89,10 @@ class ModesMixin(EngineState):
     def _get_effective_tools(self) -> dict:
         """Return tool set filtered by current mode (plan / coordinator)."""
         tools = self.available_tools
+        if self.tool_context.get("review_scope"):
+            from xuloom.features.review import READ_TOOLS
+            return {name: tool for name, tool in {**tools, "review_git": self.tool_context["review_git_tool"]}.items()
+                    if name in READ_TOOLS}
         if self.execution_sandbox.enabled:
             from xuloom.security.execution import FILE_TOOLS, CONTROL_TOOLS, PROCESS_TOOLS
             tools = {name: tool for name, tool in tools.items() if name in FILE_TOOLS | CONTROL_TOOLS | PROCESS_TOOLS}
@@ -101,7 +109,7 @@ class ModesMixin(EngineState):
         return tools
 
     def _get_coordinator_system_prompt_addon(self) -> str:
-        if not self.coordinator_mode:
+        if not self.coordinator_mode or self.tool_context.get("review_scope"):
             return ""
         return (
             "\n\n--- COORDINATOR MODE ACTIVE ---\n"

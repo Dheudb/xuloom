@@ -52,10 +52,11 @@ def inspect_reference(cwd, requested, known=(), base_path=None):
         return {"path": str(path), "directory": True}
 
 
-async def git(cwd, *args):
+async def git(cwd, *args, env_overrides=None):
     env = {key: value for key, value in os.environ.items() if key not in {
         "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE"}}
     env["LC_ALL"] = "C"
+    env.update(env_overrides or {})
     process = await asyncio.create_subprocess_exec(
         "git", "--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.quotepath=false", "-c", "diff.relative=false", *args, cwd=str(cwd),
         stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -72,16 +73,16 @@ async def git(cwd, *args):
     return process.returncode, output.decode("utf-8", errors="replace"), error.decode("utf-8", errors="replace")
 
 
-async def git_status(cwd):
+async def git_status(cwd, *, read_git=git):
     """Read-only repository snapshot, without model, session, diff or network requests."""
     if not Path(cwd).is_dir():
         return {"available": False, "code": "workspace_missing", "reason": "工作目录不存在"}
     try:
-        code, root, error = await git(cwd, "rev-parse", "--show-toplevel")
+        code, root, error = await read_git(cwd, "rev-parse", "--show-toplevel")
         if code:
             return {"available": False, "code": "not_repository" if "not a git repository" in error.lower() else "git_error",
                 "reason": "当前目录不是 Git 工作区，或 Git 拒绝读取；请检查目录与仓库所有权"}
-        code, output, _ = await git(root.rstrip("\r\n"), "status", "--porcelain=v2", "--branch", "-z", "--no-renames", "--untracked-files=normal")
+        code, output, _ = await read_git(root.rstrip("\r\n"), "status", "--porcelain=v2", "--branch", "-z", "--no-renames", "--untracked-files=normal")
         if code: return {"available": False, "code": "git_error", "reason": "无法读取 Git 状态"}
     except FileNotFoundError:
         return {"available": False, "code": "git_missing", "reason": "未安装 Git"}

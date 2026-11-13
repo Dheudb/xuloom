@@ -341,7 +341,9 @@ def run_command_palette(tui: InteractiveTerminalTUI) -> str:
             {"value": "/model status", "label": "Show current model runtime"},
             {"value": "/thinking", "label": "Show model Thinking and effort settings"},
             {"value": "/sessions", "label": "List session history"},
-            {"value": "/resume", "label": "Resume a session"},
+            {"value": "/resume", "label": "Open a saved session"},
+            {"value": "/continue", "label": "Continue the stopped task"},
+            {"value": "/pending", "label": "List undelivered instructions"},
             {"value": "/quit", "label": "Quit CLI"},
         ],
         prompt_label="Command",
@@ -656,7 +658,10 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
                     "[bold white]Session[/bold white]\n"
                     "  /new              Start a fresh session\n"
                     "  /sessions         List saved sessions\n"
-                    "  /resume <id>      Resume a saved session\n"
+                    "  /resume <id>      Open a saved session\n"
+                    "  /continue         Continue the stopped task\n"
+                    "  /pending          List undelivered instructions\n"
+                    "  /withdraw <id>    Remove an undelivered instruction\n"
                     "  /undo <revision>  Restore one file-tool write if it has not changed\n"
                     "  /delete <id>      Delete a saved session\n"
                     "  /clear sessions   Delete all saved sessions\n\n"
@@ -749,6 +754,37 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
                     else:
                         console.print(f"[red]Error: Failed to resume session '{sid}'.[/red]")
                 continue
+            elif normalized_input == "/pending":
+                if not engine.user_inbox:
+                    console.print("No undelivered instructions.")
+                for item in engine.user_inbox:
+                    console.print(f"{item['id']}  {item['text']}", markup=False)
+                continue
+            elif normalized_input == "/withdraw" or normalized_input.startswith("/withdraw "):
+                from xuloom.core.steering import withdraw
+                parts = user_input.strip().split(maxsplit=1)
+                if len(parts) == 1:
+                    console.print("Use /pending to find the instruction ID, then /withdraw <id>.")
+                    continue
+                try:
+                    removed = withdraw(engine, parts[1])
+                except (OSError, ValueError) as error:
+                    console.print(str(error), markup=False)
+                else:
+                    console.print("Instruction withdrawn." if removed else "No undelivered instruction with that ID.")
+                continue
+            elif normalized_input == "/continue":
+                from xuloom.core.messages import original_user_message
+                if getattr(engine, "goal", None) and engine.goal["status"] not in {"completed", "cancelled", "budget_exhausted"}:
+                    console.print("Use the goal's resume command to continue this goal.")
+                    continue
+                if not original_user_message(engine.messages) or (
+                    not engine.user_inbox and (getattr(engine, "last_run_result", None) or {}).get("reason") != "cancelled"
+                ):
+                    console.print("No stopped task to continue.")
+                    continue
+                user_input = ""
+                turn_options.update(resume=True, display_text="/continue")
             elif normalized_input.startswith("/plan"):
                 raw = user_input.strip()
                 parts = raw.split(maxsplit=1)
@@ -942,7 +978,7 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
                 else:
                     await _interactive_model_switch(engine, tui)
                 continue
-            elif normalized_input == "/review" or normalized_input.startswith("/review "):
+            elif normalized_input.split(maxsplit=1)[0] == "/review":
                 from xuloom.features.review import SKILL, review_request
                 try:
                     engine.tool_context["skill_registry"].resolve(SKILL)
@@ -953,6 +989,7 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
                 turn_options["display_text"], user_input = user_input.strip(), review_input
 
             final_answer = ""
+            receipt = {}
             turn_was_aborted = False
             tui.reset_turn(turn_options.get("display_text", user_input))
             tui.start_streaming(live=live is not None)
@@ -993,8 +1030,12 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
                         border_style="yellow",
                         expand=False,
                     ))
-                console.print("[dim]Current turn aborted. You can continue or start a new prompt.[/dim]")
+                console.print("[dim]Current turn stopped. Use /continue to resume.[/dim]")
+                if engine.user_inbox:
+                    console.print("[dim]Use /pending to list saved instructions or /withdraw <id> to remove one.[/dim]")
                 continue
+            if receipt.get("reason") == "input_required" and engine.user_inbox:
+                console.print("[dim]Use /continue to resume, or /pending and /withdraw <id> to clear saved instructions.[/dim]")
 
             if display_text and display_text.strip() != tui.current_turn_text.strip():
                 console.print(Panel(TerminalMarkdown(display_text, engine.session_cwd, links=terminal_links(console)), border_style="green", expand=False))
