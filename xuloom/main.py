@@ -5,7 +5,7 @@ import sys
 import time
 from datetime import datetime
 from collections import deque
-from contextlib import contextmanager, redirect_stdout
+from contextlib import asynccontextmanager, contextmanager, nullcontext, redirect_stdout
 
 from rich.console import Console, Group
 from xuloom.terminal_markdown import TerminalMarkdown, MarkdownStream, terminal_links
@@ -30,6 +30,7 @@ class InteractiveTerminalTUI:
         self.console = console
         self.engine_getter = engine_getter
         self._stream = sys.stderr if sys.stderr.isatty() else sys.stdout
+        self.live = False
         self.reset_turn()
 
     @property
@@ -54,16 +55,20 @@ class InteractiveTerminalTUI:
         self.compaction_ids = set()
         self.markdown = MarkdownStream(self.console, getattr(self.engine, "session_cwd", os.getcwd()), terminal_links(self.console))
 
-    def _write_status_line(self):
-        """Overwrite the current line with a compact status bar."""
+    def status_text(self) -> str:
         icon = "● RUNNING" if self.running else "○ IDLE"
-        mode = self.engine.get_mode()
-        parts = [icon, f"Mode: {mode}", f"Turn: {self.turn_number or '-'}",
+        parts = [icon, f"Mode: {self.engine.get_mode()}", f"Turn: {self.turn_number or '-'}",
                  f"Tools: {self.tool_count}"]
         if self.compacting: parts.append("正在压缩上下文…")
         if self.last_tool:
             parts.append(f"Active: {self.last_tool}")
-        line = " │ ".join(parts)
+        return " │ ".join(parts)
+
+    def _write_status_line(self):
+        """Overwrite the current line with a compact status bar."""
+        if self.live:
+            return
+        line = self.status_text()
         try:
             cols = os.get_terminal_size().columns
         except OSError:
@@ -79,7 +84,17 @@ class InteractiveTerminalTUI:
             self._stream.flush()
             self._status_visible = False
 
-    def start_streaming(self):
+    def _end_text_line(self):
+        if self._streaming_text:
+            if not self.live:
+                self._stream.write("\n")
+            self._streaming_text = False
+
+    def start_streaming(self, live: bool = False):
+        # Live input draws a prompt below the output; raw cursor writes would corrupt it.
+        self.live = live
+        if live:
+            return
         self._stream.write(self.HIDE_CURSOR)
         self._stream.flush()
         self._write_status_line()
@@ -87,8 +102,10 @@ class InteractiveTerminalTUI:
     def stop_streaming(self):
         self._clear_status_line()
         self.markdown.finish()
-        self._stream.write(self.SHOW_CURSOR)
-        self._stream.flush()
+        if not self.live:
+            self._stream.write(self.SHOW_CURSOR)
+            self._stream.flush()
+        self.live = False
 
     def track_stream_event(self, event: dict):
         event_type = event.get("type")
@@ -124,29 +141,27 @@ class InteractiveTerminalTUI:
             self.markdown.finish()
             self.tool_count += 1
             self.last_tool = event.get("tool_name", "") or ""
-            if self._streaming_text:
-                self._stream.write("\n")
-                self._streaming_text = False
+            self._end_text_line()
             self._clear_status_line()
             self.console.print(f"  [dim cyan]⚡ {self.last_tool}[/dim cyan]")
             self._write_status_line()
         elif event_type == "loop_transition":
             self.last_transition = event.get("reason", "") or ""
-            if self._streaming_text:
-                self._stream.write("\n")
-                self._streaming_text = False
+            self._end_text_line()
             self._clear_status_line()
             self.console.print(f"  [dim]⚡ State transition: {self.last_transition}[/dim]")
             self._write_status_line()
         elif event_type == "auto_commit_proposal":
             self.pending_auto_commit = True
+        elif event_type == "user_input_applied":
+            self.markdown.finish()
+            for item in event.get("inputs") or []:
+                self.console.print(f"  ↳ 补充要求已送达：{item.get('text', '')}", style="dim", markup=False)
         elif event_type == "message_stop":
             self.markdown.finish()
             self.running = False
             self.last_stop_reason = event.get("stop_reason", "") or ""
-            if self._streaming_text:
-                self._stream.write("\n")
-                self._streaming_text = False
+            self._end_text_line()
             self._clear_status_line()
             if self.last_stop_reason:
                 self.console.print(f"  [dim]⚡ Message stopped: {self.last_stop_reason}[/dim]")
@@ -155,12 +170,13 @@ class InteractiveTerminalTUI:
     def suspend_streaming(self):
         was_visible = self._status_visible
         self._clear_status_line()
-        self._stream.write(self.SHOW_CURSOR)
-        self._stream.flush()
+        if not self.live:
+            self._stream.write(self.SHOW_CURSOR)
+            self._stream.flush()
         try:
             yield
         finally:
-            if was_visible:
+            if was_visible and not self.live:
                 self._stream.write(self.HIDE_CURSOR)
                 self._stream.flush()
                 self._write_status_line()
@@ -449,29 +465,44 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
 
     engine = None
     tui = InteractiveTerminalTUI(console, lambda: engine)
+    live = None
 
-    def permission_prompt(request):
+    @asynccontextmanager
+    async def terminal_dialog():
+        if live is None:
+            yield
+            return
+        async with live.paused():
+            yield
+
+    async def permission_prompt(request):
         if auto_approve and not request.classifier_input.get("forced_prompt_reasons"):
             console.print(f"[dim]Auto-approved: {request.tool_name}[/dim]")
             return "y"
-        decision = tui.choose_menu(
-            title="Permission Required",
-            body_lines=[
-                f"Tool: {request.tool_name}",
-                f"Risk: {request.risk_level}",
-                "",
-                request.summary,
-            ],
-            options=[
-                {"value": "y", "label": "Allow once", "aliases": ["allow", "once", "y"]},
-                {"value": "a", "label": "Always allow this tool in current session", "aliases": ["always", "a"]},
-                {"value": "n", "label": "Deny", "aliases": ["deny", "n"]},
-            ],
-            prompt_label="授权选择",
-            default_value="n",
-        )
+        async with terminal_dialog():
+            decision = tui.choose_menu(
+                title="Permission Required",
+                body_lines=[
+                    f"Tool: {request.tool_name}",
+                    f"Risk: {request.risk_level}",
+                    "",
+                    request.summary,
+                ],
+                options=[
+                    {"value": "y", "label": "Allow once", "aliases": ["allow", "once", "y"]},
+                    {"value": "a", "label": "Always allow this tool in current session", "aliases": ["always", "a"]},
+                    {"value": "n", "label": "Deny", "aliases": ["deny", "n"]},
+                ],
+                prompt_label="授权选择",
+                default_value="n",
+            )
         console.print(f"权限决策: {request.tool_name} -> {decision}")
         return decision
+
+    async def ask_user(questions):
+        from xuloom.tools.ask_user_question_tool import AskUserQuestionTool
+        async with terminal_dialog():
+            return AskUserQuestionTool()._fallback_text_prompt(questions)
 
     async def prompt_auto_commit(proposal: dict):
         if not proposal:
@@ -495,16 +526,17 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
                 f"Skipped pre-existing dirty files: {proposal.get('skipped_dirty_overlap_count')}",
             ])
 
-        decision = tui.choose_menu(
-            title="Auto-Commit Proposal",
-            body_lines=lines,
-            options=[
-                {"value": "commit", "label": "Commit now", "aliases": ["y", "yes", "commit"]},
-                {"value": "skip", "label": "Skip this proposal", "aliases": ["n", "no", "skip"]},
-            ],
-            prompt_label="提交选择",
-            default_value="commit",
-        )
+        async with terminal_dialog():
+            decision = tui.choose_menu(
+                title="Auto-Commit Proposal",
+                body_lines=lines,
+                options=[
+                    {"value": "commit", "label": "Commit now", "aliases": ["y", "yes", "commit"]},
+                    {"value": "skip", "label": "Skip this proposal", "aliases": ["n", "no", "skip"]},
+                ],
+                prompt_label="提交选择",
+                default_value="commit",
+            )
         result = await engine.resolve_auto_commit_proposal(
             proposal.get("proposal_id", ""),
             decision=decision,
@@ -520,6 +552,7 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
     from xuloom.security.permissions import ApprovalPolicy
     engine = QueryEngine(permission_handler=permission_prompt, approval_policy=ApprovalPolicy("full" if auto_approve else "ask"), execution_mode=execution_mode, cwd=working_directory,
                          load_enabled_plugins=True)
+    engine.tool_context["ask_user_callback"] = ask_user
 
     def require_idle_session():
         if (any(not task.done() for task in engine.tool_context["subagent_tasks"].tasks.values())
@@ -533,6 +566,7 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
         await engine.aclose()
         engine = QueryEngine(permission_handler=permission_prompt, approval_policy=policy, cwd=cwd, collaboration_mode=collaboration, execution_mode=isolation,
                              load_enabled_plugins=True)
+        engine.tool_context["ask_user_callback"] = ask_user
         await engine.start_protocols(sys_print=agent_events_callback)
 
     if not engine.is_configured:
@@ -589,7 +623,10 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
     terminal_input = None
     if sys.stdin.isatty() and sys.stdout.isatty():
         from xuloom.skills.terminal import input_session
+        from xuloom.live_input import LiveInput
         terminal_input = input_session(lambda: engine.tool_context["skill_registry"])
+        if os.environ.get("XULOOM_LIVE_INPUT", "1") != "0":
+            live = LiveInput(console, status=tui.status_text)
     while True:
         try:
             if _pending_initial_prompt:
@@ -918,21 +955,24 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
             final_answer = ""
             turn_was_aborted = False
             tui.reset_turn(turn_options.get("display_text", user_input))
-            tui.start_streaming()
+            tui.start_streaming(live=live is not None)
             turn_started = time.monotonic()
+            live_turn = live.running(engine) if live is not None else nullcontext()
 
             try:
-                async for event in engine.submit_message(user_input, sys_print_callback=agent_events_callback, **turn_options):
-                    tui.track_stream_event(event)
-                    event_type = event.get("type")
-                    if event_type == "auto_commit_proposal":
-                        with tui.suspend_streaming():
-                            await prompt_auto_commit(event.get("proposal") or {})
-                    elif event_type == "final":
-                        final_answer = event.get("text", "")
-                        receipt = event.get("result", {})
-                        if not receipt.get("ok", False):
-                            final_answer += "\n[Execution ended: " + receipt.get("reason", "unknown") + "]"
+                async with live_turn:
+                    async for event in engine.submit_message(user_input, sys_print_callback=agent_events_callback, **turn_options):
+                        tui.track_stream_event(event)
+                        event_type = event.get("type")
+                        if event_type == "auto_commit_proposal":
+                            with tui.suspend_streaming():
+                                await prompt_auto_commit(event.get("proposal") or {})
+                        elif event_type == "final":
+                            final_answer = event.get("text", "")
+                            receipt = event.get("result", {})
+                            if not receipt.get("ok", False):
+                                final_answer += "\n[Execution ended: " + receipt.get("reason", "unknown") + "]"
+                turn_was_aborted = live is not None and live.stopped
             except (KeyboardInterrupt, asyncio.CancelledError):
                 last_interrupt_time = 0
                 try:
