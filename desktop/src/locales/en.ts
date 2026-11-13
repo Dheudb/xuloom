@@ -2,6 +2,8 @@
 // placeholder filled with a value that is never translated. English may use plural forms:
 // "{count, plural, one {# file} other {# files}}". `npm run i18n:check` lists messages without an entry.
 export const english: Record<string, string> = {
+  "任务已完成": "Task completed",
+  "任务未完成，请回到会话查看结果": "The task did not complete. Open the conversation to see the result.",
   "启用 Windows 桌面操控": "Enable Windows Computer Use",
   "对新开的本机会话生效。操作前会请求窗口授权，截图会发送给所选模型。操作时使用你的鼠标和键盘，可随时停止任务。": "Applies to new local chats. Xuloom asks for window access and sends screenshots to the selected model. Actions use your mouse and keyboard. Stop the task at any time.",
   "读取会话": "Reading conversation",
