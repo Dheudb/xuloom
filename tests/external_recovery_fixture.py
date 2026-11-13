@@ -23,6 +23,8 @@ async def main():
     await fixture.asyncSetUp()
     try:
         fixture.role(); fixture.mode = "hold"; engine = fixture.engine()
+        engine.set_collaboration_mode("auto")
+        engine.activate_tools(["agent_tool"])
         engine.require_writer()
         engine.messages.append(external.create_user_message("Inspect external worker recovery"))
         assert engine.persist_session_state()
@@ -50,10 +52,10 @@ async def main():
         identity = engine.session_id
         await engine.aclose()
         config = fixture.root / "config"; config.mkdir(exist_ok=True)
-        save_config({"model_connections": [{"id": "local-fixture", "name": "Local protocol fixture", "provider": "anthropic",
-            "model": external.MODEL, "models": [external.MODEL], "api_key": "fixture-only", "base_url": fixture.base,
-            "network_mode": "direct"}], "active_model_connection": "local-fixture"})
-        (config / "config.json").write_bytes((fixture.root / "config.json").read_bytes())
+        with patch("xuloom.core.config.CONFIG_FILE", config / "config.json"):
+            save_config({"model_connections": [{"id": "local-fixture", "name": "Local protocol fixture", "provider": "anthropic",
+                "model": external.MODEL, "models": [external.MODEL], "api_key": "fixture-only", "base_url": fixture.base,
+                "network_mode": "direct"}], "active_model_connection": "local-fixture"})
         print(json.dumps({"home": str(fixture.root), "project": str(fixture.root), "data": str(fixture.root / "data"),
             "config": str(config), "sessionId": identity, "confirmedId": confirmed["agent_id"], "uncertainId": uncertain["agent_id"]}), file=PROTOCOL, flush=True)
         await asyncio.to_thread(sys.stdin.readline)
@@ -90,7 +92,7 @@ async def main():
         fixture.parent_handler = parent_reply; fixture.mode = "normal"
         program = os.environ.get("XULOOM_TEST_LOCAL_PYTHON")
         command = [program, "-I", "-B"] if program else [sys.executable]
-        command += ["-m", "xuloom", "exec", "--cwd", str(fixture.root), "--session", identity, "--json", "--permission", "full", "--collaboration", "ultra", "Resume the confirmed external worker"]
+        command += ["-m", "xuloom", "exec", "--cwd", str(fixture.root), "--session", identity, "--json", "--permission", "full", "--collaboration", "auto", "Resume the confirmed external worker"]
         env = {**os.environ, "HTTP_PROXY": "http://127.0.0.1:1", "HTTPS_PROXY": "http://127.0.0.1:1", "ALL_PROXY": "http://127.0.0.1:1",
             "NO_PROXY": "127.0.0.1,localhost,::1", "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"}
         for key in list(env):

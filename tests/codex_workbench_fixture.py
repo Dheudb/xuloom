@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import sys
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / 'tests')]
@@ -24,12 +25,12 @@ async def main():
         (folder / 'codex-reader.md').write_text('---\nname: codex-reader\ndescription: independent evidence\nbackend: codex\nbackend_program: '
             + program.replace('\\', '/') + '\nconnection: owned-responses\ntools: [Read]\n---\nRead supplied evidence.\n', encoding='utf8')
         config = fixture.root / 'config'; config.mkdir(exist_ok=True)
-        save_config({'model_connections':[
-            {'id':'owned-parent','name':'Owned parent','provider':'anthropic','model':fixtures.MODEL,'models':[fixtures.MODEL],
-             'api_key':'fixture-only','base_url':fixture.base,'network_mode':'direct'},
-            {'id':'owned-responses','name':'Owned Responses','provider':'openai','model':'owned-codex-model','models':['owned-codex-model'],
-             'api_key':'fixture-only','base_url':fixture.base+'/v1','network_mode':'direct'}], 'active_model_connection':'owned-parent'})
-        (config / 'config.json').write_bytes((fixture.root / 'config.json').read_bytes())
+        with patch("xuloom.core.config.CONFIG_FILE", config / "config.json"):
+            save_config({'model_connections':[
+                {'id':'owned-parent','name':'Owned parent','provider':'anthropic','model':fixtures.MODEL,'models':[fixtures.MODEL],
+                 'api_key':'fixture-only','base_url':fixture.base,'network_mode':'direct'},
+                {'id':'owned-responses','name':'Owned Responses','provider':'openai','model':'owned-codex-model','models':['owned-codex-model'],
+                 'api_key':'fixture-only','base_url':fixture.base+'/v1','network_mode':'direct'}], 'active_model_connection':'owned-parent'})
         model, parent = ResponsesModel('namespace'), CatalogModel()
         phase, worker_id = 'bootstrap', None
         counts = {'bootstrap':0,'app':0,'cli':0}
@@ -42,9 +43,15 @@ async def main():
             return parent.reply(handler, body, name='agent_tool' if counts[phase] == 1 else None,
                 values=values,text=phase.upper()+'_CODEX_COMPLETE',identity=phase+'_'+str(counts[phase]))
         fixture.parent_handler = respond
+        fixture.config.stop()
+        fixture.config = patch("xuloom.core.config.CONFIG_FILE", config / "config.json")
+        fixture.config.start()
         engine = fixture.engine()
+        engine.set_collaboration_mode("auto")
+        engine.activate_tools(["agent_tool"])
         result = await engine.run(user_input='Read evidence with Codex',sys_print_callback=lambda _:None)
         assert result.ok,result
+        assert engine.subagent_registry, engine.recent_tool_activity
         row = engine.subagent_registry[0]; assert row['status']=='completed',row
         worker_id, identity = row['agent_id'], engine.session_id
         before = engine.session_manager.load_subagent_transcript(worker_id)['metadata']['external_agent']
