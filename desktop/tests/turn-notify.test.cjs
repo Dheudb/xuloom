@@ -17,6 +17,7 @@ test("a finished turn reports completion, failure or nothing for a user stop", a
   assert.equal(finish("c"), "任务未完成，请回到会话查看结果");
 
   finishedTurnText(outcomes, { session: "d", type: "turn_cancelled" });
+  finishedTurnText(outcomes, { session: "d", type: "turn_error" });
   assert.equal(finish("d"), undefined);
   assert.equal(outcomes.size, 0);
 });

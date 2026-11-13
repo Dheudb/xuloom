@@ -108,6 +108,15 @@ async function main() {
     await newSession(); const firstEmpty = await activeId();
     await newSession(); const draftKey = await activeId();
     assert.notEqual(draftKey, firstEmpty, "Each new-session click starts a freshly seeded session");
+    await page.evaluate(id => window.xuloom.invoke("session.close", { session: id }), firstEmpty);
+    const clickNotification = id => app.evaluate(({ BrowserWindow }, session) => {
+      BrowserWindow.getAllWindows()[0].webContents.send("workbench:event", { type: "notification_open", session });
+    }, id);
+    await clickNotification(firstEmpty);
+    await page.locator(".session-item.active[data-session-id=" + JSON.stringify(firstEmpty) + "]").waitFor();
+    assert(await page.getByRole("textbox", { name: "任务输入" }).isEnabled());
+    await clickNotification(draftKey);
+    await page.locator(".session-item.active[data-session-id=" + JSON.stringify(draftKey) + "]").waitFor();
     await page.getByRole("textbox", { name: "任务输入" }).fill("未发送的草稿");
     await page.locator(".session-item.active small").filter({ hasText: "有草稿" }).waitFor();
     assert.equal(JSON.parse(fs.readFileSync(path.join(historyRoot(project, data), "index.json"), "utf8")).sessions[draftKey.split(":")[1]].draft, "未发送的草稿");

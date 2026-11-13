@@ -138,7 +138,9 @@ class MessageNormalizationMixin(EngineState):
         schemas = []
         for tool in effective_tools.values():
             from xuloom.core.continuation import schema
-            definition = schema(compact_definition(tool.get_tool_definition()))
+            definition = compact_definition(tool.get_tool_definition())
+            if not self.tool_context.get("review_scope"):
+                definition = schema(definition)
             if tool.name == 'web_search_tool' and self.tool_context['native_search_options']()['profile']['backend'] == 'deepseek':
                 definition['input_schema']['properties']['query']['maxLength'] = 128
             if self.model_provider == "openai":

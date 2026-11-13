@@ -13,7 +13,7 @@ NAMES = frozenset({'ultra_answer', 'ultra_prepare'})
 def required(engine):
     return (getattr(engine,'collaboration_mode','auto') == 'ultra' and getattr(engine,'agent_depth',0) == 0
         and NAMES <= getattr(engine,'available_tools',{}).keys()
-        and not engine.tool_context.get('external_backend')
+        and not engine.tool_context.get('external_backend') and not engine.tool_context.get('review_scope')
         and not engine.tool_context.get('collaboration_run', {}).get('decision')
         and not engine.tool_context.get('collaboration_run', {}).get('assessment'))
 

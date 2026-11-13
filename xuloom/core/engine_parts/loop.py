@@ -245,7 +245,8 @@ class TurnLoopMixin(EngineState):
                 if self.abort_event.is_set():
                     raise AbortRequestedError("Abort requested before turn start.")
                 from xuloom.core.continuation import advance
-                await advance(self, turn=turn_count, event_callback=event_callback, sys_print_callback=sys_print_callback)
+                if not self.tool_context.get("review_scope"):
+                    await advance(self, turn=turn_count, event_callback=event_callback, sys_print_callback=sys_print_callback)
                 # Inputs arriving during native continuation must reach the actor
                 # before any new reasoning request, using the existing inbox path.
                 if self.user_inbox or mailbox and mailbox():
@@ -438,10 +439,8 @@ class TurnLoopMixin(EngineState):
             return finish_run(self, NOT_CONFIGURED_MESSAGE, 'not_configured'), None, None
 
         if resume:
-            user_msg = next((message for message in reversed(self.messages) if message.get("role") == "user"
-                and message.get("_origin", "human") == "human" and not message.get("_is_meta")
-                and not message.get("_is_tool_result") and not any(block.get("type") == "tool_result"
-                    for block in message.get("content", []) if isinstance(block, dict))), None)
+            from xuloom.core.messages import original_user_message
+            user_msg = original_user_message(self.messages)
             if user_msg is None:
                 raise ValueError("There is no original user task to resume")
             # Use the existing recovery receipts, never replay uncertain tools.
@@ -466,9 +465,11 @@ class TurnLoopMixin(EngineState):
                 user_msg["_attachments"] = attachments
             if display_text is not None:
                 user_msg["_display_text"] = display_text
+            if self.tool_context.get("review_scope"):
+                user_msg["_review_scope"] = copy.deepcopy(self.tool_context["review_scope"])
             self.messages.append(user_msg)
             self._append_hook_messages("UserPromptSubmit", prompt_hook.context)
-        if "xuloom://chat/" in str(user_msg.get("_display_text", user_msg.get("content", ""))):
+        if not self.tool_context.get("review_scope") and "xuloom://chat/" in str(user_msg.get("_display_text", user_msg.get("content", ""))):
             self.activate_tools(["chat_read_tool"])
         if self.active_turn_trace is not None:
             self.active_turn_trace["userMessageId"] = get_msg_uuid(user_msg)
@@ -482,7 +483,7 @@ class TurnLoopMixin(EngineState):
             self.session_started = True
             self.persist_session_state()
 
-        if resume:
+        if resume and not self.tool_context.get("review_scope"):
             from xuloom.agents.ultra_decision import recover
             try:
                 await recover(self, user_msg, event_callback=event_callback, sys_print_callback=sys_print_callback)
@@ -726,6 +727,7 @@ class TurnLoopMixin(EngineState):
         # is active. It should have called exit_plan_mode or ask_user_question_tool.
         if (
             self.get_mode() == "plan"
+            and not self.tool_context.get("review_scope")
             and loop_state.get("plan_mode_guard_retries", 0) < 2
         ):
             loop_state["plan_mode_guard_retries"] = loop_state.get("plan_mode_guard_retries", 0) + 1
@@ -831,7 +833,7 @@ class TurnLoopMixin(EngineState):
             raise AbortRequestedError("Abort requested before turn finalization.")
         # Delegated runs own their transcript, not project-wide
         # durable memories or untracked post-completion model jobs.
-        if not self.tool_context.get("delegation"):
+        if not self.tool_context.get("delegation") and not self.tool_context.get("review_scope"):
             estimated_tokens = self.compactor.estimate_tokens(self.messages)
             await self.session_memory_manager.maybe_extract(
                 self.messages, estimated_tokens,

@@ -111,6 +111,12 @@ export default function App() {
   draftSessions.current = sessions;
   const navigateChat = useRef<(url: string) => void>(() => {});
   navigateChat.current = (url) => { void workspaceAction("chat.open", { url }).catch(onError); };
+  const openNotifiedSession = useRef<(id: string) => void>(() => {});
+  openNotifiedSession.current = (id) => {
+    void workspaceAction("session.select", { id }).then((result) => {
+      if (result?.activeId === id) setScalingOpen(false);
+    }).catch(onError);
+  };
   const lastUser = active?.messages.slice().reverse().find((message) => message.role === "user");
   const paused = !active?.busy && ["cancelled", "interrupted"].includes(active?.messages.at(-1)?.trace?.status || "");
   const resumeAvailable = paused && !active?.draft.trim() && !active?.attachments.length && !active?.editingId && !active?.goalMode &&
@@ -161,7 +167,7 @@ export default function App() {
         return;
       }
       if (event.type === "notification_open") {
-        setActiveId(event.session);
+        openNotifiedSession.current(event.session);
         return;
       }
       if (event.session) notifyOnFinish(turnOutcomes.current, event);

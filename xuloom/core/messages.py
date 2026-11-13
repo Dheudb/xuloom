@@ -38,6 +38,14 @@ def create_user_message(
     }
 
 
+def original_user_message(messages):
+    """Find the user task a continuation belongs to, excluding supplemental input."""
+    return next((message for message in reversed(messages) if message.get("role") == "user"
+        and message.get("_origin", "human") == "human" and not message.get("_is_meta")
+        and not message.get("_is_tool_result") and not message.get("_steering_id")
+        and not any(block.get("type") == "tool_result" for block in message.get("content", []) if isinstance(block, dict))), None)
+
+
 def create_assistant_message(
     content: Any,
     *,

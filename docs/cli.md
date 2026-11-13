@@ -54,7 +54,7 @@ xuloom --resume SESSION_ID      恢复指定会话
 | `/review [<提交或范围>] [-- <说明>]` | 用内置 `code-review` Skill 审查代码，只报告问题、不修改文件 |
 | `/quit` | 退出 |
 
-`/review` 不带参数时审查当前未提交的改动（已暂存、未暂存和未跟踪文件）；也可以指定一个提交（`/review HEAD`）或范围（`/review HEAD~3..HEAD`、`/review main...HEAD`）。范围在发送前用 Git 校验，并固定为完整提交哈希；没有改动或范围无效时直接提示，不发起模型请求。`--` 之后的文字作为审查重点交给模型，例如 `/review main...HEAD -- 重点看并发和错误处理`。非交互场景使用 `xuloom exec --skill code-review "审查 main...HEAD 的改动"`。
+`/review` 不带参数时审查当前未提交的改动（已暂存、未暂存和未跟踪文件）；也可以指定一个提交（`/review HEAD`）或范围（`/review HEAD~3..HEAD`、`/review main...HEAD`）。范围在发送前用 Git 校验，并固定为完整提交哈希；没有改动或范围无效时直接提示，不发起模型请求。`--` 之后的文字作为审查重点交给模型，例如 `/review main...HEAD -- 重点看并发和错误处理`。审查回合只开放文件读取、搜索和固定范围的 Git 查看工具，并暂停会话 Hook。即使会话处于完全访问或 Ultra，审查也不会调用任意命令、修改文件或派发子代理。三点范围需要共同祖先。非交互场景可手动用 `xuloom exec --skill code-review "审查 main...HEAD 的改动"`，该用法沿用普通执行权限。
 
 Skills、子代理和 MCP 与桌面端共用引擎实现。CLI 在启动时读取项目 `.xuloom/mcp_servers.json`；
 修改配置后重启 CLI 以加载。桌面可以在 MCP 市场中编辑这份配置。

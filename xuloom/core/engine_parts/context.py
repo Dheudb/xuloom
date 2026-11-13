@@ -192,13 +192,13 @@ class ContextManagementMixin(EngineState):
         try:
             attachment_messages = self.attachment_collector.collect_attachments(
                 cwd=self.session_cwd,
-                plan_mode=self.plan_manager.get_mode(),
+                plan_mode="normal" if self.tool_context.get("review_scope") else self.plan_manager.get_mode(),
                 plan_content=self.plan_manager.get_plan(),
                 plan_file_path=self.plan_manager.plan_file_path,
                 plan_exists=self.plan_manager.plan_exists,
                 todo_summary=self.todo_manager.render_prompt_summary(),
                 todo_count=len(self.todo_manager.list_items()),
-                active_tools=list(self.available_tools.keys()),
+                active_tools=list(self._get_effective_tools() if self.tool_context.get("review_scope") else self.available_tools),
                 changed_files=[],
                 lsp_diagnostics=lsp_diags,
                 turn_count=turn_count,

@@ -78,6 +78,22 @@ class LiveInputTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(live.stopped)
         self.assertEqual(engine.aborted, 1)
 
+    async def test_stop_cleanup_outlives_the_input_prompt(self):
+        class SlowAbortEngine(FakeEngine):
+            async def request_abort(self):
+                self.aborted += 1
+                await asyncio.sleep(0.1)
+                self.cleaned = True
+
+        engine = SlowAbortEngine()
+        engine.cleaned = False
+        live = self.live()
+        async with live.running(engine):
+            self.pipe.send_text("\x03")
+            await until(lambda: engine.aborted, "Ctrl+C did not start cleanup")
+        self.assertTrue(engine.cleaned)
+        self.assertEqual(engine.aborted, 1)
+
     async def test_pause_hands_over_the_terminal_and_keeps_the_draft(self):
         engine, pipe = FakeEngine(), self.pipe
         live = self.live()
@@ -95,6 +111,59 @@ class LiveInputTests(unittest.IsolatedAsyncioTestCase):
         live = self.live()
         async with live.paused():
             self.assertFalse(live.active)
+
+    async def test_interactive_cli_lists_withdraws_and_resumes_saved_input(self):
+        import os
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import AsyncMock, patch
+        from xuloom import QueryEngine
+        from xuloom.main import interactive_loop
+        from xuloom.testing import ScriptedModel
+        from xuloom.testing.models import model_response
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            work = root / "work"
+            work.mkdir()
+            started = asyncio.Event()
+
+            async def wait_for_stop(request):
+                started.set()
+                await original.abort_event.wait()
+                return model_response(text="partial")
+
+            model = ScriptedModel([wait_for_stop, model_response(text="CONTINUED"), model_response(text="NEW")])
+            env = {"XULOOM_DATA_DIR": str(root / "data"), "XULOOM_CONFIG_DIR": str(root / "config")}
+            with patch.dict(os.environ, env), model:
+                config = model.config(cwd=str(work), collaboration_mode="solo")
+                async with QueryEngine(config) as original:
+                    async def start():
+                        return [event async for event in original.submit_message("ORIGINAL", sys_print_callback=lambda _: None)]
+                    running = asyncio.create_task(start())
+                    await asyncio.wait_for(started.wait(), 5)
+                    remove = original.queue_input("WITHDRAW_ME")
+                    original.queue_input("KEEP_ME")
+                    await original.request_abort()
+                    self.assertEqual((await running)[-1]["result"]["reason"], "cancelled")
+                    session = original.session_id
+                commands = ["/pending", f"/withdraw {remove['id']}", "/continue", "/continue", "NEW_TASK", "/quit"]
+                with (patch("xuloom.core.engine.QueryEngine", side_effect=lambda **_: QueryEngine(config)),
+                      patch.object(QueryEngine, "start_protocols", new_callable=AsyncMock),
+                      patch("xuloom.main.console", self.console),
+                      patch.object(self.console, "input", side_effect=commands),
+                      patch("sys.stdin.isatty", return_value=False)):
+                    await interactive_loop(resume_session_id=session, strict_resume=True)
+                self.assertEqual(len(model.requests), 3)
+                resumed = str(model.requests[1].messages)
+                self.assertIn("ORIGINAL", resumed)
+                self.assertIn("KEEP_ME", resumed)
+                self.assertNotIn("WITHDRAW_ME", resumed)
+                self.assertIn("NEW_TASK", str(model.requests[2].messages))
+                output = self.out.getvalue()
+                self.assertIn("Instruction withdrawn.", output)
+                self.assertIn("No stopped task to continue.", output)
+                self.assertIn("WITHDRAW_ME", output)
 
     def test_live_tui_leaves_the_prompt_area_alone_and_reports_delivery(self):
         from xuloom.main import InteractiveTerminalTUI

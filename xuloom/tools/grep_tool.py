@@ -82,7 +82,7 @@ class GrepTool(BaseAgenticTool):
         # their system ripgrep. Never search the current workspace for executables.
         bundled = Path(sys.prefix) / "Lib/site-packages/xuloom_search/rg.exe"
         executable = str(bundled) if bundled.is_file() else "rg"
-        cmd = [executable, "-n", "--max-columns", "500"]
+        cmd = [executable, "--no-config", "-n", "--max-columns", "500"]
 
         if output_mode == "files_with_matches":
             cmd.append("-l")
@@ -109,7 +109,7 @@ class GrepTool(BaseAgenticTool):
         if glob:
             cmd.extend(["-g", glob])
 
-        cmd.extend([pattern, search_path])
+        cmd.extend(["--", pattern, search_path])
 
         try:
             if self.context.get("confined_sync_worker"):

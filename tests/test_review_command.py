@@ -1,3 +1,4 @@
+import asyncio
 import os
 import subprocess
 import tempfile
@@ -38,6 +39,8 @@ class ReviewCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parse("main...HEAD -- check errors"), ("main...HEAD", "check errors"))
         with self.assertRaises(ValueError):
             parse("main HEAD")
+        with self.assertRaises(ValueError):
+            parse("--output=x")
 
     async def test_current_changes_require_a_dirty_worktree(self):
         self.commit("a.txt", "one\n")
@@ -45,21 +48,25 @@ class ReviewCommandTests(unittest.IsolatedAsyncioTestCase):
             await review_request(self.root, "")
         (self.root / "new.txt").write_text("draft\n", encoding="utf-8")
         prompt, options = await review_request(self.root, " -- focus on data loss")
-        self.assertEqual(options, {"selected_skills": ["code-review"]})
+        self.assertEqual(options["selected_skills"], ["code-review"])
+        self.assertEqual(options["review_scope"]["kind"], "worktree")
         self.assertIn("uncommitted Git changes", prompt)
-        self.assertIn("git diff HEAD", prompt)
+        self.assertIn("review_git", prompt)
         self.assertTrue(prompt.endswith("Reviewer notes: focus on data loss"))
 
     async def test_commit_and_range_are_pinned_to_hashes(self):
         first = self.commit("a.txt", "one\n")
         second = self.commit("a.txt", "two\n")
         prompt, _ = await review_request(self.root, "HEAD")
-        self.assertIn(f"git show {second}", prompt)
-        prompt, _ = await review_request(self.root, "HEAD~1..")
-        self.assertIn("1 commit(s)", prompt)
-        self.assertIn(f"git diff {first}..{second}", prompt)
-        prompt, _ = await review_request(self.root, f"{first}...HEAD")
-        self.assertIn(f"git diff {first}...{second}", prompt)
+        self.assertIn(second, prompt)
+        prompt, options = await review_request(self.root, "HEAD~1..")
+        self.assertIn(f"{first}..{second}", prompt)
+        self.assertEqual(options["review_scope"]["base"], first)
+        prompt, options = await review_request(self.root, f"{first}...HEAD")
+        self.assertIn(f"{first}...{second}", prompt)
+        self.assertEqual(options["review_scope"]["base"], first)
+        _, options = await review_request(self.root, "HEAD..HEAD~1")
+        self.assertEqual(options["review_scope"]["head"], first)
 
     async def test_invalid_targets_fail_before_any_model_request(self):
         self.commit("a.txt", "one\n")
@@ -79,11 +86,117 @@ class ReviewCommandTests(unittest.IsolatedAsyncioTestCase):
                 events = [event async for event in engine.submit_message(
                     prompt, sys_print_callback=lambda _: None, display_text="/review HEAD", **options)]
         sent = str(model.requests[0].messages[-1]["content"])
-        self.assertIn(f"git show {commit}", sent)
+        self.assertIn(commit, sent)
+        self.assertIn("review_git", sent)
         self.assertIn("<selected-skills>", sent)
         self.assertIn("Skill: code-review", sent)
         self.assertIn({"type": "skill_loaded", "name": "code-review"},
                       [{key: event.get(key) for key in ("type", "name")} for event in events if event.get("type") == "skill_loaded"])
+
+    async def test_unrelated_three_dot_range_is_rejected(self):
+        first = self.commit("a.txt", "one")
+        git(self.root, "switch", "--orphan", "unrelated")
+        second = self.commit("b.txt", "two")
+        with self.assertRaisesRegex(ValueError, "no common ancestor"):
+            await review_request(self.root, f"{first}...{second}")
+        _, options = await review_request(self.root, f"{first}..{second}")
+        self.assertEqual(options["review_scope"]["base"], first)
+
+    async def test_review_blocks_writes_commands_delegation_and_hooks_in_full_access(self):
+        import json
+        import sys
+        from xuloom import ApprovalPolicy, QueryEngine
+        from xuloom.models.adapter import ToolCall
+        from xuloom.testing import ScriptedModel
+        from xuloom.testing.models import model_response
+
+        self.commit("a.txt", "previous\n")
+        commit = self.commit("a.txt", "review this line\n")
+        (self.root / "unrelated.txt").write_text("uncommitted", encoding="utf-8")
+        forbidden = self.root / "forbidden.txt"
+        hook_marker = self.root / "hook-ran.txt"
+        calls = [
+            ToolCall("write", "file_write_tool", {"file_path": str(forbidden), "content": "blocked"}),
+            ToolCall("command", "command_tool", {"action": "start", "argv": [sys.executable, "-c", f"open({str(forbidden)!r}, 'w').close()"]}),
+            ToolCall("worker", "spawn_agent", {"prompt": "write a file", "description": "blocked"}),
+            ToolCall("diff", "review_git", {"action": "diff"}),
+        ]
+        model = ScriptedModel([model_response(tool_calls=calls), model_response(text="Review complete."), model_response(
+            tool_calls=[ToolCall("normal", "file_write_tool", {"file_path": str(forbidden), "content": "allowed"})]),
+            model_response(text="Written.")])
+        prompt, options = await review_request(self.root, commit)
+        with model:
+            config = model.config(cwd=str(self.root), approval_policy=ApprovalPolicy("full"), collaboration_mode="ultra")
+            async with QueryEngine(config) as engine:
+                hooks = self.root / "fixture-hooks.json"
+                hooks.write_text(json.dumps({"Stop": [{"type": "command",
+                    "command": f'"{sys.executable}" -c "from pathlib import Path; Path({str(hook_marker)!r}).touch()"'}]}),
+                    encoding="utf-8")
+                engine.hook_manager.config_path = str(hooks)
+                callback_events = []
+                engine.add_hook("TurnEnd", callback_events.append)
+                tool_events = []
+                engine.set_event_handler(tool_events.append)
+                events = [event async for event in engine.submit_message(
+                    prompt, display_text="/review HEAD", sys_print_callback=lambda _: None, **options)]
+                self.assertTrue(events[-1]["result"]["ok"])
+                results = {event["tool_use_id"]: event for event in [*events, *tool_events] if event["type"] == "tool_result"}
+                for blocked in ("write", "command", "worker"):
+                    self.assertIn("outside the read-only review scope", results[blocked]["result"])
+                self.assertIn("+review this line", results["diff"]["result"])
+                self.assertNotIn("unrelated.txt", results["diff"]["result"])
+                self.assertFalse(forbidden.exists())
+                self.assertFalse(hook_marker.exists())
+                self.assertEqual(callback_events, [])
+                self.assertEqual({tool["name"] for tool in model.requests[0].tools},
+                                 {"file_read_tool", "grep_tool", "glob_tool", "review_git"})
+                engine.set_collaboration_mode("solo")
+                await engine.run("Write the fixture", sys_print_callback=lambda _: None)
+                self.assertEqual(forbidden.read_text(encoding="utf-8"), "allowed")
+                self.assertEqual(len(callback_events), 1)
+                self.assertTrue(hook_marker.exists())
+
+    async def test_review_scope_survives_resuming_with_applied_steering(self):
+        from xuloom import ApprovalPolicy, QueryEngine
+        from xuloom.core.steering import consume
+        from xuloom.models.adapter import ToolCall
+        from xuloom.testing import ScriptedModel
+        from xuloom.testing.models import model_response
+
+        commit = self.commit("a.txt", "review target")
+        started = asyncio.Event()
+
+        async def stop_point(request):
+            started.set()
+            await engine.abort_event.wait()
+            return model_response(text="partial")
+
+        output = self.root / "forbidden.txt"
+        model = ScriptedModel([stop_point, model_response(tool_calls=[
+            ToolCall("forbidden", "file_write_tool", {"file_path": str(output), "content": "no"}),
+            ToolCall("review", "review_git", {"action": "diff"})]), model_response(text="Review complete.")])
+        prompt, options = await review_request(self.root, commit)
+        with model:
+            config = model.config(cwd=str(self.root), approval_policy=ApprovalPolicy("full"), collaboration_mode="solo")
+            async with QueryEngine(config) as engine:
+                async def turn(text, **kwargs):
+                    return [event async for event in engine.submit_message(text, sys_print_callback=lambda _: None, **kwargs)]
+                running = asyncio.create_task(turn(prompt, **options))
+                await asyncio.wait_for(started.wait(), 5)
+                engine.queue_input("Inspect this commit carefully")
+                await consume(engine)
+                await engine.request_abort()
+                await running
+                session = engine.session_id
+            async with QueryEngine(config) as engine:
+                self.assertTrue(engine.load_session(session))
+                tool_events = []
+                engine.set_event_handler(tool_events.append)
+                resumed = await turn("", resume=True)
+        self.assertTrue(resumed[-1]["result"]["ok"])
+        self.assertFalse(output.exists())
+        self.assertIn("review target", next(event["result"] for event in tool_events
+                                          if event.get("tool_use_id") == "review" and event["type"] == "tool_result"))
 
     async def test_outside_a_repository_reports_the_reason(self):
         with tempfile.TemporaryDirectory() as plain:
