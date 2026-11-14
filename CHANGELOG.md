@@ -4,6 +4,13 @@
 
 ## [未发布]
 
+## [0.2.1] - 2026-11-14
+
+### 修复
+- `/review` 审查回合恢复执行用户的 `BeforeToolUse` 拒绝规则，例如禁止读取密钥文件的 Hook 不再被绕过；这些 Hook 在审查中改写的参数和附加的文字仍被忽略，其他 Hook 照旧暂停。拒绝规则配置无法读取时会拦截调用，已暂停的配置项不会干扰审查。
+- 内置 `code-review` Skill 只在可以运行命令时才建议用测试验证；`/review` 只有读取工具，模型只做静态检查。
+- CLI 文档补充 `/continue`、`/pending`、`/withdraw`，并说明两点范围的比较方式和审查用 Git 工具的运行位置。
+
 ## [0.2.0] - 2026-11-13
 
 本版将 v0.1.52 的功能与修复提升为 v0.2.0，交互式 CLI 的只读审查、运行中追加指令与恢复，以及桌面后台通知均包含在内。完整变更见 [0.1.52]。
@@ -153,7 +160,8 @@
 - 引擎拆分为 `xuloom/core/engine_parts/` 下的多个 mixin，主循环拆成多个阶段方法。
 - 新增不可变的 `EngineConfig` 和顶层公开 API（`from xuloom import ...`）。
 
-[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.0...HEAD
+[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/Dheudb/xuloom/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Dheudb/xuloom/compare/v0.1.52...v0.2.0
 [0.1.52]: https://github.com/Dheudb/xuloom/compare/v0.1.51...v0.1.52
 [0.1.51]: https://github.com/Dheudb/xuloom/compare/v0.1.50...v0.1.51

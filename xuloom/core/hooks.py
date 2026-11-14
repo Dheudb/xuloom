@@ -156,7 +156,8 @@ class HookManager:
         outcome = HookOutcome()
         allowed = set(HOOK_EVENTS[event][1])
         current_input = copy.deepcopy(payload.get("tool_input")) if "updated_input" in allowed else None
-        if suppress_review_hooks.get():
+        review = suppress_review_hooks.get()
+        if review and event != "BeforeToolUse":
             return outcome
         for registration in list(self._callbacks):
             if registration.event != event:
@@ -184,9 +185,9 @@ class HookManager:
                 _logger.warning("Hook callback for %s returned %s; expected dict or None", event, type(answer).__name__)
                 continue
             text = answer.get("context")
-            if text:
+            if text and not review:
                 outcome.context.append(str(text))
-            if "updated_input" in allowed and isinstance(answer.get("updated_input"), dict):
+            if not review and "updated_input" in allowed and isinstance(answer.get("updated_input"), dict):
                 current_input = copy.deepcopy(answer["updated_input"])
                 outcome.updated_input = current_input
             decision = str(answer.get("decision", "allow") or "allow").strip().lower()
@@ -375,6 +376,7 @@ class HookManager:
         current_input = copy.deepcopy(payload.get("tool_input", {}) or {})
         rendered_outputs = []
         history = []
+        review = suppress_review_hooks.get()
 
         for index, hook in enumerate(config.get("BeforeToolUse", []), start=1):
             try:
@@ -382,30 +384,6 @@ class HookManager:
                 effective_payload["tool_input"] = current_input
                 if not self._hook_matches(hook, effective_payload):
                     continue
-
-                template = str(hook.get("content", "")).strip()
-                rendered = ""
-                if template:
-                    rendered = self._render_template(template, effective_payload)
-                    if rendered:
-                        rendered_outputs.append(rendered)
-
-                previous_input = copy.deepcopy(current_input)
-                if isinstance(hook.get("updated_input"), dict):
-                    current_input = self._render_structured_value(
-                        hook.get("updated_input"),
-                        effective_payload,
-                    )
-                elif isinstance(hook.get("input_patch"), dict):
-                    rendered_patch = self._render_structured_value(
-                        hook.get("input_patch"),
-                        effective_payload,
-                    )
-                    if isinstance(rendered_patch, dict):
-                        current_input = {
-                            **current_input,
-                            **rendered_patch,
-                        }
 
                 behavior = str(
                     hook.get("behavior", hook.get("action", "allow"))
@@ -419,6 +397,23 @@ class HookManager:
                     "block": "reject",
                     "reject": "reject",
                 }.get(behavior, "allow")
+
+                if review and normalized_behavior != "reject":
+                    continue
+
+                template = str(hook.get("content", "")).strip()
+                rendered = self._render_template(template, effective_payload) if template else ""
+                if rendered and not review:
+                    rendered_outputs.append(rendered)
+
+                previous_input = copy.deepcopy(current_input)
+                if not review:
+                    if isinstance(hook.get("updated_input"), dict):
+                        current_input = self._render_structured_value(hook["updated_input"], effective_payload)
+                    elif isinstance(hook.get("input_patch"), dict):
+                        rendered_patch = self._render_structured_value(hook["input_patch"], effective_payload)
+                        if isinstance(rendered_patch, dict):
+                            current_input = {**current_input, **rendered_patch}
 
                 input_changed = previous_input != current_input
                 history.append({
@@ -634,12 +629,17 @@ class HookManager:
     # ── Shared utilities ────────────────────────────────────────────────
 
     def _load_config(self) -> Dict[str, list]:
-        if suppress_review_hooks.get():
-            return {}
         if not os.path.exists(self.config_path):
             return {}
         with open(self.config_path, "r", encoding="utf-8") as f:
             payload = json.load(f)
+        if suppress_review_hooks.get():
+            if not isinstance(payload, dict):
+                raise ValueError("Hook configuration must be a JSON object.")
+            rules = payload.get("BeforeToolUse", [])
+            if not isinstance(rules, list) or any(not isinstance(rule, dict) for rule in rules):
+                raise ValueError("BeforeToolUse must be a list of rule objects.")
+            return {"BeforeToolUse": rules}
         if not isinstance(payload, dict):
             return {}
         for legacy, current in HOOK_EVENT_ALIASES.items():
