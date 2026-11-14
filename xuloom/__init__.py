@@ -10,7 +10,7 @@ Names are imported lazily so ``import xuloom`` stays cheap for CLI startup.
 from importlib import import_module
 from typing import TYPE_CHECKING
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 _EXPORTS = {
     "QueryEngine": "xuloom.core.engine",

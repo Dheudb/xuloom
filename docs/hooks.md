@@ -42,6 +42,8 @@ engine.remove_hook(handle)
 
 回调抛出异常时只记录异常类型，不中断任务；**BeforeToolUse 例外**：回调出错会拒绝这次工具调用，避免安全检查失效后工具照常执行。
 
+交互式 CLI 的只读审查回合保留 BeforeToolUse 的拒绝决定。审查期间忽略该事件的参数改写及附加上下文，暂停其他生命周期 Hook。BeforeToolUse 配置格式无效时，审查会拒绝对应的工具调用。
+
 ## 配置文件
 
 ```json
