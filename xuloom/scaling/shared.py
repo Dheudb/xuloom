@@ -12,6 +12,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 from xuloom.tools.base import BaseAgenticTool
+from .node import COORDINATOR_KINDS
 from .store import identity
 from . import artifacts
 
@@ -267,6 +268,8 @@ class SharedTool(BaseAgenticTool):
     def is_read_only_call(self,**values):return values.get("action") in {"query","read","read_artifact"}
     async def execute(self,**values):
         args=SharedInput(**values)
+        if self.row.get("kind") in COORDINATOR_KINDS and not self.is_read_only_call(**values):
+            self.node.store.update("execution", self.row["id"], lambda row: row.update(replay_safe=False))
         remote=False
         if args.action=="read_artifact":
             record=self.node.store.get("shared",identity(args.entry));owner=owned(self.node,self.row)

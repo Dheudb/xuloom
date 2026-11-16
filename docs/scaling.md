@@ -47,6 +47,8 @@ xuloom scaling nodes --json
 xuloom scaling start --node lab-node --goal "研究目标、约束与所需成果" --accept-high-usage --request-id research-001 --json
 # 两者一起参与
 xuloom scaling start --node local --node lab-node --goal "共同探索目标" --accept-high-usage --json
+# 最多 4 轮，测试命令通过才算完成
+xuloom scaling start --node local --goal "修复并验证解析器" --accept-high-usage --max-rounds 4 --accept-command "python -m pytest -q" --accept-cwd C:\work\parser --json
 xuloom scaling list --json
 xuloom scaling status RUN_ID --json
 xuloom scaling watch RUN_ID --json
@@ -78,8 +80,19 @@ xuloom scaling retry RUN_ID --task TASK_ID --confirm-side-effects --json
 - 控制索引位于平台数据目录的 `scaling/index.sqlite3`，远端执行索引为 `scaling/node.sqlite3`，节点自治调度索引为 `scaling/node-leaders.sqlite3`，本机协调执行索引为 `scaling/primary.sqlite3`。对话本体继续存现有集中式 `history/`，不在 `.xuloom` 复制一套聊天记录。
 - 每个执行有独立产物目录 `scaling/workspaces/RUN_ID/TASK_ID`。SSH 连接指定的工作目录作为执行主机上的参考目录；该目录中的 Skills、MCP 配置在执行主机读取，文件不会自动复制到 worker 目录或本机。跨主机产物不会自动合并进项目；结果记录保留其主机、工作目录和原生历史身份。
 - SSH 网关断开后，节点主 agent 继续已接受任务的规划、推理、worker 调度与汇总；明确的人类审批与尚未送达的改向请求需等待连接恢复。重新连接用原任务 ID 核对；只有节点进程实际退出后，原来的 running 才会记为 interrupted，不自动重放未知副作用。旧任务及回执保留，明确改向另开一轮。
+- 规划、展开、组内汇总、总复核和对话中，只有持久记录为可安全重跑的原生协调回合才从上次保存的会话重新排队，最多 2 次。使用了共享写入的回合、可能带有副作用的扩展回合以及旧执行记录会标记为中断，等待核对后重试。
+- 已授予的模型额度在任务确认结束、节点报告任务不存在（取消时）或节点明确拒绝提交后归还。运行进入“阻塞”后仍会轮询，直到已接受的任务结束、额度归还，避免一个阻塞运行长期占住其他运行的额度。节点主 agent 的提交被连续拒绝 5 次后记为失败，不再无限重试。
+- SQLite 的 `database is locked／busy` 等瞬时错误在下一轮重试，不会把运行标记为阻塞。
+- 运行完成或取消时持久记录凭据清理意图。控制端删除 `outbound-secrets/` 中该运行的凭据，各节点在没有未完成执行时删除 `secrets/` 中对应文件。不可达的节点在服务活动时每 30 秒重试，服务重启后继续核对。通过对话重开时，控制端先核对保存的连接、模型和凭据身份，再向节点发送凭据。
+- 控制端与节点服务在全部工作结束、且 120 秒内没有请求时自动退出，下次 Scaling 调用再按需启动。服务完成启动后才写入连接文件，退出时删除。进行中的请求会保持服务在线。SSH 网关遇到连接拒绝时会重新找到服务，已发送但结果未知的请求沿用原有身份核对。
 
 ## 当前证明范围
+
+### 轮次上限与验收命令
+
+总复核每次返回 `continue` 都会开启新一轮。默认最多 8 轮（创建时 `max_rounds` 可设 1–100，CLI `--max-rounds`）。达到上限仍未完成时，运行进入“阻塞”并保留最后一次复核报告。用户可以检查报告后明确要求改向或开始新运行。
+
+可选的验收命令（CLI `--accept-command`、`--accept-cwd`、`--accept-timeout`，接口参数 `acceptance: {command, cwd, timeout}`）在总复核返回 `complete` 后以当前用户权限在控制端主机运行。退出码为 0 才记为完成，`completion_basis` 为 `acceptance_command`。失败时保留最多 8000 字符的输出尾部供下一轮规划，达到轮次上限则阻塞。命令用系统 Shell 在指定的绝对目录内执行，超时默认 600 秒（1–3600）。取消运行或超时会清理命令进程。控制端意外退出后，已经开始且缺少结果的验收标记为“结果未确认”，需核对本机结果后再调整方向。未设置验收命令时使用“模型报告完成”。
 
 ### 可选运行预算
 
@@ -120,4 +133,4 @@ xuloom scaling shared RUN_ID --entry ENTRY_ID --json
 
 v0.1.32 修复首次共享摘要与事件游标的快照竞争，并改为不可变文件版本的有界分页。首次摘要、数量和游标在同一 SQLite 读取事务中产生，并发提交的记录会出现在该快照或下一次增量中。共享文件副本与索引位于执行端数据目录的 `scaling/shared-artifacts/`，索引在内存中最多缓存 64 份；不把文件内容全量保存在内存缓存中。
 
-CPU／内存观测是准入估算，不能硬限制任意 Shell、浏览器、构建或本地模型的资源使用，也不替代操作系统沙箱。配置容量不等于供应商承载量；API 上限、内存压力、有效独立工作量都会减少实际运行数量。完成显示明确为“模型报告完成”，不冒充科学验收、程序检查通过或用户验收。未做真实跨机断网、千级真实模型、外部执行器大规模混合运行和 Linux／macOS 桌面验收。
+CPU／内存观测是准入估算，不能硬限制任意 Shell、浏览器、构建或本地模型的资源使用，也不替代操作系统沙箱。配置容量不等于供应商承载量；API 上限、内存压力、有效独立工作量都会减少实际运行数量。未设置验收命令时，完成显示明确为“模型报告完成”，不冒充科学验收、程序检查通过或用户验收；验收命令只证明该命令退出码为 0。未做真实跨机断网、千级真实模型、外部执行器大规模混合运行和 Linux／macOS 桌面验收。

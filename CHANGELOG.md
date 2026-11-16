@@ -4,6 +4,22 @@
 
 ## [未发布]
 
+## [0.2.3] - 2026-11-16
+
+### 新增
+- Scaling 默认最多 8 轮复核（`max_rounds`，CLI `--max-rounds`），达到上限时保留报告并进入阻塞，不再无限开新轮。
+- Scaling 可选验收命令（CLI `--accept-command`、`--accept-cwd`、`--accept-timeout`）：总复核报告完成后运行，退出码为 0 才记为完成；失败时把输出交给下一轮规划。
+
+### 修复
+- Scaling 取消时，节点上不存在的任务会归还已授予的模型额度；阻塞的运行继续轮询到已接受的任务结束，并归还其额度，不再让其他运行一直拿不到额度。
+- 节点主 agent 的提交被连续拒绝 5 次后记为失败并归还额度，不再停在“派发中”无限重试。
+- 节点服务重启后，最多重排 2 次已确认可重跑的协调回合。执行过共享写入或副作用未知的回合等待核对。
+- SQLite 锁等待等瞬时错误不再把运行标记为阻塞，也不会让调度循环退出。
+- 运行完成或取消后删除控制端和节点上的模型凭据文件；之后若通过对话重开运行，再从已保存的连接重新导出。
+- Scaling 后台服务在没有未完成工作且 120 秒无请求时自动退出，不再一直挡住桌面更新；服务完成启动后才发布连接地址。等待审批和模型额度时不再每 0.25 秒查询一次数据库。
+- 验收命令随运行取消。控制端意外退出后，保留结果未知的记录；桌面区分等待验收、执行中、失败和已通过。
+- 已开始的 RPC 请求保持 Scaling 服务在线，SSH 网关可在节点服务空闲重启后重新连接。凭据清理可在控制端重启后继续，重开前先核对冻结的模型连接。
+
 ## [0.2.2] - 2026-11-16
 
 ### 变更
@@ -170,7 +186,8 @@
 - 引擎拆分为 `xuloom/core/engine_parts/` 下的多个 mixin，主循环拆成多个阶段方法。
 - 新增不可变的 `EngineConfig` 和顶层公开 API（`from xuloom import ...`）。
 
-[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.2...HEAD
+[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/Dheudb/xuloom/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/Dheudb/xuloom/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/Dheudb/xuloom/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Dheudb/xuloom/compare/v0.1.52...v0.2.0

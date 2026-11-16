@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import re
+import sys
 import tempfile
 import time
 import unittest
@@ -352,6 +353,175 @@ class ScalingTests(unittest.IsolatedAsyncioTestCase):
         await self.controller.dispatch("answer", {"id": run["id"], "question": "approval", "answer": "deny"})
         await self.controller.requests(private, node, [question])
         self.assertEqual(self.node.store.get("request", "approval")["answer"], "deny")
+
+    def held_permit(self, run, task_id):
+        return self.controller.store.put("permit", {"id": "allocation-" + task_id, "run_id": run["id"], "task_id": task_id, "node": "lab",
+            "quota": digest("provider"), "limits": {"concurrency": 4, "requests_per_minute": None}, "units": 2, "status": "granted", "allocation": True})
+
+    async def test_cancel_releases_slots_of_work_the_node_never_accepted(self):
+        run = await self.run_swarm(2); private = self.controller.store.get("run", run["id"])
+        lost = self.controller.add_task(private, "explore", "submit reply lost", node="lab")
+        self.controller.store.update("task", lost["id"], lambda row: row.update(status="dispatching"))
+        self.held_permit(run, lost["id"])
+        await self.controller.dispatch("cancel", {"id": run["id"]})
+        final = await self.drive(run)
+        self.assertEqual(final["status"], "cancelled")
+        self.assertEqual(self.controller.store.get("permit", "allocation-" + lost["id"])["status"], "released")
+
+    async def test_blocked_run_keeps_polling_until_its_slots_are_returned(self):
+        run = await self.run_swarm(2); private = self.controller.store.get("run", run["id"])
+        failed = self.controller.add_task(private, "explore", "failed after grant", node="lab")
+        self.controller.store.update("task", failed["id"], lambda row: row.update(status="failed", handled=True))
+        self.held_permit(run, failed["id"])
+        self.controller.store.update("run", run["id"], lambda row: row.update(status="blocked", error="needs review"))
+        self.controller.schedule()
+        self.assertIn(run["id"], self.controller.jobs)
+        await asyncio.gather(*self.controller.jobs.values())
+        self.assertEqual(self.controller.store.get("permit", "allocation-" + failed["id"])["status"], "released")
+        self.assertEqual(self.controller.store.get("run", run["id"])["status"], "blocked")
+        self.controller.schedule()
+        self.assertNotIn(run["id"], self.controller.jobs)
+
+    async def test_sqlite_contention_does_not_block_the_run(self):
+        import sqlite3
+        run = await self.run_swarm(2)
+        async def locked(_): raise sqlite3.OperationalError("database is locked")
+        with patch.object(self.controller, "tick", locked):
+            await self.controller.tick_guard(self.controller.store.get("run", run["id"]))
+        self.assertEqual(self.controller.store.get("run", run["id"])["status"], "running")
+        self.assertEqual((await self.drive(run))["status"], "completed")
+
+    async def test_continue_stops_at_the_round_limit_with_the_report(self):
+        run = await self.controller.dispatch("create", {"goal": "Find independent evidence", "nodes": ["lab"], "target": 2,
+            "accept_high_usage": True, "max_rounds": 1})
+        private = self.controller.store.get("run", run["id"])
+        review = self.controller.add_task(private, "synthesize", "review", node="primary")
+        review.update(status="completed", receipt={"text": json.dumps({"decision": "continue", "groups": [{"label": "next", "prompt": "more"}], "report": "Still missing evidence"})})
+        self.controller.interpret(private, review)
+        current = self.controller.store.get("run", run["id"])
+        self.assertEqual((current["status"], current["round"]), ("blocked", 1))
+        self.assertIn("round limit", current["error"])
+        self.assertEqual(current["report"], "Still missing evidence")
+        with self.assertRaisesRegex(ValueError, "round limit"):
+            await self.controller.dispatch("resume", {"id": run["id"]})
+        with self.assertRaisesRegex(ValueError, "Round limit"):
+            await self.controller.dispatch("create", {"goal": "x", "nodes": ["lab"], "accept_high_usage": True, "max_rounds": 0})
+
+    def acceptance(self, code):
+        return {"command": '"' + sys.executable + '" -c "raise SystemExit(' + str(code) + ')"', "cwd": str(self.root), "timeout": 60}
+
+    async def acceptance_run(self, script):
+        spec = {"command": f'"{sys.executable}" -c "{script}"', "cwd": str(self.root), "timeout": 60}
+        run = await self.controller.dispatch("create", {"goal": "Verify local work", "nodes": ["lab"], "target": 2,
+            "accept_high_usage": True, "acceptance": spec})
+        return self.controller.store.update("run", run["id"], lambda row: row.update(
+            acceptance_state={"status": "pending", "review": "review-fixture"}))
+
+    async def test_cancel_stops_the_accepted_local_command_before_the_run_settles(self):
+        run = await self.acceptance_run("import pathlib, time; pathlib.Path('started').touch(); time.sleep(20)")
+        tick = asyncio.create_task(self.controller.check_acceptance(run))
+        try:
+            for _ in range(100):
+                if (self.root / "started").exists():
+                    break
+                await asyncio.sleep(.05)
+            self.assertTrue((self.root / "started").exists())
+            await self.controller.dispatch("cancel", {"id": run["id"]})
+            await asyncio.wait_for(asyncio.shield(tick), 4)
+            final = await self.drive(run)
+            self.assertEqual(final["status"], "cancelled")
+            self.assertEqual(final["acceptance_state"]["status"], "cancelled")
+        finally:
+            tick.cancel()
+            await asyncio.gather(tick, return_exceptions=True)
+
+    async def test_controller_restart_never_replays_an_unconfirmed_acceptance_command(self):
+        run = await self.acceptance_run("import pathlib; pathlib.Path('replayed').touch()")
+        self.controller.store.update("run", run["id"], lambda row: row["acceptance_state"].update(status="running"))
+        await self.primary.close()
+        await self.controller.start()
+        current = self.controller.store.get("run", run["id"])
+        self.assertEqual((current["status"], current["acceptance_state"]["status"]), ("blocked", "interrupted"))
+        with self.assertRaisesRegex(ValueError, "unconfirmed"):
+            await self.controller.dispatch("resume", {"id": run["id"]})
+        self.assertFalse((self.root / "replayed").exists())
+
+    async def test_terminal_cleanup_is_journaled_before_the_controller_can_exit(self):
+        run = await self.run_swarm(2)
+        private = self.controller.store.get("run", run["id"])
+        review = self.controller.add_task(private, "synthesize", "review", node="primary")
+        review.update(status="completed", receipt={"text": '{"decision":"complete","report":"Verified model report"}'})
+        self.controller.interpret(private, review)
+        cleanup = self.controller.store.get("cleanup", run["id"])
+        self.assertEqual(cleanup["status"], "pending")
+        self.controller.schedule_cleanup()
+        await asyncio.wait_for(self.controller.jobs[run["id"]], 4)
+        self.assertEqual(self.node.store.get("job", run["id"])["status"], "closed")
+        self.assertEqual(self.controller.store.get("cleanup", run["id"])["status"], "done")
+
+    async def test_acceptance_retains_only_a_bounded_output_tail(self):
+        run = await self.acceptance_run("print('x' * 100000 + ' kept'); raise SystemExit(7)")
+        await self.controller.check_acceptance(run)
+        result = self.controller.store.get("run", run["id"])["acceptance_state"]
+        self.assertEqual((result["status"], result["exit_code"]), ("failed", 7))
+        self.assertLessEqual(len(result["output"]), 8000)
+        self.assertTrue(result["output"].strip().endswith("kept"))
+
+    async def test_acceptance_command_decides_completion(self):
+        run = await self.controller.dispatch("create", {"goal": "Find independent evidence", "nodes": ["lab"], "target": 2,
+            "accept_high_usage": True, "acceptance": self.acceptance(0)})
+        final = await self.drive(run)
+        self.assertEqual((final["status"], final["completion_basis"]), ("completed", "acceptance_command"))
+        self.assertEqual(final["acceptance_state"]["exit_code"], 0)
+
+    async def test_failed_acceptance_opens_a_new_round_until_the_limit(self):
+        run = await self.controller.dispatch("create", {"goal": "Find independent evidence", "nodes": ["lab"], "target": 2,
+            "accept_high_usage": True, "acceptance": self.acceptance(3), "max_rounds": 2})
+        final = await self.drive(run, seconds=60)
+        self.assertEqual(final["status"], "blocked", final)
+        self.assertEqual((final["round"], final["acceptance_state"]["exit_code"]), (2, 3))
+        plans = sorted((t for t in self.controller.store.walk("task", run["id"]) if t["kind"] == "plan"), key=lambda t: t["round"])
+        self.assertEqual([t["round"] for t in plans], [1, 2])
+        self.assertIn("acceptance_failure", plans[1]["text"])
+        with self.assertRaisesRegex(ValueError, "absolute"):
+            await self.controller.dispatch("create", {"goal": "x", "nodes": ["lab"], "accept_high_usage": True,
+                "acceptance": {"command": "exit 0", "cwd": "relative"}})
+
+    async def test_node_restart_requeues_tool_free_coordinator_turns_from_saved_session(self):
+        self.node.store.put("coordinator", {"id": "group-a", "run_id": "old", "session_id": "saved-session", "status": "idle"})
+        self.node.store.put("execution", {"id": "summary", "run_id": "old", "kind": "group", "coordinator": "group-a",
+            "session_id": "partial-session", "status": "running", "replay_safe": True})
+        self.node.store.put("execution", {"id": "twice", "run_id": "old", "kind": "plan", "status": "running", "restarts": 2,
+            "replay_safe": True})
+        self.node.store.put("execution", {"id": "worker", "run_id": "old", "kind": "explore", "status": "running"})
+        self.node.store.put("execution", {"id": "legacy", "run_id": "old", "kind": "dialogue", "status": "running"})
+        replacement = Node(self.node.store, FakeExecution, resources)
+        await replacement.start()
+        try:
+            summary = replacement.store.get("execution", "summary")
+            self.assertEqual((summary["status"], summary["session_id"], summary["restarts"]), ("queued", "saved-session", 1))
+            self.assertEqual(replacement.store.get("execution", "twice")["status"], "interrupted")
+            self.assertEqual(replacement.store.get("execution", "worker")["status"], "interrupted")
+            self.assertEqual(replacement.store.get("execution", "legacy")["status"], "interrupted")
+        finally: await replacement.close()
+
+    async def test_waiting_for_an_answer_does_not_poll_the_index(self):
+        row = {"id": "waiting-worker", "run_id": "job", "kind": "explore"}
+        reads = []
+        original = self.node.store.get
+        def counted(kind, key):
+            if kind == "request": reads.append(key)
+            return original(kind, key)
+        with patch.object(self.node.store, "get", counted):
+            waiter = asyncio.create_task(self.node.question(row, "permission", {"summary": "write"}))
+            await asyncio.sleep(1.2)
+            self.assertLessEqual(len(reads), 2)
+            key = reads[0]
+            self.node.store.put("job", {"id": "job", "run_id": "job", "token_hash": digest("t" * 64), "status": "active", "settings": {}})
+            started = time.monotonic()
+            await self.node.dispatch("answer", {"run_id": "job", "token": "t" * 64, "id": key, "answer": "allow"})
+            self.assertEqual(await asyncio.wait_for(waiter, 1), "allow")
+            self.assertLess(time.monotonic() - started, .5)
 
 
 class NativeScalingTests(unittest.IsolatedAsyncioTestCase):
