@@ -116,7 +116,8 @@ const add = () => page.getByRole("button", {name:"添加工具与模式",exact:t
   assert.equal(await page.locator(".composer-toolbar").evaluate(el=>el.scrollWidth>el.clientWidth),false);
   const png=await app.evaluate(async({BrowserWindow})=>{const web=BrowserWindow.getAllWindows()[0].webContents;await web.capturePage(undefined,{stayHidden:true,stayAwake:true});await new Promise(r=>setTimeout(r,100));return(await web.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG().toString("base64");});
   fs.mkdirSync(path.join(root,"test-results"),{recursive:true});fs.writeFileSync(path.join(root,"test-results/composer-menu.png"),Buffer.from(png,"base64"));
-  await menu.getByRole("menuitem",{name:/Skills/}).click(); await page.locator(".panel-title h3").filter({hasText:"技能库"}).waitFor();
+  await menu.getByRole("menuitem",{name:/Skills/}).click(); await page.getByRole("listbox",{name:"可用技能"}).waitFor();
+  assert.match(await page.getByRole("textbox",{name:"任务输入"}).inputValue(),/\$$/); assert.equal(await page.locator(".inspector").count(),0);
   assert.deepEqual(errors,[]);
   console.log("Composer E2E passed: plus menu, hover-removable Goal chip, prompt-based native goal execution, persistent strip and cancellation, centered details without grid displacement, short-model sizing/right-aligned send, 1100px layout; local fixture only");
 } finally {if(app)await app.close().catch(()=>{});server.closeAllConnections();server.close();} })().catch(e=>{console.error(e);process.exitCode=1;});

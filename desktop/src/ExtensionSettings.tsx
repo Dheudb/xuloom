@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import type { Capabilities, ModelConnection } from "./types";
 import { t, tServer, tx } from "./i18n";
+import CapabilityGuide from "./CapabilityGuide";
 
-export default function ExtensionSettings({ kind, busy, invoke, changed }: {
+export default function ExtensionSettings({ kind, busy, invoke, changed, assign }: {
   kind: "skills" | "agents"; busy: boolean;
   invoke: (method: string, params?: Record<string, unknown>) => Promise<any>;
   changed: (value: Capabilities) => void;
+  assign?: (name: string) => void;
 }) {
   const [data, setData] = useState<Capabilities>(), [pending, setPending] = useState(false), [error, setError] = useState(""), [notice, setNotice] = useState("");
   const [creating, setCreating] = useState(false);
@@ -42,6 +44,7 @@ export default function ExtensionSettings({ kind, busy, invoke, changed }: {
     <p className="fine-print">{kind === "skills" ? t("导入已有 SKILL.md 目录，或直接编写一个新技能。有效技能默认可用，输入 $ 选择。") : t("导入 Markdown 定义目录，或新建角色。定义角色不会启动任务；委派沿用会话的权限和协作档位。")}</p>
     <div className="actions"><button disabled={busy || pending} onClick={() => { setCreating(!creating); setPreview(null); }}>{tx("新建 {label}", { label })}</button><button disabled={busy || pending} onClick={() => void action("capabilities.import", { kind })}>{t("导入目录")}</button><button disabled={pending} onClick={() => void action("capabilities.list")}>{t("刷新列表")}</button></div>
     {busy && <p className="notice">{t("任务运行中可以查看配置，停止任务后才能新增或导入。")}</p>}
+    {data && <CapabilityGuide kind={kind} settings={data.settings} busy={busy} invoke={invoke} changed={(value) => { setData(value); changed(value); }} />}
     {creating && <form className="extension-form" onSubmit={async e => { e.preventDefault(); const value = await action("capabilities.create", { kind, ...form }); if (value) { setCreating(false); setNotice(t("{label} 已保存并加载", { label })); } }}>
       <fieldset disabled={busy || pending}>
         <label>{t("保存范围")}<select aria-label={t("扩展保存范围")} value={form.scope} onChange={e => setForm({ ...form, scope: e.target.value })}><option value="global">{t("全局 · 所有会话可用")}</option><option value="project">{t("当前工作区")}</option></select></label>
@@ -73,6 +76,7 @@ export default function ExtensionSettings({ kind, busy, invoke, changed }: {
           const value = await action(kind === "skills" ? "skills.read" : "agents.read", { name: item.name });
           if (typeof value === "string") setPreview({ key, content: value });
         }}>{expanded ? t("收起指令") : t("查看指令")}</button>
+        {kind === "agents" && assign && item.valid && !item.shadowed && <button disabled={busy} onClick={() => assign(item.name)}>{t("分配任务 →")}</button>}
         {expanded && <pre ref={previewRef} id={id} role="region" aria-label={t("{name} 指令", { name: item.name })} tabIndex={0} className="extension-preview">{preview.content || t("暂无指令内容")}</pre>}
       </section>;
     })}

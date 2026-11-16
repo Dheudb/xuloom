@@ -59,7 +59,7 @@ xuloom --resume SESSION_ID      恢复指定会话
 `/review` 不带参数时审查当前未提交的改动（已暂存、未暂存和未跟踪文件）；也可以指定一个提交（`/review HEAD`）或范围（`/review HEAD~3..HEAD`、`/review main...HEAD`）。范围在发送前用 Git 校验，并固定为完整提交哈希；没有改动或范围无效时直接提示，不发起模型请求。`--` 之后的文字作为审查重点交给模型，例如 `/review main...HEAD -- 重点看并发和错误处理`。审查回合只开放文件读取、搜索和固定范围的 Git 查看工具。会话 Hook 暂停，只保留 `BeforeToolUse` 的拒绝决定，例如禁止读取密钥文件的规则仍然生效；这些 Hook 在审查中改写的参数和附加的文字会被忽略。即使会话处于完全访问或 Ultra，审查也不会调用任意命令、修改文件或派发子代理。Git 查看工具在宿主机上以只读方式运行 Git（禁用过滤器、分页器和远程拉取），开启系统工作区隔离时也是如此。两点范围 `A..B` 与 `git diff A B` 相同，直接比较两个提交的快照；三点范围比较共同祖先与 B，需要共同祖先。非交互场景可手动用 `xuloom exec --skill code-review "审查 main...HEAD 的改动"`，该用法沿用普通执行权限。
 
 Skills、子代理和 MCP 与桌面端共用引擎实现。CLI 在启动时读取项目 `.xuloom/mcp_servers.json`；
-修改配置后重启 CLI 以加载。桌面可以在 MCP 市场中编辑这份配置。
+修改配置后重启 CLI 以加载。桌面可以在“扩展 → MCP 服务”打开的 MCP 市场中编辑这份配置。
 
 `revision_id` 来自对应文件工具回执，备份保存在中央会话历史中。撤销只恢复该次工具写入前的文件字节，不清除对话，也不回滚 Shell、REPL、MCP 等外部副作用。范围与程序接口见 [输入与恢复说明](history/input-and-recovery-hardening-2026-10-30.md)。
 

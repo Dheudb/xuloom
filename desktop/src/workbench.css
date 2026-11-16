@@ -241,14 +241,13 @@ a, .markdown-link, .inline-file-link { color: var(--link); text-decoration-color
 .inspector > .panel-tabs button svg { width: 14px; height: 14px; flex: none; }
 .inspector > .panel-tabs button span { overflow: hidden; text-overflow: ellipsis; }
 .panel-tabs button.active:after { height: 2px; left: 12px; right: 12px; bottom: 9px; border-radius: 2px; background: var(--brand); }
-.panel-title { margin: 25px 22px 18px; }
-.panel-title h3 { font-size: 15px; font-weight: 600; }
+.panel-title { margin: 16px 22px 10px; min-height: 28px; }
+.panel-title h3 { font-size: 14px; font-weight: 600; }
 .panel-title h3 span { font-size: 11px; background: var(--surface-soft); color: var(--text-secondary); border-radius: 5px; padding: 1px 5px; }
-.panel-title p { font-size: 12px; color: var(--text-muted); line-height: 1.6; margin-top: 5px; }
 .import-button { border: 1px solid var(--line); background: var(--surface); color: var(--text-secondary); margin: 0 22px 12px; padding: 9px; font-size: 12px; border-radius: 9px; }
 .import-button:hover { background: var(--surface-soft); }
-.capability-guide-link { color: var(--text-muted); margin: 0 22px 12px; font-size: 11px; }
-.capability-guide-link:hover { color: var(--text); background: transparent; }
+.extension-settings .capability-guide { margin: 0 0 14px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; }
+.extension-settings .capability-guide summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); }
 .panel-scroll { padding: 0 18px 22px; scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
 .capability-card { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; margin: 0; padding: 18px 6px; background: transparent; }
 .capability-card:last-of-type { border-bottom: 0; }
@@ -256,16 +255,8 @@ a, .markdown-link, .inline-file-link { color: var(--link); text-decoration-color
 .card-heading > svg { color: var(--text-secondary); }
 .card-heading strong { font-size: 13px; font-weight: 550; color: var(--text); }
 .capability-card > p { font-size: 12px; line-height: 1.75; color: var(--text-secondary); margin-top: 9px; }
-.skill-description { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .card-meta { font-size: 11px; color: var(--text-muted); margin-top: 10px; }
 .card-meta > span:first-child { background: var(--surface-soft); color: var(--text-secondary); padding: 1px 5px; border-radius: 4px; }
-.card-actions { border-top: 0; padding-top: 0; margin-top: 13px; align-items: center; }
-.card-actions button { color: var(--text-muted); font-size: 11px; padding: 4px 0; }
-.card-actions button:last-child { color: var(--text-secondary); background: var(--surface-soft); border-radius: 6px; padding: 4px 9px; }
-.card-actions button:hover { color: var(--text); }
-.card-actions button.selected-link { background: var(--action-soft); color: var(--action-hover); }
-.root-details { font-size: 11px; color: var(--text-muted); margin: 22px 6px 0; }
-.panel-footnote { font-size: 11px; color: var(--text-muted); padding: 13px 22px; border-top-color: var(--line); }
 .instruction-empty { color: var(--text-muted); }
 .instruction-empty h4 { color: var(--text-secondary); font-size: 14px; }
 .instruction-empty p { font-size: 12px; }

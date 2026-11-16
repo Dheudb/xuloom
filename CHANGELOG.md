@@ -4,6 +4,16 @@
 
 ## [未发布]
 
+## [0.2.2] - 2026-11-16
+
+### 变更
+- 桌面右侧面板只显示任务结果：标签改为变更、活动、代理、文件、上下文，有文件改动时默认打开变更；去掉 Skills 标签、可用角色列表和各标签下常驻的说明文字。
+- 侧栏“MCP 市场”改为“扩展”，进入设置中的 Skills、Subagents 和 MCP 服务页。配置说明和示例改为页内折叠区，子代理角色可直接“分配任务”。输入框“＋ → Skills”改为打开 `$` 技能列表。
+
+### 修复
+- 分配子代理任务时保留现有草稿，输入框“＋ → Skills”从草稿任意光标位置都能打开选择器。无匹配技能时提示正确的导入入口。
+- 扩展窗口立即打开，并把键盘焦点放在选中的标签上。模型配置和默认工作区目录独立加载，读取错误在相应页面显示。
+
 ## [0.2.1] - 2026-11-14
 
 ### 修复
@@ -160,7 +170,8 @@
 - 引擎拆分为 `xuloom/core/engine_parts/` 下的多个 mixin，主循环拆成多个阶段方法。
 - 新增不可变的 `EngineConfig` 和顶层公开 API（`from xuloom import ...`）。
 
-[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.1...HEAD
+[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/Dheudb/xuloom/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/Dheudb/xuloom/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Dheudb/xuloom/compare/v0.1.52...v0.2.0
 [0.1.52]: https://github.com/Dheudb/xuloom/compare/v0.1.51...v0.1.52

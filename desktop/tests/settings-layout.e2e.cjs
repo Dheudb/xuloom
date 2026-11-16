@@ -54,6 +54,7 @@ async function layout() {
     await app.evaluate(({ BrowserWindow }) => { const window = BrowserWindow.getAllWindows()[0]; window.setMinimumSize(760, 600); window.setSize(1440, 940); });
     await page.getByRole('button', { name: '设置与模型', exact: true }).click();
     await page.getByRole('dialog', { name: '工作台设置' }).waitFor();
+    await page.getByLabel('API 地址', { exact: true }).waitFor();
     for (const label of ['API 地址', 'API Key', '模型 ID']) assert(await page.getByLabel(label, { exact: true }).isVisible(), label + ' should be visible');
     for (const label of ['连接名称', '模型输入能力', '联网搜索']) assert(!(await page.getByLabel(label, { exact: true }).isVisible()), 'Advanced fields start collapsed');
     assert.equal(await page.getByLabel('可选模型列表').count(), 0, 'No redundant model list on the basic screen');

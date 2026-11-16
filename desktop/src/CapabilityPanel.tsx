@@ -1,31 +1,23 @@
 import { useEffect, useState } from "react";
-import { useDialogFocus } from "./useDialogFocus";
-import { skillScope } from "./skill-mention";
 import {
-  Plus,
   RefreshCw,
-  Puzzle,
   Bot,
-  CircleCheck,
-  CircleAlert,
-  ChevronDown,
   Square,
   FileDiff,
   Activity,
-  X,
   FolderTree,
   ChartPie,
+  PanelRight,
 } from "lucide-react";
-import type { SessionView, Skill, FileChange } from "./types";
+import type { SessionView, FileChange } from "./types";
 import ChangesPanel from "./ChangesPanel";
 import Markdown from "./Markdown";
-import CapabilityGuide from "./CapabilityGuide";
 import ActivityPanel from "./ActivityPanel";
 import WorkspaceTree from "./WorkspaceTree";
 import WorkerHistory from "./WorkerHistory";
 import PipelineTree from "./PipelineTree";
 import ContextPanel from "./ContextPanel";
-import { t, tServer, tx } from "./i18n";
+import { t, tx } from "./i18n";
 
 export default function CapabilityPanel({
   session,
@@ -37,6 +29,7 @@ export default function CapabilityPanel({
   onError,
   onOpenFile,
   onNavigateChat,
+  onManage,
   activityQuery,
   contextBusy,
 }: {
@@ -49,46 +42,19 @@ export default function CapabilityPanel({
   onError: (e: unknown) => void;
   onOpenFile: (path: string, change?: FileChange) => void;
   onNavigateChat: (url: string) => void;
+  onManage: (kind: "skills" | "agents") => void;
   activityQuery?: string;
   contextBusy: boolean;
 }) {
-  const [preview, setPreview] = useState<{ name: string; text: string; kind?: "agent" } | null>(
-    null,
-  );
-  const [guide, setGuide] = useState<"skills" | "agents" | null>(null);
-  const previewRef = useDialogFocus(undefined, !!preview);
   const [historyWorker, setHistoryWorker] = useState<{ id: string; name: string; remoteUrl?: string } | null>(null);
   useEffect(() => setHistoryWorker(null), [session?.id]);
-  async function importDirectory(kind: string) {
-    try {
-      const capabilities = await invoke("capabilities.import", { kind });
-      if (capabilities) update({ capabilities });
-    } catch (e) {
-      onError(e);
-    }
-  }
-  async function read(skill: Skill) {
-    try {
-      setPreview({
-        name: skill.name,
-        text: await invoke("skills.read", { name: skill.name }),
-      });
-    } catch (e) {
-      onError(e);
-    }
-  }
-  const active =
-    session?.capabilities.skills.filter(
-      (skill) => skill.valid && skill.enabled && !skill.shadowed,
-    ) || [];
   return (
     <aside className="inspector">
       <div className="panel-tabs">
         {[
-          { id: "skills", label: "Skills", icon: Puzzle },
-          { id: "agents", label: t("代理"), icon: Bot },
-          { id: "activity", label: t("活动"), icon: Activity },
           { id: "changes", label: t("变更"), icon: FileDiff },
+          { id: "activity", label: t("活动"), icon: Activity },
+          { id: "agents", label: t("代理"), icon: Bot },
           { id: "files", label: t("文件"), icon: FolderTree },
           { id: "context", label: t("上下文"), icon: ChartPie },
         ].map(({ id, label, icon: Icon }) => (
@@ -107,137 +73,22 @@ export default function CapabilityPanel({
       </div>
       {!session ? (
         <div className="panel-empty">
-          <Puzzle size={28} />
-          <p>{t("会话能力会显示在这里")}</p>
-          <small>{t("开始会话后，管理技能、子代理、文件和执行过程。")}</small>
+          <PanelRight size={28} />
+          <p>{t("任务结果会显示在这里")}</p>
+          <small>{t("开始会话后，查看变更、执行活动、子代理和文件。")}</small>
         </div>
       ) : (
         <>
-          {tab === "skills" && (
-            <>
-              <div className="panel-title">
-                <div>
-                  <h3>{t("技能库")} <span>{active.length}</span>
-                  </h3>
-                  <p>{t("按需加载，让代理掌握你的工作流")}</p>
-                </div>
-                <button
-                  className="icon-button"
-                  aria-label={t("刷新技能")}
-                  onClick={() => refresh().catch(onError)}
-                >
-                  <RefreshCw size={15} />
-                </button>
-              </div>
-              <button
-                className="import-button"
-                onClick={() => importDirectory("skills")}
-              >
-                <Plus size={15} />{t("导入技能目录")}</button>
-              <button className="capability-guide-link" onClick={() => setGuide("skills")}>{t("Skill 怎么配置？查看目录和示例")}</button>
-              <div className="panel-scroll">
-                {!session.capabilities.skills.length && (
-                  <div className="instruction-empty">
-                    <Puzzle size={26} />
-                    <h4>{t("添加第一个 Skill")}</h4>
-                    <p>{t("选择包含 SKILL.md 的目录，也可以将技能放入项目的 .xuloom/skills。")}</p>
-                  </div>
-                )}
-                {session.capabilities.skills.map((skill) => (
-                  <article
-                    className={
-                      "capability-card " +
-                      (!skill.valid || skill.shadowed ? "invalid" : "")
-                    }
-                    key={skill.id}
-                  >
-                    <div className="card-heading">
-                      <Puzzle size={15} />
-                      <strong>{skill.name}</strong>
-                    </div>
-                    <p className="skill-description" title={skill.description || tServer(skill.error)}>{(skill.scope === "builtin" ? tServer(skill.description) : skill.description) || tServer(skill.error)}</p>
-                    <div className="card-meta">
-                      <span>
-                        {skillScope(skill.scope)}
-                      </span>
-                      <span className={!skill.valid ? "bad" : ""}>
-                        {!skill.valid
-                          ? t("格式错误")
-                          : skill.shadowed
-                            ? t("被同名技能覆盖")
-                            : session.selected.includes(skill.name)
-                              ? t("已选择")
-                              : session.loaded.includes(skill.name)
-                                ? t("本会话已加载")
-                                : ""}
-                      </span>
-                    </div>
-                    {skill.compatibility && (
-                      <small className="compatibility">{tx("环境要求：{compatibility}", { compatibility: skill.compatibility })}
-                      </small>
-                    )}
-                    {skill.valid && skill.enabled && !skill.shadowed && (
-                      <div className="card-actions">
-                        <button onClick={() => read(skill)}>{t("查看指令")}</button>
-                        <button
-                          className={
-                            session.selected.includes(skill.name)
-                              ? "selected-link"
-                              : ""
-                          }
-                          onClick={() =>
-                            update({
-                              selected: session.selected.includes(skill.name)
-                                ? session.selected.filter(
-                                    (name) => name !== skill.name,
-                                  )
-                                : [...session.selected, skill.name],
-                            })
-                          }
-                        >
-                          {session.selected.includes(skill.name)
-                            ? t("已选择")
-                            : t("选择使用")}
-                        </button>
-                      </div>
-                    )}
-                    {skill.error && skill.description && (
-                      <small className="bad">{tServer(skill.error)}</small>
-                    )}
-                  </article>
-                ))}
-                <details className="root-details">
-                  <summary>{t("扫描目录与优先级")} <ChevronDown size={13} />
-                  </summary>
-                  <p>{t("项目 .xuloom → .agents → .claude → 导入目录 → 环境目录 → 全局目录 → 内置目录。同名技能以首个格式正确的目录为准。")}</p>
-                </details>
-              </div>
-              <div className="panel-footnote">
-                <CircleCheck size={13} />{t("名称和描述常驻，完整指令按需加载")}</div>
-            </>
-          )}
           {tab === "agents" && (
             <>
               <div className="panel-title">
-                <div>
-                  <h3>{t("子代理")}</h3>
-                  <p>{t("分配独立任务，查看执行结果")}</p>
-                </div>
+                <h3>{t("子代理")}</h3>
                 <button className="icon-button" aria-label={t("刷新子代理")} onClick={() => refresh().catch(onError)}><RefreshCw size={15} /></button>
               </div>
-              <button
-                className="import-button"
-                onClick={() => importDirectory("agents")}
-              >
-                <Plus size={15} />{t("导入代理定义目录")}</button>
-              <button className="capability-guide-link" onClick={() => setGuide("agents")}>{t("Subagent 怎么配置？查看目录和示例")}</button>
               <div className="panel-scroll">
                 <PipelineTree sessionId={session.id} busy={session.busy || !!session.controlledExecution} invoke={invoke} onError={onError}
                   onHistory={(id, name) => setHistoryWorker({ id, name })} />
-                {session.workers.length > 0 && (
-                  <>
-                    <span className="section-label">{t("会话任务")}</span>
-                    {session.workers.map((worker) => (
+                {session.workers.length > 0 ? session.workers.map((worker) => (
                       <article
                         className="capability-card"
                         key={worker.agent_id}
@@ -287,60 +138,13 @@ export default function CapabilityPanel({
                           </details>
                         )}
                       </article>
-                    ))}
-                  </>
+                )) : (
+                  <div className="instruction-empty">
+                    <Bot size={26} />
+                    <p>{t("本会话还没有子代理任务。")}</p>
+                    <button className="text-button" onClick={() => onManage("agents")}>{t("管理子代理角色")}</button>
+                  </div>
                 )}
-                <span className="section-label">{t("可用角色")}</span>
-                {session.capabilities.agents.map((agent, index) => (
-                  <article
-                    className={
-                      "capability-card " + (!agent.valid ? "invalid" : "")
-                    }
-                    key={agent.name + index}
-                  >
-                    <div className="card-heading">
-                      <Bot size={15} />
-                      <strong>{agent.name}</strong>
-                      {!agent.valid && <CircleAlert size={14} />}
-                    </div>
-                    <p>{(agent.scope === "builtin" ? tServer(agent.description) : agent.description) || tServer(agent.error)}</p>
-                    <div className="card-meta">
-                      <span>
-                        {agent.scope === "builtin"
-                          ? t("内置")
-                          : agent.scope === "project"
-                            ? t("项目")
-                            : t("自定义")}
-                      </span>
-                      <span>
-                        {!agent.valid
-                          ? t("不可用")
-                          : agent.shadowed
-                            ? t("被覆盖")
-                            : agent.model || t("继承模型")}
-                      </span>
-                    </div>
-                    {agent.allowed_tools && (
-                      <small className="compatibility">{tx("工具：{value}", { value: agent.allowed_tools.join(", ") || t("无") })}
-                      </small>
-                    )}
-                    {agent.valid && !agent.shadowed && (
-                      <div className="card-actions">
-                      <button className="text-button" onClick={() => invoke("agents.read", { name: agent.name }).then((text) => setPreview({ name: agent.name, text, kind: "agent" })).catch(onError)}>{t("查看代理定义")}</button>
-                      <button
-                        className="text-button"
-                        disabled={session.controlledExecution}
-                        onClick={() =>
-                          update({
-                            draft:
-                              t("请使用 {name} 子代理完成以下任务：\n", { name: agent.name }),
-                          })
-                        }
-                      >{t("分配任务 →")}</button>
-                      </div>
-                    )}
-                  </article>
-                ))}
               </div>
             </>
           )}
@@ -353,37 +157,6 @@ export default function CapabilityPanel({
             model={session.config} compactError={session.contextCompactError}
             setCompaction={(contextCompacting, contextCompactError) => update({ contextCompacting, contextCompactError })} />}
         </>
-      )}
-      {guide && session && <CapabilityGuide kind={guide} session={session} invoke={invoke} update={update} close={() => setGuide(null)} />}
-      {preview && (
-        <div className="overlay" onClick={() => setPreview(null)}>
-          <section
-            className="dialog skill-preview"
-            ref={previewRef}
-            role="dialog"
-            aria-modal="true"
-            onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); setPreview(null); } }}
-            aria-label={preview.kind === "agent" ? t("代理定义") : t("技能指令")}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <header>
-              <div>
-                <span className="eyebrow">{preview.kind === "agent" ? "SUBAGENT DEFINITION" : "SKILL INSTRUCTIONS"}</span>
-                <h2>{preview.name}</h2>
-              </div>
-              <button
-                aria-label={preview.kind === "agent" ? t("关闭代理预览") : t("关闭技能预览")}
-                className="icon-button"
-                onClick={() => setPreview(null)}
-              >
-                <X size={18} />
-              </button>
-            </header>
-            <div className="preview-body">
-              <Markdown text={preview.text} />
-            </div>
-          </section>
-        </div>
       )}
       {historyWorker && <WorkerHistory key={session?.id + ":" + historyWorker.id} agentId={historyWorker.id} name={historyWorker.name} remoteUrl={historyWorker.remoteUrl} invoke={invoke} close={() => setHistoryWorker(null)} />}
     </aside>

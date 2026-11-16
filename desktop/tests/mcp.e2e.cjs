@@ -173,7 +173,12 @@ async function main() {
       0,
     );
     await page.getByRole("button", { name: "关闭设置", exact: true }).click();
-    await page.getByRole("button", { name: "MCP 市场", exact: true }).click();
+    const openMarket = async () => {
+      await page.getByRole("button", { name: "扩展", exact: true }).click();
+      await page.getByRole("tab", { name: "MCP 服务", exact: true }).click();
+      await page.getByRole("button", { name: "打开 MCP 管理", exact: true }).click();
+    };
+    await openMarket();
     const dialog = page.getByRole("dialog", { name: "MCP 市场" });
     await dialog.getByText("Exa Search", { exact: true }).waitFor();
     // A malformed mounted extension and a hand-edited invalid server must be
@@ -201,7 +206,7 @@ async function main() {
     // Remove only the fixture created above, not an external/user Skill.
     fs.unlinkSync(path.join(ownedSkill, "mcp_servers.json"));
     await dialog.getByRole("button", { name: "关闭 MCP 市场", exact: true }).click();
-    await page.getByRole("button", { name: "MCP 市场", exact: true }).click();
+    await openMarket();
     await dialog.getByRole("button", { name: /我的服务/ }).click();
     assert.equal(await dialog.getByText("部分 Skill 的 MCP 配置未加载，其他服务可继续使用。", { exact: true }).count(), 0);
     await dialog.getByRole("button", { name: "浏览市场", exact: true }).click();
@@ -296,7 +301,7 @@ async function main() {
       ),
     );
     assert(!JSON.stringify(modelRequests).includes("fixture-secret"));
-    await page.getByRole("button", { name: "MCP 市场", exact: true }).click();
+    await openMarket();
     await dialog.getByRole("button", { name: /我的服务/ }).click();
     await dialog.getByText("已连接", { exact: true }).waitFor();
     await dialog.getByRole("button", { name: "停用", exact: true }).click();

@@ -115,9 +115,9 @@ async function send(text) {
     assert.equal(await page.locator('.turn-process[data-turn-status="error"]').count(), 1);
     await send("CONTINUE"); await page.getByText("CONTINUATION_PASS", { exact: true }).waitFor();
     await send("CHILD_RECOVER"); await page.getByText("CHILD_PARENT_PASS", { exact: true }).waitFor(); assert.equal(childCalls, 3);
-    if (await page.getByRole("button", { name: "展开能力面板", exact: true }).count()) await page.getByRole("button", { name: "展开能力面板", exact: true }).click();
-    await page.getByRole("button", { name: "Skills", exact: true }).click();
-    await page.locator(".capability-card").filter({ has: page.getByText("fixture-workflow", { exact: true }) }).getByRole("button", { name: "选择使用", exact: true }).click();
+    const task = page.getByRole("textbox", { name: "任务输入" });
+    await task.fill("$fixture-workflow"); await task.focus();
+    await page.locator("#skill-options").getByRole("option", { name: /fixture-workflow/ }).click();
     await send("WORKFLOW"); await page.getByText("WORKFLOW_PASS", { exact: true }).waitFor(); assert.equal(workflowCalls, 4);
     const workflowTrace = page.locator(".turn-process").last(); assert.equal(await workflowTrace.getAttribute("data-turn-status"), "completed");
     await workflowTrace.locator(":scope > summary").click(); await workflowTrace.locator('.turn-retry > summary').click(); assert((await workflowTrace.innerText()).includes("技能流程尚未完成"));

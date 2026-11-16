@@ -15,9 +15,10 @@ async function launch(){
 }
 async function main(){try{
  let page=await launch();
- const entry=page.getByRole('button',{name:'MCP 市场',exact:true});
+ const entry=page.getByRole('button',{name:'扩展',exact:true});
  assert.equal(await entry.isEnabled(),true,'Market must be available before creating a conversation');
- await entry.click();let dialog=page.getByRole('dialog',{name:'MCP 市场',exact:true});
+ await entry.click();await page.getByRole('tab',{name:'MCP 服务',exact:true,selected:true}).waitFor();
+ await page.getByRole('button',{name:'打开 MCP 管理',exact:true}).click();let dialog=page.getByRole('dialog',{name:'MCP 市场',exact:true});
  await dialog.getByText('Exa Search',{exact:true}).waitFor();
  assert.equal(await page.locator('.session-item').count(),0,'Browsing must not create an implicit conversation');
  assert.equal(await dialog.getByRole('button',{name:'自定义服务',exact:true}).isDisabled(),true);
@@ -49,7 +50,8 @@ async function main(){try{
  assert.equal(JSON.parse(fs.readFileSync(target)).mcpServers.fetch.catalogId,'fetch');
  assert.equal(fs.existsSync(path.join(data,'.xuloom/mcp_servers.json')),false);
  await app.close();app=undefined;
- page=await launch();await page.locator('.session-item.active').waitFor();await page.getByRole('button',{name:'MCP 市场',exact:true}).click();
+ page=await launch();await page.locator('.session-item.active').waitFor();await page.getByRole('button',{name:'扩展',exact:true}).click();
+ await page.getByRole('tab',{name:'MCP 服务',exact:true}).click();await page.getByRole('button',{name:'打开 MCP 管理',exact:true}).click();
  await page.getByRole('dialog',{name:'MCP 市场'}).getByRole('button',{name:/我的服务/}).click();
  await page.getByRole('dialog',{name:'MCP 市场'}).getByText('Fetch',{exact:true}).waitFor();
  assert.deepEqual(errors,[]);

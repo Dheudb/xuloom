@@ -315,15 +315,17 @@ async function main() {
       .filter({ hasText: "sample-project" })
       .click();
     await page.getByRole("heading", { name: "今天想完成什么？" }).waitFor();
-    if (await page.getByRole("button", { name: "展开能力面板", exact: true }).count()) await page.getByRole("button", { name: "展开能力面板", exact: true }).click();
-    await page.getByText("project-review", { exact: true }).waitFor();
-    await page.locator(".capability-card").filter({ has: page.getByText("project-review", { exact: true }) }).getByRole("button", { name: "查看指令", exact: true }).click();
-    await page
-      .getByRole("dialog", { name: "技能指令" })
+    await page.getByRole("button", { name: "扩展", exact: true }).click();
+    await settingsDialog.locator(".extension-row").filter({ has: page.getByText("project-review", { exact: true }) }).getByRole("button", { name: "查看指令", exact: true }).click();
+    await settingsDialog
+      .getByRole("region", { name: "project-review 指令" })
       .getByText(/DESKTOP_SKILL_PROOF/)
       .waitFor();
-    await page.getByRole("button", { name: "关闭技能预览" }).click();
-    await page.locator(".capability-card").filter({ has: page.getByText("project-review", { exact: true }) }).getByRole("button", { name: "选择使用" }).click();
+    await page.getByRole("button", { name: "关闭设置", exact: true }).click();
+    const taskInput = page.getByRole("textbox", { name: "任务输入" });
+    await taskInput.fill("$project-review"); await taskInput.focus();
+    await page.locator("#skill-options").getByRole("option", { name: /project-review/ }).click();
+    assert.equal(await page.locator(".selected-skills .selected-skill").count(), 1);
     await page
       .getByRole("textbox", { name: "任务输入" })
       .fill("验收技能：请分析这个项目。");
@@ -413,16 +415,18 @@ async function main() {
           !body.tools.some((tool) => tool.function.name === "file_write_tool"),
       ),
     );
-    if (await page.getByRole("button", { name: "展开能力面板", exact: true }).count()) await page.getByRole("button", { name: "展开能力面板", exact: true }).click();
-    await page.getByRole("button", { name: "Skills", exact: true }).click();
     await screenshot("workbench.png");
     // A second project owns a distinct Python process and capability catalog.
     await page
       .getByRole("button", { name: "打开项目 another-project", exact: true })
       .click();
-    await page.locator(".capability-card strong").filter({ hasText: /^project-review$/ }).waitFor({ state: "hidden" });
-    await page.getByText("code-review", { exact: true }).waitFor();
-    assert.equal(await page.locator(".capability-card").count(), 9, "Another project has nine public bundled skills but not the first project's skill");
+    await page.getByRole("heading", { name: "今天想完成什么？" }).waitFor();
+    await taskInput.fill("$"); await taskInput.focus();
+    await page.locator("#skill-options").getByRole("option", { name: /code-review/ }).waitFor();
+    await page.waitForFunction(() => document.querySelector('[role="listbox"]')?.getAttribute("aria-busy") === "false");
+    assert.equal(await page.locator("#skill-options").getByRole("option", { name: /project-review/ }).count(), 0);
+    assert.equal(await page.locator("#skill-options").getByRole("option").count(), 9, "Another project has nine public bundled skills but not the first project's skill");
+    await taskInput.press("Escape");
     await page
       .getByRole("textbox", { name: "任务输入" })
       .fill("第二个项目的独立会话");

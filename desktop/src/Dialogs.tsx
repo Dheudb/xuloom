@@ -15,56 +15,8 @@ import { displayName, getLanguage, setLanguage, t, tServer, tx, untranslated, ty
 import BuildDetails from './BuildDetails';
 import ComputerUseSettings from "./ComputerUseSettings";
 
-export function SettingsDialog({
-  config,
-  close,
-  save,
-  defaultDirectory,
-  chooseDirectory,
-  saveDirectory,
-  catalog,
-  workspaceAction,
-  discoverModels,
-  deleteConnection,
-  extensions,
-  openMcp,
-  targetLabel,
-  mediaControl,
-}: {
-  config?: ModelConfig;
-  close: () => void;
-  save: (value: ModelConfig & { apiKey: string }) => Promise<void>;
-  defaultDirectory: string;
-  chooseDirectory: () => Promise<string | null>;
-  saveDirectory: (value: string) => Promise<string>;
-  catalog: SessionCatalog;
-  workspaceAction: (method: string, params: Record<string, unknown>) => Promise<void>;
-  discoverModels: (value: Record<string, unknown>) => Promise<{ models: string[]; modelContext?: ModelConfig["modelContext"] }>;
-  deleteConnection: (connectionId: string) => Promise<ModelConfig>;
-  extensions?: { busy: boolean; invoke: (method: string, params?: Record<string, unknown>) => Promise<any>; changed: (value: Capabilities) => void };
-  openMcp: () => void;
-  targetLabel?: string;
-  mediaControl?: (action: "status" | "cancel", identity: string) => Promise<void>;
-}) {
-  const [tab, setTab] = useState("model");
-  const dialogRef = useRef<HTMLElement>(null);
-  // Pages backed by plugins appear only while their plugin is loaded (e.g. media → 生成模型).
-  const [pluginMethods, setPluginMethods] = useState<string[]>([]);
-  useEffect(() => {
-    let active = true;
-    window.xuloom.invoke<{ methods?: { name: string }[] }>("plugins.rpc", {})
-      .then((result) => { if (active) setPluginMethods((result?.methods || []).map((item) => item.name)); })
-      .catch(() => { if (active) setPluginMethods([]); });
-    return () => { active = false; };
-  }, []);
-  const mediaAvailable = pluginMethods.includes("media.connections");
-  const [directory, setDirectory] = useState(defaultDirectory);
-  const [directoryBusy, setDirectoryBusy] = useState(false);
-  const [directorySaved, setDirectorySaved] = useState(false);
-  const [chatUrl, setChatUrl] = useState("");
-  const [linkBusy, setLinkBusy] = useState(false);
-  const [linkStatus, setLinkStatus] = useState("");
-  const [form, setForm] = useState({
+function modelForm(config?: ModelConfig) {
+  return {
     connectionId: config?.connectionId || "legacy-openai",
     connectionName: config?.connectionName || t("我的 API"),
     provider: config?.provider || "openai",
@@ -77,8 +29,65 @@ export function SettingsDialog({
     modelReasoning: config?.modelReasoning || {} as NonNullable<ModelConfig["modelReasoning"]>,
     modelContext: config?.modelContext || {} as NonNullable<ModelConfig["modelContext"]>,
     nativeSearch: config?.nativeSearch || { backend: 'builtin', model: '', baseUrl: '' },
-  });
-  const [modelsText, setModelsText] = useState((config?.models || (config?.model ? [config.model] : [])).join("\n"));
+  };
+}
+
+export function SettingsDialog({
+  loadModel,
+  onModelLoaded,
+  close,
+  save,
+  chooseDirectory,
+  saveDirectory,
+  catalog,
+  workspaceAction,
+  discoverModels,
+  deleteConnection,
+  extensions,
+  openMcp,
+  targetLabel,
+  mediaControl,
+  initialTab,
+}: {
+  loadModel: () => Promise<ModelConfig>;
+  onModelLoaded: (config: ModelConfig) => void;
+  close: () => void;
+  save: (value: ModelConfig & { apiKey: string }) => Promise<void>;
+  chooseDirectory: () => Promise<string | null>;
+  saveDirectory: (value: string) => Promise<string>;
+  catalog: SessionCatalog;
+  workspaceAction: (method: string, params: Record<string, unknown>) => Promise<void>;
+  discoverModels: (value: Record<string, unknown>) => Promise<{ models: string[]; modelContext?: ModelConfig["modelContext"] }>;
+  deleteConnection: (connectionId: string) => Promise<ModelConfig>;
+  extensions?: { busy: boolean; invoke: (method: string, params?: Record<string, unknown>) => Promise<any>; changed: (value: Capabilities) => void; assign?: (name: string) => void };
+  openMcp: () => void;
+  targetLabel?: string;
+  mediaControl?: (action: "status" | "cancel", identity: string) => Promise<void>;
+  initialTab?: string;
+}) {
+  const [tab, setTab] = useState(initialTab || "model");
+  const dialogRef = useRef<HTMLElement>(null);
+  // Pages backed by plugins appear only while their plugin is loaded (e.g. media → 生成模型).
+  const [pluginMethods, setPluginMethods] = useState<string[]>([]);
+  useEffect(() => {
+    let active = true;
+    window.xuloom.invoke<{ methods?: { name: string }[] }>("plugins.rpc", {})
+      .then((result) => { if (active) setPluginMethods((result?.methods || []).map((item) => item.name)); })
+      .catch(() => { if (active) setPluginMethods([]); });
+    return () => { active = false; };
+  }, []);
+  const mediaAvailable = pluginMethods.includes("media.connections");
+  const [directory, setDirectory] = useState("");
+  const [directoryLoad, setDirectoryLoad] = useState<{ error?: string }>();
+  const [directoryBusy, setDirectoryBusy] = useState(false);
+  const [directorySaved, setDirectorySaved] = useState(false);
+  const [chatUrl, setChatUrl] = useState("");
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkStatus, setLinkStatus] = useState("");
+  const [config, setConfig] = useState<ModelConfig>();
+  const [modelLoadError, setModelLoadError] = useState("");
+  const [form, setForm] = useState(() => modelForm());
+  const [modelsText, setModelsText] = useState("");
   const [managingModels, setManagingModels] = useState(false);
   const modelNames = [...new Set([...modelsText.split(/[\n,，]/).map(name => name.trim()).filter(Boolean), ...(form.model.trim() ? [form.model.trim()] : [])])];
   const [discovering, setDiscovering] = useState(false);
@@ -89,8 +98,24 @@ export function SettingsDialog({
   const savedConnection = config?.connections?.find((item) => item.connectionId === form.connectionId);
   const [error, setError] = useState("");
   useEffect(() => {
+    let active = true;
+    loadModel().then((value) => {
+      if (!active) return;
+      setConfig(value);
+      setForm(modelForm(value));
+      setModelsText((value.models || (value.model ? [value.model] : [])).join("\n"));
+      onModelLoaded(value);
+    }).catch((reason) => { if (active) setModelLoadError(String(reason)); });
+    window.xuloom.invoke<{ defaultDirectory: string }>("workspace.get").then((value) => {
+      if (!active) return;
+      setDirectory(value.defaultDirectory);
+      setDirectoryLoad({});
+    }).catch((reason) => { if (active) setDirectoryLoad({ error: String(reason) }); });
+    return () => { active = false; };
+  }, []);
+  useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
-    dialogRef.current?.querySelector<HTMLButtonElement>("[role=tab]")?.focus();
+    dialogRef.current?.querySelector<HTMLButtonElement>('[role=tab][aria-selected="true"]')?.focus();
     const escape = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !event.isComposing) { event.preventDefault(); event.stopPropagation(); close(); }
     };
@@ -169,7 +194,10 @@ export function SettingsDialog({
           {tab === "mcp" ? <><h3>{t("MCP 服务")}</h3><p>{t("连接外部工具。支持本地 stdio 与远程 Streamable HTTP，可浏览市场、自定义服务、测试连接及启停。")}</p><p>{extensions ? t("配置保存在当前工作区的 .xuloom/mcp_servers.json，与 CLI 共用。") : t("可以直接浏览市场；安装和管理服务前，选择或新建一个会话即可，无需配置模型或打开代码仓库。")}</p><button onClick={openMcp}>{t("打开 MCP 管理")}</button></> : !extensions ? <p>{t("请先新建或打开一个会话，再管理扩展；无需配置模型或打开代码仓库。")}</p> : <ExtensionSettings key={tab} kind={tab as "skills" | "agents"} {...extensions} />}
         </div>}
         <div className="form-section model-connection-form" role="tabpanel" id="settings-panel-model" aria-labelledby="settings-tab-model" hidden={tab !== 'model'}>
-          <fieldset className="model-form" disabled={saving || discovering || deleting}>
+          {!config ? <div className="model-form-body">
+            <h3>{t("模型连接")}</h3>
+            {modelLoadError ? <p role="alert" className="error">{t("读取模型连接失败。{value}", { value: tServer(modelLoadError) })}</p> : <p role="status">{t("加载中…")}</p>}
+          </div> : <fieldset className="model-form" disabled={saving || discovering || deleting}>
           <div className="model-form-body">
           <div className="model-form-heading"><h3>{t("模型连接")}</h3></div>
           {config?.credentialStorage?.unavailable.length ? <p role="alert" className="error">{t("部分 Key 无法读取，请重新填写或删除对应连接。")}</p> : null}
@@ -193,6 +221,7 @@ export function SettingsDialog({
                 setDeleting(true); setError("");
                 try {
                   const next = await deleteConnection(deleteId);
+                  setConfig(next);
                   setForm({ connectionId: next.connectionId || crypto.randomUUID(), connectionName: next.connectionName || t("我的 API"), provider: next.provider,
                     model: next.model, baseUrl: next.baseUrl, hasKey: next.hasKey, apiKey: "", networkMode: next.networkMode || "direct", modelInputs: next.modelInputs || {}, modelReasoning: next.modelReasoning || {}, modelContext: next.modelContext || {}, nativeSearch: next.nativeSearch || { backend: 'builtin', model: '', baseUrl: '' } });
                   setModelsText((next.models || []).join("\n")); setDeleteId("");
@@ -334,7 +363,7 @@ export function SettingsDialog({
               <button className="primary" disabled={saving || discovering || deleting || !!deleteId || !form.model.trim()} onClick={submit}><Check size={15} />{saving ? t("保存中…") : t("保存配置")}</button>
             </div></div>
           </footer>
-          </fieldset>
+          </fieldset>}
         </div>
         <div className="form-section" role="tabpanel" id="settings-panel-workspace" aria-labelledby="settings-tab-workspace" hidden={tab !== "workspace"}>
           <BuildDetails />
@@ -359,6 +388,7 @@ export function SettingsDialog({
           {linkStatus && <p role="status" className="fine-print">{linkStatus}</p>}
           <h3><FolderOpen size={16} /> {t("独立会话工作区根目录")}</h3>
           <p className="fine-print">{t("每个新建的独立会话会在此目录下分配专属文件夹，互不共用工作文件。聊天记录集中存储；修改此路径不移动已有文件或历史。")}</p>
+          {!directoryLoad ? <p role="status">{t("加载中…")}</p> : directoryLoad.error ? <p role="alert" className="error">{t("读取工作区目录失败。{value}", { value: tServer(directoryLoad.error) })}</p> : <>
           <label>{t("目录路径")}<input aria-label={t("默认工作目录")} value={directory} onChange={(e) => { setDirectory(e.target.value); setDirectorySaved(false); }} />
           </label>
           <div className="actions">
@@ -374,6 +404,7 @@ export function SettingsDialog({
             }}>{directoryBusy ? t("处理中…") : t("保存默认目录")}</button>
             {directorySaved && <span role="status">{t("默认目录已保存")}</span>}
           </div>
+          </>}
           {error && tab === "workspace" && <p role="alert" className="error">{tServer(error)}</p>}
         </div>
         {tab === "archives" && <div role="tabpanel" id="settings-panel-archives" aria-labelledby="settings-tab-archives"><ArchivePanel catalog={catalog} action={workspaceAction} /></div>}
