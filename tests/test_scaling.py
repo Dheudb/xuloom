@@ -9,7 +9,7 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from xuloom.scaling.store import Store
 from xuloom.scaling.node import Node, digest
@@ -28,7 +28,7 @@ def checked(name="host", quota=None):
 
 
 class FakeExecution:
-    started, active, peak, hold, fail_kind, invalid, needs_permit = [], 0, 0, None, None, False, False
+    started, active, peak, hold, fail_kind, invalid, needs_permit, verdict = [], 0, 0, None, None, False, False, True
     def __init__(self, node, row):
         self.node, self.row = node, row
         self.engine = type("Engine", (), {"session_id": row.get("session_id") or row["id"]})()
@@ -41,7 +41,11 @@ class FakeExecution:
             if self.row["kind"] == "explore" and cls.hold: await cls.hold.wait()
             await asyncio.sleep(.005)
             if cls.fail_kind == self.row["kind"]: return {"ok": False, "persisted": False, "reason": "persistence_error"}
-            if self.row["kind"] == "plan":
+            if text.startswith("SCALING VERIFY"):
+                if cls.verdict is None: return {"ok": False, "persisted": False, "reason": "persistence_error"}
+                result = cls.verdict if isinstance(cls.verdict, dict) else {
+                    "passed": cls.verdict, "findings": "All tests pass: checked" if cls.verdict else "Tests fail: 2 errors"}
+            elif self.row["kind"] == "plan":
                 result = {"groups": [{"label": "Method A", "prompt": "independent evidence A"}, {"label": "Method B", "prompt": "alternative evidence B"}]}
             elif self.row["kind"] == "expand":
                 count = int(re.search(r"Create up to (\d+)", text)[1])
@@ -65,6 +69,7 @@ class ScalingTests(unittest.IsolatedAsyncioTestCase):
         self.environment = patch.dict(os.environ, {"XULOOM_DATA_DIR": str(self.root / "data")}); self.environment.start()
         FakeExecution.started = []; FakeExecution.active = FakeExecution.peak = 0
         FakeExecution.hold = FakeExecution.fail_kind = None; FakeExecution.invalid = FakeExecution.needs_permit = False
+        FakeExecution.verdict = True
         self.node = Node(Store(self.root / "node.sqlite3"), FakeExecution, resources)
         self.node.check = lambda params: checked()
         self.primary = Node(Store(self.root / "primary.sqlite3"), FakeExecution, resources)
@@ -466,6 +471,52 @@ class ScalingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((result["status"], result["exit_code"]), ("failed", 7))
         self.assertLessEqual(len(result["output"]), 8000)
         self.assertTrue(result["output"].strip().endswith("kept"))
+
+    async def test_plain_language_criteria_are_checked_by_an_independent_worker(self):
+        run = await self.controller.dispatch("create", {"goal": "Fix the parser", "nodes": ["lab"], "target": 2,
+            "accept_high_usage": True, "criteria": "All unit tests pass"})
+        final = await self.drive(run)
+        self.assertEqual((final["status"], final["completion_basis"]), ("completed", "criteria_check"))
+        self.assertEqual(final["criteria_state"]["status"], "passed")
+        tasks = list(self.controller.store.walk("task", run["id"]))
+        check = next(t for t in tasks if t.get("criteria_check"))
+        self.assertEqual((check["kind"], check["purpose"], check["node"]), ("explore", "verify", "lab"))
+        self.assertIn("All unit tests pass", check["text"])
+        self.assertIn("All unit tests pass", next(t for t in tasks if t["kind"] == "plan")["text"])
+
+    async def test_unmet_criteria_start_another_round_until_the_limit(self):
+        FakeExecution.verdict = False
+        run = await self.controller.dispatch("create", {"goal": "Fix the parser", "nodes": ["lab"], "target": 2,
+            "accept_high_usage": True, "criteria": "All unit tests pass", "max_rounds": 2})
+        final = await self.drive(run, seconds=60)
+        self.assertEqual((final["status"], final["round"], final["criteria_state"]["status"]), ("blocked", 2, "failed"))
+        self.assertIn("criteria were not met", final["error"])
+        plans = sorted((t for t in self.controller.store.walk("task", run["id"]) if t["kind"] == "plan"), key=lambda t: t["round"])
+        self.assertIn("Tests fail: 2 errors", plans[1]["text"])
+
+    async def test_incomplete_verdict_cannot_complete_or_start_the_acceptance_command(self):
+        FakeExecution.verdict = {"passed": True}
+        run = await self.controller.dispatch("create", {"goal": "Fix the parser", "nodes": ["lab"], "target": 2,
+            "accept_high_usage": True, "criteria": "All unit tests pass", "max_rounds": 1, "acceptance": self.acceptance(0)})
+        with patch("xuloom.scaling.control.run_command", new=AsyncMock(return_value=("passed", 0, ""))) as command:
+            final = await self.drive(run)
+        command.assert_not_awaited()
+        self.assertEqual((final["status"], final["criteria_state"]["status"]), ("blocked", "failed"))
+        self.assertIn("findings", final["criteria_state"]["findings"])
+
+    async def test_failed_criteria_check_cannot_be_retried_as_an_exploration_task(self):
+        FakeExecution.verdict = None
+        run = await self.controller.dispatch("create", {"goal": "Fix the parser", "nodes": ["lab"], "target": 2,
+            "accept_high_usage": True, "criteria": "All unit tests pass", "max_rounds": 1})
+        final = await self.drive(run)
+        self.assertEqual((final["status"], final["criteria_state"]["status"]), ("blocked", "failed"))
+        tasks = list(self.controller.store.walk("task", run["id"]))
+        check = self.controller.store.get("task", final["criteria_state"]["task"])
+        self.assertEqual(sum(t.get("criteria_check", False) for t in tasks), 2)
+        self.assertEqual(check["status"], "failed")
+        with self.assertRaisesRegex(ValueError, "Completion checks"):
+            await self.controller.dispatch("retry", {"id": run["id"], "task": check["id"], "confirm_side_effects": True})
+        self.assertEqual(tasks, list(self.controller.store.walk("task", run["id"])))
 
     async def test_acceptance_command_decides_completion(self):
         run = await self.controller.dispatch("create", {"goal": "Find independent evidence", "nodes": ["lab"], "target": 2,

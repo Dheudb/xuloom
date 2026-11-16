@@ -399,6 +399,19 @@ class HierarchyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.controller.store.get("permit","slot-second")["status"],"suspended")
         self.assertEqual(self.controller.store.get("permit","slot-offline")["status"],"granted")
 
+    async def test_criteria_check_runs_on_an_execution_node_after_leaders_finish(self):
+        FakeExecution.verdict = True
+        run = await self.controller.dispatch("create", {"goal": "Find independent evidence", "nodes": ["lab"], "target": 6,
+            "accept_high_usage": True, "criteria": "Six cited sources"})
+        for _ in range(300):
+            final = await self.parent_tick(run)
+            if final["status"] in {"completed", "blocked"}: break
+        self.assertEqual((final["status"], final["completion_basis"]), ("completed", "criteria_check"), final)
+        check = next(t for t in self.controller.store.walk("task", run["id"]) if t.get("criteria_check"))
+        self.assertEqual(check["node"], "lab")
+        leader = next(t for t in self.controller.store.walk("task", run["id"]) if t["kind"] == "leader")
+        self.assertIn("Six cited sources", json.loads(leader["text"])["goal"])
+
     async def test_persistent_leader_rejection_fails_and_returns_its_slots(self):
         original = self.host.dispatch
         async def reject(method, params):

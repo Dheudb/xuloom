@@ -6,6 +6,7 @@ from .store import TERMINAL
 
 
 def distribute(controller, run, groups, db):
+    from .control import objective
     for group in groups: controller.validate_assignment(group)
     remaining = run["target"]
     nodes = run["nodes"][1:]
@@ -19,7 +20,7 @@ def distribute(controller, run, groups, db):
         for part in range(groups_count):
             amount=count//groups_count+(1 if part>=groups_count-count%groups_count else 0) if run.get("grouped_leaders") else count
             chosen=directions[part::groups_count] or [directions[part%len(directions)]]
-            text = json.dumps({"goal": run["goal"], "directions":chosen, "target":amount,
+            text = json.dumps({"goal": objective(run), "directions":chosen, "target":amount,
                 "group_width":width,"direct_group":bool(run.get("grouped_leaders")),"partition":part+1,"partitions":groups_count},ensure_ascii=False)
             controller.add_task(run,"leader",text,node=node["id"],label=node["id"]+(" · 组长 "+str(part+1) if run.get("grouped_leaders") else " · 节点主 agent"),count=amount,db=db)
         remaining -= count
@@ -78,5 +79,5 @@ async def advance(controller, run):
     reports = [{"id": row["id"], "node": row["node"], "status": row["status"], "child_run_id": row.get("child_run_id"),
         "excerpt": str((controller.store.get("task", row["id"]).get("receipt") or {}).get("text", ""))[:excerpt],
         "excerpt_limit": excerpt, "error": row.get("error")} for row in leaders]
-    from .control import task_prompt
-    controller.add_task(run, "synthesize", task_prompt("review", run["goal"], reports), node="primary")
+    from .control import task_prompt, objective
+    controller.add_task(run, "synthesize", task_prompt("review", objective(run), reports), node="primary")

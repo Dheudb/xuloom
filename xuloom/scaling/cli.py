@@ -24,6 +24,7 @@ def add_parser(sub):
     p.add_argument('--output-budget',type=int,help='Run-wide admitted output-token cap, including offline node allocations; native executors only')
     p.add_argument('--admission-seconds',type=int,help='Stop new model admission after this duration; does not undo existing side effects')
     p.add_argument("--max-rounds", type=int, help="Stop with a blocked report after this many review rounds (default 8)")
+    p.add_argument("--criteria", help="Completion criteria in plain language; an independent agent checks them before the run completes")
     p.add_argument("--accept-command", help="Shell command that must exit 0 before the run counts as completed")
     p.add_argument("--accept-cwd", help="Absolute directory for --accept-command")
     p.add_argument("--accept-timeout", type=int, help="Seconds before the acceptance command is stopped (default 600)")
@@ -66,6 +67,7 @@ async def dispatch(args, emit):
         limits={k:v for k,v in {'output_tokens':getattr(args,'output_budget',None),'seconds':getattr(args,'admission_seconds',None)}.items() if v is not None}
         if limits: params['budget']=limits
         if args.max_rounds is not None: params["max_rounds"] = args.max_rounds
+        if args.criteria: params["criteria"] = args.criteria
         if args.accept_command:
             params["acceptance"] = {"command": args.accept_command, "cwd": args.accept_cwd or ""}
             if args.accept_timeout is not None: params["acceptance"]["timeout"] = args.accept_timeout

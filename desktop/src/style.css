@@ -2147,7 +2147,7 @@ body.panel-resizing iframe { pointer-events: none; }
 .task-readiness button:disabled { opacity: .6; cursor: wait; }
 .task-readiness summary { cursor: pointer; margin: 12px 0; }
 .scaling-budget { margin: 12px 0; }
-.scaling-budget label { display: block; margin: 8px 0; }
+.scaling-budget label { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
 .pending-inputs { margin: 8px 0; max-height: 160px; overflow: auto; }
 .pending-inputs > div { display:flex; gap:12px; align-items:start; padding:10px 14px; border-radius:12px; background:#f2f7fc; margin:6px 0; }
 .pending-inputs span { flex:1; white-space:pre-wrap; overflow-wrap:anywhere; }
