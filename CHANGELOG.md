@@ -4,6 +4,17 @@
 
 ## [未发布]
 
+## [0.2.4] - 2026-11-16
+
+### 新增
+- Scaling 可以用自然语言写完成标准（桌面“完成标准”，CLI `--criteria`）。总复核报告完成后，会另派一个带工具的代理逐条核对；未达到时继续下一轮。
+
+### 变更
+- 桌面 Scaling 创建表单去掉验收命令和目录输入框，改为“完成标准”文本框；验收命令仍可通过命令行设置。精简预算和完成状态的说明文字，加大预算区标签与输入框的间距。
+
+### 修复
+- Scaling 不再把缺少证据的核对结果记为通过；核对失败后由调度器处理，避免误用普通任务重试入口。
+
 ## [0.2.3] - 2026-11-16
 
 ### 新增
@@ -186,7 +197,8 @@
 - 引擎拆分为 `xuloom/core/engine_parts/` 下的多个 mixin，主循环拆成多个阶段方法。
 - 新增不可变的 `EngineConfig` 和顶层公开 API（`from xuloom import ...`）。
 
-[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.3...HEAD
+[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/Dheudb/xuloom/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/Dheudb/xuloom/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/Dheudb/xuloom/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/Dheudb/xuloom/compare/v0.2.0...v0.2.1

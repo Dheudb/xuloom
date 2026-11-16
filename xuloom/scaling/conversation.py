@@ -175,6 +175,7 @@ async def apply(controller,run,message):
         current.update(goal=plan["goal"].strip(),round=old_round+1,status="paused" if current["status"]=="paused" else "running",
             report=None,error=None,completion_basis=None,control_epoch=current.get("control_epoch",0)+1)
         current.pop("acceptance_state", None)
+        current.pop("criteria_state", None)
         current.pop("round_limit_reached", None)
         controller.queue_plan(current,plan["groups"],db)
         controller.store.put_db(db,"message",{**message,"status":"applied","nodes":{},"applied_round":current["round"]})
