@@ -20,6 +20,10 @@ def identity(value):
     return value
 
 
+def transient(error):
+    return isinstance(error, sqlite3.OperationalError) and any(word in str(error).lower() for word in ("locked", "busy"))
+
+
 def new_id(prefix):
     return prefix + "-" + uuid.uuid4().hex
 

@@ -11,12 +11,16 @@ import time
 from xuloom.agents.connections import resolve_connection
 from xuloom.core.config import load_config
 from xuloom.core.model_catalog import active_connection
-from xuloom.core.storage import data_directory
+from xuloom.core.storage import IOPath, data_directory
 from xuloom.desktop.bridge import DesktopBridge
 from . import PROTOCOL
 from .config import positive
 from .resources import snapshot as resource_snapshot
-from .store import Store, identity, new_id
+from .store import Store, identity, new_id, transient
+
+
+COORDINATOR_KINDS = {"plan", "expand", "group", "synthesize", "dialogue"}
+COORDINATOR_RESTARTS = 2
 
 
 def digest(value):
@@ -65,6 +69,15 @@ class Execution(DesktopBridge):
         allowed = [] if self.row["kind"] != "explore" else None
         configure_role(engine, definition, allowed_tools=allowed, skills=self.skills,
             frozen_prompt="Coordinate the assigned Scaling branch: choose independent work, examine evidence and report accurately." if self.row["kind"] != "explore" else None)
+        if self.row["kind"] in COORDINATOR_KINDS:
+            from xuloom.core.hooks import HOOK_EVENTS
+            hooks = engine.hook_manager
+            safe = (self.row.get("backend", "native") == "native"
+                    and not os.path.lexists(hooks.config_path)
+                    and not any(hooks.has_callbacks(event) for event in HOOK_EVENTS)
+                    and all(plugin.name == "media" for plugin in engine.plugins))
+            self.node.store.update("execution", self.row["id"], lambda row: row.update(
+                replay_safe=safe and row.get("replay_safe", True)))
         if self.row["kind"] in {"group", "synthesize", "explore", "dialogue"}:
             from .evidence import EvidenceTool
             tool = EvidenceTool(self.node, self.row)
@@ -116,6 +129,7 @@ class Node:
         self.factory, self.resources = execution_factory, resources
         self.tasks, self.bridges = {}, {}
         self.stopping = set()
+        self.answered = {}
         self.persistence_errors = {}
         self.loop_task = None
         self.ramp = 1
@@ -136,7 +150,13 @@ class Node:
         # Only this OS-lease-owning daemon can execute node records. A dead
         # process's running operations are never blindly replayed.
         for row in self.store.walk("execution", statuses=["running"]):
-            if row.get("kind") != "leader":
+            if row.get("kind") in COORDINATOR_KINDS and row.get("replay_safe") and row.get("restarts", 0) < COORDINATOR_RESTARTS:
+                # Only a turn with a durable read-only boundary may be replayed.
+                try: session = self.store.get("coordinator", row["coordinator"]).get("session_id") if row.get("coordinator") else None
+                except ValueError: session = None
+                self.store.update("execution", row["id"], lambda value, session=session: value.update(
+                    status="queued", session_id=session, restarts=value.get("restarts", 0) + 1))
+            elif row.get("kind") != "leader":
                 self.store.update("execution", row["id"], lambda value: value.update(status="interrupted", error="Previous executor exited; inspect native transcript before retry"))
                 self.share_final(row,{"status":"interrupted","error":"Previous executor exited; inspect native transcript before retry"})
         for row in self.store.walk("request", statuses=["pending", "granted"]):
@@ -205,7 +225,7 @@ class Node:
             except ValueError as error:
                 if not str(error).startswith("Unknown Scaling job"): raise
             provided = params.get("provided_models")
-            if provided is None and existing and existing.get("model_file"):
+            if provided is None and existing and existing.get("model_file") and not existing.get("closed"):
                 provided = models.read(existing["model_file"])
             if settings.get("requires_imported_models") and provided is None:
                 raise ValueError("Imported model registration is missing; reconcile the node before resubmission")
@@ -217,6 +237,10 @@ class Node:
                 if row["binding"] != checked["binding"] or old_settings != new_settings or row.get("program") != checked.get("program") or row.get("pool", checked.get("pool")) != checked.get("pool") or any(k in row["settings"] and row["settings"][k]!=v for k,v in settings.items() if k.startswith("shared_")):
                     raise ValueError("Frozen node binding changed; restore its settings before reconnecting")
                 if row["settings"]!=settings:row=self.store.update("job",row["id"],lambda r:r.update(settings=settings))
+                if row.get("closed"):
+                    if row["status"] == "cancelled": raise ValueError("Cancelled node runs cannot be reopened")
+                    if row.get("model_file"): models.write(row["model_file"], provided)
+                    row = self.store.update("job", row["id"], lambda r: r.update(status="active", closed=False))
             except ValueError as error:
                 if not str(error).startswith("Unknown Scaling job"):
                     raise
@@ -284,6 +308,12 @@ class Node:
                             "text":"Not executed: equivalent work already claimed. Inspect its actual evidence before treating it as a result. Source: "+json.dumps(result["claim"],ensure_ascii=False)})
                 row=self.store.put_db(db,"execution",row)
             return self.public(row)
+        if method == "close":
+            counts = self.store.counts("execution", job["id"])
+            if counts.get("queued") or counts.get("running"): return {"closed": False}
+            self.store.update("job", job["id"], lambda row: row.update(closed=True, status="cancelled" if row["status"] == "cancelled" else "closed"))
+            if job.get("model_file"): IOPath(job["model_file"]).unlink(missing_ok=True)
+            return {"closed": True}
         if method == "model.idle":
             jobs = {job["id"]}
             if self.leadership: jobs.update(self.leadership.api_jobs(job["id"]))
@@ -337,7 +367,9 @@ class Node:
             if request["run_id"] != job["id"]:
                 raise ValueError("Question belongs to another Scaling run")
             if request["status"] == "pending":
-                return self.store.update("request", request["id"], lambda row: row.update(status="granted", answer=params.get("answer")))
+                granted = self.store.update("request", request["id"], lambda row: row.update(status="granted", answer=params.get("answer")))
+                if request["id"] in self.answered: self.answered[request["id"]].set()
+                return granted
             return {"accepted": request["status"] in {"granted", "released", "consumed"}}
         if method == "ack":
             request = self.store.get("request", identity(params.get("id")))
@@ -375,6 +407,7 @@ class Node:
     async def question(self, execution, kind, payload):
         row = self.store.put("request", {"id": new_id("question"), "run_id": execution["run_id"], "task_id": execution["id"],
             "kind": kind, "payload": payload, "status": "pending"})
+        answered = self.answered.setdefault(row["id"], asyncio.Event())
         try:
             while True:
                 answer = self.store.get("request", row["id"])
@@ -382,46 +415,57 @@ class Node:
                     if kind != "model_permit":
                         self.store.update("request", row["id"], lambda value: value.update(status="consumed"))
                     return answer["answer"]
-                await asyncio.sleep(.25)
+                # Answers arrive through dispatch("answer") and wake this waiter;
+                # the timeout only covers writes made outside this process.
+                try: await asyncio.wait_for(answered.wait(), 2)
+                except asyncio.TimeoutError: pass
+                answered.clear()
         except BaseException:
             self.store.update("request", row["id"], lambda value: value.update(status="released"))
             raise
+        finally:
+            self.answered.pop(row["id"], None)
 
     async def loop(self):
         while True:
-            for key, error in list(self.persistence_errors.items()):
-                try:
-                    self.store.update("execution", key, lambda row: row.update(status="failed", error=error,
-                        receipt={"ok": False, "persisted": False, "reason": "persistence_error"}))
-                    self.persistence_errors.pop(key, None)
-                except Exception: pass
-            jobs = self.store.list("job", statuses=["active"], limit=1000)
-            if jobs:
-                maximum = min(job["settings"].get("host_capacity", job["settings"]["max_agents"]) for job in jobs)
-                resources = self.resources(max(job["settings"]["reserve_percent"] for job in jobs))
-                allowed = min(maximum, resources["suggested"]) if any(job["settings"]["automatic"] for job in jobs) else maximum
-                if resources.get("pressure"):
-                    allowed = 0
-                if time.monotonic() - self.last_growth >= 1:
-                    self.ramp = min(allowed, max(1, self.ramp + max(1, self.ramp // 4)))
-                    self.last_growth = time.monotonic()
-                if self.ramp > allowed:
-                    self.ramp = allowed
-                # One candidate per job per pass: a large swarm cannot starve
-                # another run on the same host. No thousands of wait coroutines.
-                start = self.fairness % len(jobs)
-                for job in jobs[start:] + jobs[:start]:
-                    if len(self.tasks) >= self.ramp:
-                        break
-                    active = sum(self.store.counts("execution", job["id"]).get(k, 0) for k in ["running"])
-                    if active >= job["settings"]["max_agents"]:
-                        continue
-                    queued = self.store.list("execution", parent=job["id"], statuses=["queued"], limit=1)
-                    if queued:
-                        row = self.store.update("execution", queued[0]["id"], lambda value: value.update(status="running"))
-                        self.launch(row)
-                        self.fairness = (jobs.index(job) + 1) % len(jobs)
+            try: self.admit()
+            except Exception as error:
+                if not transient(error): raise
             await asyncio.sleep(.1)
+
+    def admit(self):
+        for key, error in list(self.persistence_errors.items()):
+            try:
+                self.store.update("execution", key, lambda row: row.update(status="failed", error=error,
+                    receipt={"ok": False, "persisted": False, "reason": "persistence_error"}))
+                self.persistence_errors.pop(key, None)
+            except Exception: pass
+        jobs = self.store.list("job", statuses=["active"], limit=1000)
+        if not jobs: return
+        maximum = min(job["settings"].get("host_capacity", job["settings"]["max_agents"]) for job in jobs)
+        resources = self.resources(max(job["settings"]["reserve_percent"] for job in jobs))
+        allowed = min(maximum, resources["suggested"]) if any(job["settings"]["automatic"] for job in jobs) else maximum
+        if resources.get("pressure"):
+            allowed = 0
+        if time.monotonic() - self.last_growth >= 1:
+            self.ramp = min(allowed, max(1, self.ramp + max(1, self.ramp // 4)))
+            self.last_growth = time.monotonic()
+        if self.ramp > allowed:
+            self.ramp = allowed
+        # One candidate per job per pass: a large swarm cannot starve
+        # another run on the same host. No thousands of wait coroutines.
+        start = self.fairness % len(jobs)
+        for job in jobs[start:] + jobs[:start]:
+            if len(self.tasks) >= self.ramp:
+                break
+            active = sum(self.store.counts("execution", job["id"]).get(k, 0) for k in ["running"])
+            if active >= job["settings"]["max_agents"]:
+                continue
+            queued = self.store.list("execution", parent=job["id"], statuses=["queued"], limit=1)
+            if queued:
+                row = self.store.update("execution", queued[0]["id"], lambda value: value.update(status="running"))
+                self.launch(row)
+                self.fairness = (jobs.index(job) + 1) % len(jobs)
 
     def launch(self, row):
         task=asyncio.create_task(self.execute(row))

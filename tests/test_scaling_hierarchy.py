@@ -398,3 +398,47 @@ class HierarchyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.controller.store.get("permit","slot-first")["status"],"suspended")
         self.assertEqual(self.controller.store.get("permit","slot-second")["status"],"suspended")
         self.assertEqual(self.controller.store.get("permit","slot-offline")["status"],"granted")
+
+    async def test_persistent_leader_rejection_fails_and_returns_its_slots(self):
+        original = self.host.dispatch
+        async def reject(method, params):
+            if method == "submit" and params["task"]["kind"] == "leader": raise ValueError("Node is not accepting this run's work")
+            return await original(method, params)
+        self.host.dispatch = reject
+        run = await self.create()
+        for _ in range(40):
+            leader = next((t for t in self.controller.store.walk("task", run["id"]) if t["kind"] == "leader"), None)
+            if leader and leader["status"] == "failed": break
+            await self.parent_tick(run)
+        self.assertEqual(leader["status"], "failed", leader)
+        self.assertEqual(leader["rejections"], 5)
+        self.assertFalse([p for p in self.controller.store.walk("permit", run["id"], statuses=["granted"]) if p.get("allocation")])
+
+    async def test_run_credentials_are_removed_after_completion_and_restored_on_reopen(self):
+        config = json.loads(self.config.read_text())
+        config["scaling_nodes"][0].update(api_source="local", api_pool=[{"connection": "local", "model": "model-a"}])
+        self.config.write_text(json.dumps(config), encoding="utf-8")
+        run = await self.create(); await self.accepted_leader(run)
+        self.assertTrue(list((self.root / "outbound-secrets").glob("*.json")))
+        self.assertTrue(list((self.root / "secrets").glob("*.json")))
+        for _ in range(200):
+            final = await self.parent_tick(run)
+            if final["status"] in {"completed", "blocked"}: break
+        self.assertEqual(final["status"], "completed", final)
+        await self.wait(lambda: not list((self.root / "secrets").glob("*.json")))
+        self.assertFalse(list((self.root / "outbound-secrets").glob("*.json")))
+        self.assertEqual(self.host.store.get("job", run["id"])["status"], "closed")
+        self.assertEqual(self.controller.store.get("cleanup", run["id"])["status"], "done")
+        stored = self.controller.store.get("run", run["id"])
+        changed = json.loads(self.config.read_text())
+        changed["model_connections"][0]["api_key"] = "new-test-credential"
+        self.config.write_text(json.dumps(changed), encoding="utf-8")
+        with patch.object(self.controller, "remote", wraps=self.controller.remote) as remote:
+            with self.assertRaisesRegex(ValueError, "Frozen model pool changed"):
+                await self.controller.open_node(stored, stored["nodes"][1])
+            remote.assert_not_awaited()
+        self.assertFalse(list((self.root / "outbound-secrets").glob("*.json")))
+        self.config.write_text(json.dumps(config), encoding="utf-8")
+        await self.controller.open_node(stored, stored["nodes"][1])
+        self.assertEqual(self.host.store.get("job", run["id"])["status"], "active")
+        self.assertTrue(list((self.root / "outbound-secrets").glob("*.json")))

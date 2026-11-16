@@ -23,6 +23,10 @@ def add_parser(sub):
     p.add_argument("--target", type=int)
     p.add_argument('--output-budget',type=int,help='Run-wide admitted output-token cap, including offline node allocations; native executors only')
     p.add_argument('--admission-seconds',type=int,help='Stop new model admission after this duration; does not undo existing side effects')
+    p.add_argument("--max-rounds", type=int, help="Stop with a blocked report after this many review rounds (default 8)")
+    p.add_argument("--accept-command", help="Shell command that must exit 0 before the run counts as completed")
+    p.add_argument("--accept-cwd", help="Absolute directory for --accept-command")
+    p.add_argument("--accept-timeout", type=int, help="Seconds before the acceptance command is stopped (default 600)")
     p.add_argument("--request-id", help="Stable start identity; lost replies never create a second swarm")
     p.add_argument("--task", help="Task ID for result/retry")
     p.add_argument("--child", help="Nested task ID for child_result/child_retry; --task selects its node primary")
@@ -61,6 +65,12 @@ async def dispatch(args, emit):
         if args.target is not None: params["target"] = args.target
         limits={k:v for k,v in {'output_tokens':getattr(args,'output_budget',None),'seconds':getattr(args,'admission_seconds',None)}.items() if v is not None}
         if limits: params['budget']=limits
+        if args.max_rounds is not None: params["max_rounds"] = args.max_rounds
+        if args.accept_command:
+            params["acceptance"] = {"command": args.accept_command, "cwd": args.accept_cwd or ""}
+            if args.accept_timeout is not None: params["acceptance"]["timeout"] = args.accept_timeout
+        elif args.accept_cwd is not None or args.accept_timeout is not None:
+            raise ValueError("--accept-cwd and --accept-timeout require --accept-command")
         if args.request_id: params["request_id"] = args.request_id
         value = await invoke("create", params)
     elif action == "list": value = await invoke("list")

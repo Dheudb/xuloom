@@ -41,6 +41,17 @@ class SharedTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(value["accepted"])
         self.assertEqual(shared.query(self.node.store,"run-one")["total"],1)
 
+    async def test_coordinator_shared_writes_disallow_automatic_resume(self):
+        row = self.node.store.put("execution", {"id": "coordinator", "run_id": "run-one", "kind": "group",
+            "status": "running", "replay_safe": True})
+        tool = shared.SharedTool(self.node, row)
+        await tool.execute(action="query")
+        self.assertTrue(self.node.store.get("execution", row["id"])["replay_safe"])
+        await tool.execute(action="note", summary="Evidence was published")
+        self.assertFalse(self.node.store.get("execution", row["id"])["replay_safe"])
+        await self.node.start()
+        self.assertEqual(self.node.store.get("execution", row["id"])["status"], "interrupted")
+
     async def test_submit_deduplicates_without_history_and_preserves_verify_and_input_revision(self):
         first=await self.submit("first");duplicate=await self.submit("second")
         self.assertEqual(first["status"],"queued");self.assertEqual(duplicate["status"],"deduplicated")

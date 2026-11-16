@@ -7,17 +7,36 @@ import asyncio
 import copy
 import json
 import math
+from pathlib import Path
 import secrets
 import time
 
-from xuloom.core.storage import data_directory
+from xuloom.core.storage import IOPath, data_directory
 from xuloom.remote.config import resolve
 from xuloom.remote.ssh import SSHClient
 from . import config, models, budget
+from .acceptance import run_command
 from .node import Node, digest
-from .store import Store, identity, new_id, TERMINAL
+from .store import Store, identity, new_id, transient, TERMINAL
 
 LIVE = {"queued", "dispatching", "running"}
+DEFAULT_ROUNDS = 8
+DISPATCH_REJECTIONS = 5
+CLEANUP_RETRY_SECONDS = 30
+
+
+def acceptance_spec(value):
+    if value is None: return None
+    if not isinstance(value, dict) or set(value) - {"command", "cwd", "timeout"}:
+        raise ValueError("Acceptance accepts command, cwd and timeout only")
+    command, cwd, timeout = value.get("command"), value.get("cwd"), value.get("timeout", 600)
+    if not isinstance(command, str) or not 1 <= len(command.strip()) <= 4000:
+        raise ValueError("Supply an acceptance command (1–4000 characters)")
+    if not isinstance(cwd, str) or not Path(cwd).is_absolute() or not Path(cwd).is_dir():
+        raise ValueError("Acceptance directory must be an existing absolute path")
+    if type(timeout) is not int or not 1 <= timeout <= 3600:
+        raise ValueError("Acceptance timeout must be 1–3600 seconds")
+    return {"command": command.strip(), "cwd": cwd, "timeout": timeout}
 
 
 def decode(text):
@@ -65,6 +84,7 @@ class Controller:
         self.create_lock = asyncio.Lock()
         self.advance_cursors = {}
         self.registered = set()
+        self.acceptance_stops = {}
         self.loop_task = None
 
     async def start(self):
@@ -73,14 +93,18 @@ class Controller:
         # restart, reconcile that accepted intent using the same ownership IDs.
         for run in self.store.walk("run", statuses=["starting"]):
             self.store.update("run", run["id"], lambda row: row.update(status="running"))
+        for run in self.store.walk("run", statuses=["running", "paused", "cancelling"]):
+            if (run.get("acceptance_state") or {}).get("status") == "running":
+                self.interrupt_acceptance(run["id"])
         self.loop_task = asyncio.create_task(self.loop())
 
     async def remote(self, node, method, params):
         if node["id"] == "primary":
             return await self.local.dispatch(method, params)
         if node.get("location")=="local":
-            from .daemon import connect,call
-            return await call(await connect("node"),method,params,timeout=20)
+            from .daemon import request
+            result, _ = await request("node", method, params, timeout=20)
+            return result
         key = digest(node["profile"])
         client = self.clients.get(key)
         try:
@@ -137,6 +161,10 @@ class Controller:
             if params.get("accept_high_usage") is not True:
                 raise ValueError("Explicitly acknowledge Scaling's high model/API usage")
             limits = budget.normalize(params.get('budget'))
+            max_rounds = params.get("max_rounds", DEFAULT_ROUNDS)
+            if type(max_rounds) is not int or not 1 <= max_rounds <= 100:
+                raise ValueError("Round limit must be 1–100")
+            acceptance = acceptance_spec(params.get("acceptance"))
             goal = params.get("goal", "").strip()
             if not 1 <= len(goal) <= 100000:
                 raise ValueError("Supply a Scaling goal (1–100000 characters)")
@@ -181,7 +209,9 @@ class Controller:
             primary["check"] = await self.remote(primary, "check", primary)
             run = {"id": run_id, "request_digest": request_digest, "status": "starting", "goal": goal, "token": secrets.token_hex(32),
                 "nodes": [primary] + nodes, "target": target, "permission": params.get("permission", "ask"),
-                "created": time.time(), "round": 1, "completion_basis": None,"grouped_leaders":self.hierarchical}
+                "created": time.time(), "round": 1, "completion_basis": None,"grouped_leaders":self.hierarchical,
+                "max_rounds": max_rounds}
+            if acceptance: run["acceptance"] = acceptance
             if limits:
                 run['budget'] = {k:v for k,v in limits.items() if k != 'seconds'}
                 if limits.get('seconds'): run['budget']['deadline'] = time.time() + limits['seconds']
@@ -274,9 +304,22 @@ class Controller:
                 raise ValueError("This Scaling run has ended")
             if method == 'resume' and run.get('budget_stopped'):
                 raise ValueError('Budget admission stopped this run; inspect the preserved results or cancel it')
+            if method == "resume" and (run.get("acceptance_state") or {}).get("status") == "interrupted":
+                raise ValueError("Acceptance command outcome is unconfirmed; inspect its effects before changing direction or starting a new run")
+            if method == "resume" and run.get("round_limit_reached"):
+                raise ValueError("Scaling round limit reached; review the report and change direction or start a new run")
             action_status = {"pause": "paused", "resume": "running", "cancel": "cancelling"}[method]
-            run = self.store.update("run", run["id"], lambda row: row.update(status=action_status, error=None, control_epoch=row.get("control_epoch", 0) + 1))
+            if run["status"] == "cancelling" and method != "cancel":
+                raise ValueError("Scaling cancellation is still in progress")
+            def update_control(row):
+                row.update(status=action_status, error=None, control_epoch=row.get("control_epoch", 0) + 1)
+                if method == "cancel" and (row.get("acceptance_state") or {}).get("status") == "pending":
+                    row["acceptance_state"]["status"] = "cancelled"
+            run = self.store.update("run", run["id"], update_control)
             if method == "cancel":
+                stop = self.acceptance_stops.get(run["id"])
+                if stop is not None:
+                    stop.set()
                 while True:
                     queued = self.store.list("task", run["id"], statuses=["queued"], limit=1000)
                     if not queued: break
@@ -295,6 +338,12 @@ class Controller:
         if node.get("model_file"): settings["requires_imported_models"] = True
         params = {**self.auth(run), "settings": settings}
         if node.get("model_file") and (run["id"], node["id"]) not in self.registered:
+            if not IOPath(node["model_file"]).is_file():
+                # Credentials are removed when a run ends; an owner message can reopen it.
+                pool = models.export(node)
+                if not pool or models.public(pool) != node["check"].get("pool"):
+                    raise ValueError("Frozen model pool changed; restore its saved connections before reopening")
+                models.write(node["model_file"], pool)
             params["provided_models"] = models.read(node["model_file"])
         checked = await self.remote(node, "open", params)
         if checked["binding"] != node["check"]["binding"] or checked["machine"] != node["check"]["machine"] or checked.get("program") != node["check"].get("program"):
@@ -339,22 +388,116 @@ class Controller:
 
     async def loop(self):
         while True:
-            candidates = {r["id"]:r for r in self.store.list("run", statuses=["running", "paused", "cancelling"], limit=1000)}
-            for message in self.store.walk("message", statuses=["queued","responding","applying"], brief=True):
-                candidates.setdefault(message["run_id"], self.store.get("run",message["run_id"]))
-            for run in candidates.values():
-                if run["id"] not in self.busy:
-                    self.busy.add(run["id"])
-                    job = asyncio.create_task(self.tick_guard(run))
-                    self.jobs[run["id"]] = job
+            try: self.schedule()
+            except Exception as error:
+                if not transient(error): raise
             await asyncio.sleep(.5)
+
+    def schedule(self):
+        candidates = {r["id"]:r for r in self.store.list("run", statuses=["running", "paused", "cancelling"], limit=1000)}
+        for message in self.store.walk("message", statuses=["queued","responding","applying"], brief=True):
+            candidates.setdefault(message["run_id"], self.store.get("run",message["run_id"]))
+        for run in self.store.walk("run", statuses=["blocked"], brief=True):
+            # Blocked runs are still polled until their accepted work settles,
+            # so the model slots it held are returned to other runs.
+            if run["id"] not in candidates and self.holds_work(run["id"]): candidates[run["id"]] = run
+        for run in candidates.values():
+            if run["id"] not in self.busy:
+                self.busy.add(run["id"])
+                job = asyncio.create_task(self.tick_guard(run))
+                self.jobs[run["id"]] = job
+        self.schedule_cleanup()
+
+    def schedule_cleanup(self):
+        now = time.time()
+        for cleanup in self.store.walk("cleanup", statuses=["pending"]):
+            key = cleanup["id"]
+            if cleanup.get("next_at", 0) <= now and key not in self.busy:
+                self.busy.add(key)
+                self.jobs[key] = asyncio.create_task(self.cleanup_guard(key))
+
+    def holds_work(self, run_id):
+        return (next(self.store.walk("task", run_id, statuses=["dispatching", "running"], brief=True), None) is not None
+                or next(self.store.walk("permit", run_id, statuses=["granted", "suspended"]), None) is not None)
+
+    def release_permits(self, run_id, task_ids):
+        task_ids = set(task_ids)
+        if not task_ids: return
+        for permit in self.store.walk("permit", run_id, statuses=["granted", "suspended"]):
+            if permit.get("task_id") in task_ids:
+                self.store.update("permit", permit["id"], lambda p: p.update(status="released"))
+
+    def release_settled_permits(self, run_id):
+        # A task that ended here was confirmed terminal, absent or rejected by its
+        # node, so no execution can still be using the slot.
+        ended = set()
+        for permit in self.store.walk("permit", run_id, statuses=["granted", "suspended"]):
+            try: status = self.store.get("task", permit.get("task_id") or "")["status"]
+            except ValueError: continue
+            if status in TERMINAL: ended.add(permit["task_id"])
+        self.release_permits(run_id, ended)
+
+    def journal_cleanup(self, db, run):
+        self.store.put_db(db, "cleanup", {"id": run["id"], "run_id": run["id"], "status": "pending",
+            "nodes": [node["id"] for node in run["nodes"]], "epoch": run.get("control_epoch", 0), "next_at": 0})
+
+    async def finish_run(self, run):
+        """Delete run credentials once its nodes have no unfinished executions."""
+        epoch = run.get("control_epoch", 0)
+        remaining = {node["id"] for node in run["nodes"]}
+        try:
+            previous = self.store.get("cleanup", run["id"])
+            if previous.get("epoch") == epoch and previous["status"] in {"pending", "done"}:
+                if previous["status"] == "done" or previous.get("next_at", 0) > time.time():
+                    return
+                remaining = set(previous["nodes"])
+        except ValueError:
+            pass
+        pending = []
+        for node in run["nodes"]:
+            if node["id"] not in remaining:
+                continue
+            self.registered.discard((run["id"], node["id"]))
+            try:
+                if node.get("model_file"):
+                    IOPath(node["model_file"]).unlink(missing_ok=True)
+                if not (await self.remote(node, "close", self.auth(run))).get("closed"): pending.append(node["id"])
+            except Exception:
+                pending.append(node["id"])
+        self.store.put("cleanup", {"id": run["id"], "run_id": run["id"], "status": "pending" if pending else "done",
+            "nodes": pending, "epoch": epoch, "next_at": time.time() + CLEANUP_RETRY_SECONDS})
+
+    async def cleanup_guard(self, run_id):
+        try:
+            run = self.store.get("run", run_id)
+            if run["status"] in {"completed", "cancelled", "blocked"} and not run.get("conversation_pending"):
+                await self.finish_run(run)
+            else: self.store.update("cleanup", run_id, lambda row: row.update(status="reopened"))
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
+        finally:
+            self.busy.discard(run_id)
+            self.jobs.pop(run_id, None)
+
+    async def after_tick(self, run):
+        current = self.store.get("run", run["id"])
+        if current["status"] in {"completed", "cancelled"} and not current.get("conversation_pending"):
+            await self.finish_run(current)
 
     async def tick_guard(self, run):
         try:
             await self.tick(run)
+            await self.after_tick(run)
         except asyncio.CancelledError:
             raise
         except Exception as error:
+            if transient(error):
+                # SQLite contention is retried on the next tick, not a run failure.
+                try: self.store.event(run["id"], {"type": "transient_error", "error": str(error)})
+                except Exception: pass
+                return
             def block(row, message=str(error)):
                 if row["status"] == "running": row.update(status="blocked", error=message)
             self.store.update("run", run["id"], block)
@@ -365,17 +508,29 @@ class Controller:
 
     async def tick(self, run):
         run = self.store.get("run", run["id"])
+        if (run.get("acceptance_state") or {}).get("status") == "running" and run["id"] not in self.acceptance_stops:
+            run = self.interrupt_acceptance(run["id"])
+        if run["status"] == "blocked" and not run.get("conversation_pending"):
+            self.release_settled_permits(run["id"])
+            if not self.holds_work(run["id"]): return
         # Nodes are independent; one disconnected host must not delay polling
         # or permissions on every other host.
         await asyncio.gather(*(self.poll_node(run, node) for node in run["nodes"]))
+        self.release_settled_permits(run["id"])
         run = self.store.get("run", run["id"])
+        if run["status"] == "blocked" and not run.get("conversation_pending"): return
         if run["status"] == "cancelling":
             for message in self.store.walk("message",run["id"],statuses=["queued","responding","applying"]):
                 self.store.update("message",message["id"],lambda row:row.update(status="cancelled"))
             self.store.update("run",run["id"],lambda row:row.update(conversation_pending=False))
             counts = self.store.counts("task", run["id"])
             if not any(counts.get(k) for k in LIVE):
-                self.store.update("run", run["id"], lambda row: row.update(status="cancelled"))
+                with self.store.connection() as db:
+                    db.execute("BEGIN IMMEDIATE")
+                    current = json.loads(db.execute("SELECT data FROM records WHERE kind='run' AND id=?", (run["id"],)).fetchone()[0])
+                    current.update(status="cancelled")
+                    self.store.put_db(db, "run", current)
+                    self.journal_cleanup(db, current)
             return
         from .conversation import tick as converse
         if await converse(self, run): return
@@ -388,6 +543,9 @@ class Controller:
                 interpreted = True
                 self.interpret(run, row)
         run = self.store.get("run", run["id"])
+        if run["status"] == "running" and (run.get("acceptance_state") or {}).get("status") == "pending":
+            await self.check_acceptance(run)
+            return
         if run["status"] == "running":
             await self.dispatch_queued(run)
             cursor = self.store.cursor(run["id"])
@@ -414,7 +572,8 @@ class Controller:
             current = self.store.get("run", run["id"])
             chatting = current.get("conversation_pending", False)
             action = "cancel" if current["status"] == "cancelling" else "pause" if (node["id"] != "primary" and chatting) or (current["status"] == "paused" and not (node["id"] == "primary" and chatting)) else "resume"
-            await self.remote(node, "control", {**self.auth(run), "action": action, "revision": current.get("control_epoch", 0), "yield_models": chatting and node["id"] != "primary"})
+            if current["status"] != "blocked" or chatting:
+                await self.remote(node, "control", {**self.auth(run), "action": action, "revision": current.get("control_epoch", 0), "yield_models": chatting and node["id"] != "primary"})
             live = list(self.store.walk("task", run["id"], statuses=["dispatching", "running"], brief=True))
             live = [row for row in live if row.get("node") == node["id"]]
             # RPCs have bounded pages; no per-worker SSH process is created.
@@ -425,21 +584,25 @@ class Controller:
                     if remote["status"] == "absent":
                         if run["status"] == "cancelling":
                             self.store.update("task", remote["id"], lambda row: row.update(status="cancelled", handled=True))
+                            self.release_permits(run["id"], [remote["id"]])
                         continue
                     self.accept_task(remote["id"], remote)
                     if remote.get("leader_status") == "blocked" and remote["status"] not in TERMINAL:
-                        self.store.update("run", run["id"], lambda row: row.update(status="blocked", error=remote.get("error") or "Node leader needs intervention"))
+                        def block_current(row):
+                            if row["status"] == "running":
+                                row.update(status="blocked", error=remote.get("error") or "Node leader needs intervention")
+                        self.store.update("run", run["id"], block_current)
                     if remote["status"] in TERMINAL:
                         # A confirmed terminal native execution can no longer
                         # be using a model slot, including after node restart.
-                        for permit in self.store.walk("permit", run["id"], statuses=["granted", "suspended"]):
-                            if permit.get("task_id") == remote["id"]:
-                                self.store.update("permit", permit["id"], lambda p: p.update(status="released"))
+                        self.release_permits(run["id"], [remote["id"]])
                 await self.requests(run, node, value["requests"])
             self.store.put("health", {"id": run["id"] + "_" + node["id"], "run_id": run["id"],
                 "status": "connected", "resources": value["resources"], "running": value["running"], "ramp": value["ramp"]})
         except Exception as error:
             # Transport loss is unknown liveness, never task interruption.
+            if transient(error):
+                raise
             self.store.put("health", {"id": run["id"] + "_" + node["id"], "run_id": run["id"],
                 "status": "unconfirmed", "error": str(error)})
             for permit in self.store.walk("permit", run["id"], statuses=["queued"]):
@@ -578,11 +741,18 @@ class Controller:
                     if isinstance(error, budget.Exhausted):
                         self.store.update('run',run['id'],lambda r,message=str(error):r.update(status='paused',budget_stopped=True,error=message))
                         return
-                    if row["kind"] == "leader":
-                        self.store.update("task", row["id"], lambda value, error=str(error): value.update(error=error))
-                    else: self.store.update("task", row["id"], lambda value, error=str(error): value.update(status="failed", error=error))
-                except Exception:
-                    pass  # Stable identity reconciles on the SAME node only.
+                    def reject(value, error=str(error)):
+                        value.update(error=error, rejections=value.get("rejections", 0) + 1)
+                        # A node primary keeps its allocation across a few rejected
+                        # submits; a persistent rejection is a failure, not a retry loop.
+                        if value["kind"] != "leader" or value["rejections"] >= DISPATCH_REJECTIONS:
+                            value.update(status="failed")
+                    if self.store.update("task", row["id"], reject)["status"] == "failed":
+                        self.release_permits(run["id"], [row["id"]])
+                except Exception as error:
+                    if transient(error):
+                        raise
+                    # Stable identity reconciles on the same node only.
                 break
 
     def queue_plan(self, run, groups, db):
@@ -618,7 +788,11 @@ class Controller:
             value = decode(text) if task["kind"] in {"plan", "expand", "synthesize"} else None
             with self.store.connection() as db:
                 db.execute("BEGIN IMMEDIATE")
-                if task["kind"] == "plan" or task["kind"] == "synthesize" and value.get("decision") == "continue":
+                if task["kind"] == "synthesize" and value.get("decision") == "continue" and run["round"] >= run.get("max_rounds", DEFAULT_ROUNDS):
+                    run = {**run, "status": "blocked", "report": str(value.get("report") or ""), "round_limit_reached": True,
+                           "error": "Reached the " + str(run.get("max_rounds", DEFAULT_ROUNDS)) + "-round limit without completion; review the report"}
+                    self.store.put_db(db, "run", run)
+                elif task["kind"] == "plan" or task["kind"] == "synthesize" and value.get("decision") == "continue":
                     if task["kind"] == "synthesize":
                         run = {**run, "round": run["round"] + 1}
                         self.store.put_db(db, "run", run)
@@ -641,9 +815,14 @@ class Controller:
                 elif task["kind"] == "synthesize":
                     if value.get("decision") not in {"complete", "blocked"} or not isinstance(value.get("report"), str) or not value["report"].strip():
                         raise ValueError("Primary review needs a decision and evidence report")
-                    run = {**run, "status": "completed" if value["decision"] == "complete" else "blocked",
-                           "report": value["report"], "completion_basis": "model_report"}
+                    if value["decision"] == "complete" and run.get("acceptance"):
+                        run = {**run, "report": value["report"], "acceptance_state": {"status": "pending", "review": task["id"]}}
+                    else:
+                        run = {**run, "status": "completed" if value["decision"] == "complete" else "blocked",
+                               "report": value["report"], "completion_basis": "model_report"}
                     self.store.put_db(db, "run", run)
+                    if run["status"] == "completed":
+                        self.journal_cleanup(db, run)
                 task.update(handled=True)
                 self.store.put_db(db, "task", task)
         except (ValueError, KeyError, TypeError) as error:
@@ -659,6 +838,57 @@ class Controller:
                     self.store.put_db(db, "task", {**task, "handled": True, "format_error": str(error)})
             else:
                 raise ValueError("Coordinator output remains invalid after two repairs: " + str(error))
+
+    def interrupt_acceptance(self, run_id):
+        def interrupted(row):
+            state = row.get("acceptance_state") or {}
+            if state.get("status") != "running":
+                return
+            state.update(status="interrupted", at=time.time())
+            if row["status"] in {"running", "paused"}:
+                row.update(status="blocked", error="Acceptance command outcome is unconfirmed after interruption")
+        return self.store.update("run", run_id, interrupted)
+
+    async def check_acceptance(self, run):
+        """Journal the attempt before launching the owner's local command."""
+        run_id = run["id"]
+        with self.store.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            current = json.loads(db.execute("SELECT data FROM records WHERE kind='run' AND id=?", (run_id,)).fetchone()[0])
+            state = current.get("acceptance_state") or {}
+            if current["status"] != "running" or state.get("status") != "pending" or current.get("conversation_pending"):
+                return
+            state.update(status="running", started_at=time.time())
+            self.store.put_db(db, "run", current)
+        stop = self.acceptance_stops[run_id] = asyncio.Event()
+        try:
+            status, code, output = await run_command(current["acceptance"], stop)
+        finally:
+            self.acceptance_stops.pop(run_id, None)
+        with self.store.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            current = json.loads(db.execute("SELECT data FROM records WHERE kind='run' AND id=?", (run_id,)).fetchone()[0])
+            attempt = current.get("acceptance_state") or {}
+            if attempt.get("status") != "running" or attempt.get("review") != state.get("review"):
+                return
+            if current["status"] == "cancelling":
+                status, code = "cancelled", None
+            result = {**attempt, "status": status, "exit_code": code, "output": output, "at": time.time()}
+            current["acceptance_state"] = result
+            if status == "cancelled":
+                pass  # The next control tick settles the rest of the run.
+            elif status == "passed":
+                current.update(status="completed", completion_basis="acceptance_command")
+                self.journal_cleanup(db, current)
+            elif current["round"] >= current.get("max_rounds", DEFAULT_ROUNDS):
+                current.update(status="blocked", round_limit_reached=True, error="Acceptance command failed and the round limit is reached")
+            else:
+                current["round"] += 1
+                self.add_task(current, "plan", task_prompt("plan", current["goal"], {"target": current["target"],
+                    "suggested_groups": math.ceil(current["target"] / 50), "previous_report": str(current.get("report") or "")[:12000],
+                    "acceptance_failure": result}), node="primary", db=db)
+            self.store.put_db(db, "run", current)
+            self.store.event_db(db, run["id"], {"type": "acceptance", "status": result["status"], "exit_code": code})
 
     @staticmethod
     def validate_assignment(row):
@@ -734,14 +964,17 @@ class Controller:
         await asyncio.gather(*(client.aclose() for client in self.clients.values()), return_exceptions=True)
 
     def can_stop(self):
-        return (not next(self.store.walk("message", statuses=["queued","responding","applying"]), None)
+        return (not self.jobs and not self.acceptance_stops
+                and not next(self.store.walk("message", statuses=["queued","responding","applying"]), None)
                 and not next(self.store.walk("run", statuses=["starting", "running", "paused", "cancelling"]), None)
-                and not next(self.store.walk("task", statuses=list(LIVE)), None))
+                and not next(self.store.walk("task", statuses=["dispatching", "running"]), None)
+                and not next(self.store.walk("permit", statuses=["granted", "suspended"]), None))
 
 
 async def invoke(method, params=None):
-    from .daemon import connect, call
-    return await call(await connect("control"), method.removeprefix("scaling."), params)
+    from .daemon import request
+    result, _ = await request("control", method.removeprefix("scaling."), params)
+    return result
 
 
 if __name__ == "__main__":

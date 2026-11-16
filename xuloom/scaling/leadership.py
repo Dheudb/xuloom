@@ -12,7 +12,7 @@ import secrets
 from .control import Controller, task_prompt
 from . import models
 from .node import digest
-from .store import Store
+from .store import Store, transient
 
 
 class Leadership(Controller):
@@ -39,10 +39,14 @@ class Leadership(Controller):
 
     async def loop(self):
         while True:
-            for run in self.store.walk("run", statuses=["running", "paused", "cancelling", "blocked"]):
-                if not run.get("ownership_missing") and run["id"] not in self.busy:
-                    self.busy.add(run["id"])
-                    self.jobs[run["id"]] = asyncio.create_task(self.tick_guard(run))
+            try:
+                for run in self.store.walk("run", statuses=["running", "paused", "cancelling", "blocked"]):
+                    if not run.get("ownership_missing") and run["id"] not in self.busy:
+                        self.busy.add(run["id"])
+                        self.jobs[run["id"]] = asyncio.create_task(self.tick_guard(run))
+                self.schedule_cleanup()
+            except Exception as error:
+                if not transient(error): raise
             await asyncio.sleep(.4)
 
     async def remote(self, node, method, params):
@@ -72,8 +76,8 @@ class Leadership(Controller):
             for row in result["requests"]: row["run_id"] = original
         return result
 
-    async def tick_guard(self, run):
-        await super().tick_guard(run)
+    async def after_tick(self, run):
+        await super().after_tick(run)
         current = self.store.get("run", run["id"])
         counts = self.store.counts("task", run["id"])
         final = current["status"] in {"completed", "cancelled"} or current["status"] == "blocked" and not any(counts.get(k) for k in ("queued", "dispatching", "running"))
@@ -86,6 +90,8 @@ class Leadership(Controller):
                     "text": current.get("report") or current.get("error") or "Node execution stopped", "completion_basis": "model_report"},
                 session_id=reviews[-1].get("session_id") if reviews else None)
         self.host.store.update("execution", run["parent_task"], lambda row: row.update(changes))
+        if final and current["status"] == "blocked":
+            await self.finish_run(current)
 
     def plan_groups(self, run, groups):
         # Additional cohorts stream through these coordinators; do not allocate
