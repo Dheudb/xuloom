@@ -19,7 +19,7 @@ export default function ChangesPanel({ session, invoke, onOpen }: {
     return () => { cancelled = true; };
   }, [gitSession, session.id, session.project, session.fileChanges?.[0]?.updatedAt, revision]);
   return <>
-    <div className="panel-title"><div><h3>{t("文件变更")}</h3><p>{t("点击查看修改前后差异，新增为绿，删除为红")}</p></div><FileDiff size={18} /></div>
+    <div className="panel-title"><h3>{t("文件变更")} {!!session.fileChanges?.length && <span>{session.fileChanges.length}</span>}</h3></div>
     <div className="panel-scroll changes-scroll">
       {session.fileChanges?.length ? <FileChanges files={session.fileChanges} project={session.project} onOpen={onOpen} compact />
         : <div className="instruction-empty"><FileDiff size={26} /><p>{t("写入或编辑文件后会自动显示在这里。")}</p></div>}

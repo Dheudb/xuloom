@@ -83,8 +83,9 @@ async function main() {
     atomicJSON(path.join(config, "config.json"), { model_provider: "openai", openai_model: "move-fixture", openai_api_key: "fixture-key", openai_base_url: `http://127.0.0.1:${server.address().port}/v1` });
     await launch();
     const old = sessionKey(first, "moving"), next = sessionKey(second, "moving");
-    if (await page.getByRole("button", { name: "展开能力面板", exact: true }).count()) await page.getByRole("button", { name: "展开能力面板", exact: true }).click();
-    await page.locator(".capability-card").filter({ has: page.getByText("only-first", { exact: true }) }).getByRole("button", { name: "选择使用", exact: true }).click();
+    const task = page.getByRole("textbox", { name: "任务输入" });
+    await task.fill("$only-first"); await task.focus();
+    await page.locator("#skill-options").getByRole("option", { name: /only-first/ }).click();
     assert.equal(await page.locator(".selected-skills .selected-skill").count(), 1);
     await page.getByRole("textbox", { name: "任务输入" }).fill("拖动前最后输入的草稿");
     await row(old).dragTo(group(second).locator(".project-heading"));
@@ -93,7 +94,10 @@ async function main() {
     assert.equal(await page.getByRole("textbox", { name: "任务输入" }).inputValue(), "拖动前最后输入的草稿");
     assert.equal(await page.locator(".selected-skills .selected-skill").count(), 0);
     await page.getByText("原来的回答", { exact: true }).waitFor();
-    assert.equal(await page.getByText("only-first", { exact: true }).count(), 0); await page.getByText("only-second", { exact: true }).waitFor();
+    await task.fill("$only"); await task.focus();
+    await page.locator("#skill-options").getByRole("option", { name: /only-second/ }).waitFor();
+    assert.equal(await page.locator("#skill-options").getByRole("option", { name: /only-first/ }).count(), 0);
+    await task.press("Escape"); await task.fill("");
     assert.equal(await page.getByRole("switch", { name: /启用技能/ }).count(), 0);
     assert(!fs.existsSync(history(first, "moving"))); assert(fs.existsSync(history(second, "moving")));
     await send("MOVE_WRITE", true); // remembered grants from the old workspace must be revoked

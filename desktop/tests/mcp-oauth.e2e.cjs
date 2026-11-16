@@ -18,7 +18,8 @@ async function main(){
   const address=await Promise.race([new Promise((resolve,reject)=>{lines.once('line',line=>resolve(JSON.parse(line)));service.once('exit',code=>reject(Error('Owned OAuth service exited '+code+': '+diagnostics)));}),new Promise((_,reject)=>setTimeout(()=>reject(Error('Owned OAuth service startup timeout')),15000).unref())]);
   app=await electron.launch({executablePath:process.env.XULOOM_TEST_EXECUTABLE,args:process.env.XULOOM_TEST_EXECUTABLE?[]:[root],env,timeout:30000});
   const page=await app.firstWindow();page.setDefaultTimeout(45000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
-  await page.locator('.project-item').click();await page.getByRole('button',{name:'MCP 市场',exact:true}).click();
+  await page.locator('.project-item').click();await page.getByRole('button',{name:'扩展',exact:true}).click();
+  await page.getByRole('tab',{name:'MCP 服务',exact:true}).click();await page.getByRole('button',{name:'打开 MCP 管理',exact:true}).click();
   const dialog=page.getByRole('dialog',{name:'MCP 市场'});
   await page.evaluate(()=>window.xuloom.onEvent(event=>{if(event.type==='mcp_oauth_authorize')window.__ownedOAuth=event;}));
   await dialog.getByRole('button',{name:'自定义服务'}).click();

@@ -148,21 +148,23 @@ async function main() {
     await page.getByRole("button", { name: "确认移除项目" }).click();
     await page.getByRole("button", { name: "项目操作 project-two", exact: true }).waitFor({ state: "hidden" });
     assert(fs.existsSync(historyFile(second, "other")));
-    // Add example definitions from the real panel; no browser file injection.
-    if (await page.getByRole("button", { name: "展开能力面板", exact: true }).count()) await page.getByRole("button", { name: "展开能力面板", exact: true }).click();
-    await page.getByRole("button", { name: "Skills", exact: true }).click();
-    await page.getByRole("button", { name: /Skill 怎么配置/ }).click();
-    await page.getByRole("button", { name: "添加示例到当前项目" }).click();
-    await page.getByRole("status").filter({ hasText: "已添加 project-review" }).waitFor();
-    await page.getByRole("button", { name: "关闭配置说明" }).click();
-    await page.getByText("project-review", { exact: true }).waitFor();
-    if (await page.getByRole("button", { name: "展开能力面板", exact: true }).count()) await page.getByRole("button", { name: "展开能力面板", exact: true }).click();
-    await page.getByRole("button", { name: "代理", exact: true }).click();
-    await page.getByText("reviewer", { exact: true }).waitFor();
-    await page.locator(".capability-card").filter({ has: page.getByText("reviewer", { exact: true }) }).getByRole("button", { name: "查看代理定义" }).click();
-    await page.getByRole("dialog", { name: "代理定义" }).getByText(/model: inherit/).waitFor();
-    await page.getByRole("button", { name: "关闭代理预览" }).click();
+    // Add example definitions from the extensions page; no browser file injection.
+    await page.getByRole("button", { name: "扩展", exact: true }).click();
+    const extensions = page.getByRole("dialog", { name: "工作台设置" });
+    await extensions.getByRole("tab", { name: "Skills", exact: true, selected: true }).waitFor();
+    await extensions.getByText(/Skill 怎么配置/).click();
+    await extensions.getByRole("button", { name: "添加示例到当前项目" }).click();
+    await extensions.getByRole("status").filter({ hasText: "已添加 project-review" }).waitFor();
+    await extensions.locator(".extension-row").filter({ has: page.getByText("project-review", { exact: true }) }).waitFor();
+    await extensions.getByRole("tab", { name: "Subagents", exact: true }).click();
+    const reviewer = extensions.locator(".extension-row").filter({ has: page.getByText("reviewer", { exact: true }) });
+    await reviewer.getByRole("button", { name: "查看指令" }).click();
+    await extensions.getByRole("region", { name: "reviewer 指令" }).getByText(/model: inherit/).waitFor();
     await screenshot("sessions-management.png");
+    await reviewer.getByRole("button", { name: "分配任务 →" }).click();
+    await extensions.waitFor({ state: "hidden" });
+    assert.match(await page.getByRole("textbox", { name: "任务输入" }).inputValue(), /reviewer 子代理/);
+    await page.getByRole("textbox", { name: "任务输入" }).fill("");
     // Bulk operations act on the same durable catalog and can be undone by
     // restoring archives, while deletion removes each selected record.
     await page.getByRole("button", { name: "选择多个会话" }).click();

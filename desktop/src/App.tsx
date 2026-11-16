@@ -18,7 +18,7 @@ import {
   ShieldCheck,
   Square,
   X,
-  Store,
+  Blocks,
   Pencil,
   Play,
   Paperclip,
@@ -67,7 +67,6 @@ export default function App() {
   const [activeId, setActiveId] = useState("");
   const [catalog, setCatalog] = useState<SessionCatalog>({ projects: [], view: { sort: "recent" } });
   const preferences = useRef(new CatalogPreferences(catalog));
-  const [defaultDirectory, setDefaultDirectory] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [scalingOpen, setScalingOpen] = useState(false);
   const [navigationRepair, setNavigationRepair] = useState(false);
@@ -80,7 +79,8 @@ export default function App() {
   const [executionDialog, setExecutionDialog] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
-  const [panelTab, setPanelTab] = useState("skills");
+  const [panelTab, setPanelTab] = useState("");
+  const [settingsTab, setSettingsTab] = useState<string>();
   const [activityQuery, setActivityQuery] = useState("");
   const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH);
   const [filePanelWidth, setFilePanelWidth] = useState(700);
@@ -105,6 +105,7 @@ export default function App() {
   const turnOutcomes = useRef(new Map<string, TurnOutcome>());
   const active = sessions.find((item) => item.id === activeId);
   const selectedModel = active?.config || globalModel;
+  const shownPanelTab = panelTab || (active?.fileChanges?.length ? "changes" : "activity");
   const conversationScroll = useConversationScroll(activeId, active?.messages, active?.interactions);
   const effectiveSidebarWidth = clampSidebarWidth(sidebarWidth ?? defaultSidebarWidth(viewport), viewport, panelOpen);
   const draftSessions = useRef(sessions);
@@ -148,7 +149,6 @@ export default function App() {
         setGlobalModel(value.config);
         setBuildId(value.buildId || "");
         setAppVersion(value.version || "");
-        setDefaultDirectory(value.workspaceSettings.defaultDirectory);
         if (Number.isFinite(value.layout?.inspectorWidth)) setPanelWidth(value.layout.inspectorWidth);
         if (Number.isFinite(value.layout?.filePreviewWidth)) setFilePanelWidth(value.layout.filePreviewWidth);
         if (Number.isFinite(value.layout?.reviewTreeWidth)) setReviewTreeWidth(value.layout.reviewTreeWidth);
@@ -350,7 +350,15 @@ export default function App() {
     } else if (name === "plan") {
       if (active?.goal && !["completed", "cancelled", "budget_exhausted"].includes(active.goal.status)) { onError(t("请先结束当前目标，再切换计划模式。")); return; }
       update({ mode: active?.mode === "plan" ? "normal" : "plan", goalMode: false });
-    } else if (name === "skills") { setPanelOpen(true); setPanelTab("skills"); }
+    } else if (name === "skills") {
+      const draft = active?.draft || "";
+      const nextDraft = draft + (draft && !/\s$/.test(draft) ? " $" : "$");
+      update({ draft: nextDraft });
+      requestAnimationFrame(() => {
+        input.current?.setSelectionRange(nextDraft.length, nextDraft.length);
+        input.current?.focus();
+      });
+    }
     else if (name === "mcp") setMcpOpen(true);
     else if (name === "settings") void openSettings();
   }
@@ -527,15 +535,9 @@ export default function App() {
     } catch (error) { onError(error); }
     finally { setCollaborationChanging(false); }
   }
-  async function openSettings() {
-    try {
-      const [config, workspace] = await Promise.all([invoke("config.get"), window.xuloom.invoke("workspace.get")]);
-      applyModel(config);
-      setDefaultDirectory(workspace.defaultDirectory);
-      setSettingsOpen(true);
-    } catch (error) {
-      onError(error);
-    }
+  function openSettings(tab?: string) {
+    setSettingsTab(tab);
+    setSettingsOpen(true);
   }
   const title = catalog.projects.flatMap((project) => project.sessions).find((row) => row.id === activeId)?.title ||
     active?.messages
@@ -588,14 +590,14 @@ export default function App() {
           <button className="sidebar-action" aria-label={t("Scaling 蜂群")} onClick={() => setScalingOpen(true)}><Workflow size={16} />{t("Scaling 蜂群")} <span className="scaling-beta">{t("实验阶段")}</span></button>
           <button
             className="sidebar-action"
-            title={active ? t("为当前工作区管理外部工具") : t("浏览 MCP 服务目录")}
-            onClick={() => setMcpOpen(true)}
+            title={t("管理 Skills、子代理角色和 MCP 服务")}
+            onClick={() => void openSettings(active ? "skills" : "mcp")}
           >
-            <Store size={16} />{t("MCP 市场")}</button>
+            <Blocks size={16} />{t("扩展")}</button>
           <div className="local-status">
             <span />{t("本地工作区")}<span className="version" title={buildId ? t("构建 {buildId}", { buildId }) : t("开发版本")}>{appVersion ? "v" + appVersion : t("开发版")}{buildId ? " · " + buildId.slice(-4) : ""}</span>
           </div>
-          <button className="sidebar-action" onClick={openSettings}>
+          <button className="sidebar-action" onClick={() => void openSettings()}>
             <Settings2 size={16} />{t("设置与模型")}</button>
         </div>
       </aside>
@@ -626,7 +628,7 @@ export default function App() {
                 { id: "activity", label: t("活动"), icon: Activity },
               ].map(({ id, label, icon: Icon }) => (
                 <button key={id} className="icon-button" title={label} aria-label={t("打开{label}面板", { label })}
-                  aria-pressed={panelOpen && !filePreview && panelTab === id}
+                  aria-pressed={panelOpen && !filePreview && shownPanelTab === id}
                   onClick={() => { setActivityQuery(""); setFilePreview(undefined); setPanelTab(id); setPanelOpen(true); }}>
                   <Icon size={17} />
                 </button>
@@ -634,7 +636,7 @@ export default function App() {
             </div>
             <button
               className="icon-button"
-              title={panelOpen ? t("收起侧栏") : t("技能、子代理与会话工具")}
+              title={panelOpen ? t("收起侧栏") : t("变更、活动、子代理与文件")}
               aria-label={panelOpen ? t("收起能力面板") : t("展开能力面板")}
               aria-expanded={panelOpen}
               onClick={() => setPanelOpen(!panelOpen)}
@@ -806,7 +808,7 @@ export default function App() {
             <div className="session-error" role="alert">
               {tServer(active.error)}
               {active.errorAction && <button onClick={() => {
-                if (active.errorAction === "settings") setSettingsOpen(true);
+                if (active.errorAction === "settings") openSettings();
                 else { setFilePreview(undefined); setPanelTab("activity"); setPanelOpen(true); }
               }}>{active.errorAction === "settings" ? t("检查模型设置") : t("查看活动")}</button>}
               <button
@@ -893,7 +895,7 @@ export default function App() {
                     <optgroup key={connection.connectionId} label={displayName(connection.connectionName)}>
                       {connection.models.map((model) => <option key={model} value={JSON.stringify([connection.connectionId, model])}>{model}</option>)}
                     </optgroup>)}
-                </select> : <button className="model-button" onClick={openSettings}>{t("连接模型")}<ChevronRight size={12} /></button>}
+                </select> : <button className="model-button" onClick={() => void openSettings()}>{t("连接模型")}<ChevronRight size={12} /></button>}
                 {!active?.controlledExecution && <ReasoningControls profile={selectedModel?.modelReasoning?.[selectedModel.model]}
                   disabled={opening || modelChanging || !!active?.busy || !!runningWorkers || !!runningCommands}
                   change={value => void selectReasoning(value)} />}
@@ -986,35 +988,45 @@ export default function App() {
           session={active}
           activityQuery={activityQuery}
           contextBusy={opening || modelChanging || !!active?.busy || !!runningWorkers || !!runningCommands || !!active?.controlledExecution}
-          tab={panelTab}
+          tab={shownPanelTab}
           setTab={setPanelTab}
           invoke={invoke}
           refresh={refresh}
           update={update}
           onError={onError}
           onNavigateChat={(url) => navigateChat.current(url)}
+          onManage={(kind) => void openSettings(kind)}
         />}
         </div>
       )}
       {settingsOpen && (
         <SettingsDialog
           key={activeId}
-          config={selectedModel || active?.config}
+          loadModel={() => invoke("config.get")}
+          onModelLoaded={applyModel}
           targetLabel={active?.remote ? "SSH · " + active.remote.host : undefined}
           catalog={catalog}
           workspaceAction={workspaceAction}
           mediaControl={async (action, jobId) => { setSettingsOpen(false); try { await invoke("media.control", { action, jobId }); } catch (error) { onError(error); } }}
-          defaultDirectory={defaultDirectory}
           chooseDirectory={() => window.xuloom.invoke("workspace.choose")}
           saveDirectory={async (directory) => {
             const value = await window.xuloom.invoke("workspace.save", { defaultDirectory: directory });
-            setDefaultDirectory(value.defaultDirectory);
             return value.defaultDirectory;
           }}
           close={() => setSettingsOpen(false)}
           save={saveModel}
           openMcp={() => { setSettingsOpen(false); setMcpOpen(true); }}
-          extensions={active ? { busy: active.busy || !!runningWorkers || !!runningCommands, invoke, changed: (capabilities) => update({ capabilities }) } : undefined}
+          initialTab={settingsTab}
+          extensions={active ? { busy: active.busy || !!runningWorkers || !!runningCommands, invoke, changed: (capabilities) => update({ capabilities }),
+            assign: active.controlledExecution ? undefined : (name) => {
+              setSettingsOpen(false);
+              const draft = t("请使用 {name} 子代理完成以下任务：\n", { name }) + active.draft;
+              update({ draft });
+              requestAnimationFrame(() => {
+                input.current?.focus();
+                input.current?.setSelectionRange(draft.length, draft.length);
+              });
+            } } : undefined}
           deleteConnection={async (connectionId) => {
             const config = await invoke("config.delete", { connectionId, confirm: true });
             applyModel(config);

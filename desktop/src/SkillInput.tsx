@@ -65,7 +65,7 @@ export default function SkillInput({ sessionId, draft, selected, capabilities, d
           <Puzzle size={16} /><span className="skill-picker-name">{skill.name}</span><span className="skill-picker-description">{skill.scope === "builtin" ? tServer(skill.description) : skill.description}</span>
           {selected.includes(skill.name) && <Check size={14} aria-label={t("已选择")} />}<small className="skill-picker-scope">{skillScope(skill.scope)}</small>
         </button>)}
-        {!options.length && !loading && !error && <p className="skill-picker-empty">{t("没有匹配的 Skill。可在右侧导入目录，或放入 .xuloom/skills/&lt;名称&gt;/SKILL.md。")}</p>}
+        {!options.length && !loading && !error && <p className="skill-picker-empty">{t("没有匹配的 Skill。可在「扩展 → Skills → 导入目录」导入，或放入 .xuloom/skills/<名称>/SKILL.md。")}</p>}
       </div>
       {loading && <p className="skill-picker-status" role="status">{t("正在读取技能目录…")}</p>}
       {error && <p className="skill-picker-status error" role="alert">{tServer(error)}</p>}

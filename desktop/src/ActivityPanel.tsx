@@ -20,7 +20,7 @@ export default function ActivityPanel({ session, initialQuery = "" }: { session:
     (scope === "all" || (scope === "main" ? !tool.agentId : !!tool.agentId)) &&
     JSON.stringify([tool.name, tool.input, tool.result, tool.agentRole, statusText[tool.status]]).toLowerCase().includes(query.toLowerCase()));
   return <>
-    <div className="panel-title"><div><h3>{t("执行活动")} <span>{session.tools.length}</span></h3><p>{t("操作参数、执行状态与返回结果")}</p></div><Activity size={17} /></div>
+    <div className="panel-title"><h3>{t("执行活动")} <span>{session.tools.length}</span></h3></div>
     <div className="activity-toolbar">
       <div className="activity-counts"><span>{tx("{length} 进行中", { length: session.tools.filter(pending).length })}</span><span>{tx("{length} 已完成", { length: session.tools.filter((tool) => tool.status === "completed").length })}</span><span>{tx("{length} 异常", { length: session.tools.filter((tool) => ["error", "crashed"].includes(tool.status)).length })}</span></div>
       <div className="activity-filters"><input aria-label={t("搜索执行活动")} placeholder={t("搜索操作、文件或输出")} value={query} onChange={(event) => setQuery(event.target.value)} />

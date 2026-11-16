@@ -1,6 +1,6 @@
 {
   "name": "xuloom-desktop",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "type": "module",
   "description": "Xuloom desktop workbench",
@@ -60,6 +60,7 @@
     "test:browser-capture": "node tests/browser-capture.e2e.cjs",
     "test:skills": "node tests/skills.e2e.cjs",
     "test:extensions": "node tests/extensions.e2e.cjs",
+    "test:extension-entry": "node tests/extension-entry.e2e.cjs",
     "test:moves": "node tests/moves.e2e.cjs",
     "test:files": "node tests/files.e2e.cjs",
     "test:git-status": "node tests/git-status.e2e.cjs",
