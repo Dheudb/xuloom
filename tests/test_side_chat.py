@@ -72,6 +72,14 @@ class SideChatTests(unittest.IsolatedAsyncioTestCase):
         initial = await restored.dispatch("initialize", {"sessionId": sid})
         self.assertEqual(initial["sideChat"]["parentSessionId"], self.sid)
 
+    async def test_quoted_skill_name_is_data_not_an_implicit_skill_invocation(self):
+        child, _ = await self.child()
+        engine = await child.ensure_engine(write=True)
+        text = "> Source\n> $not-an-installed-skill\n\nExplain this phrase."
+        with patch.object(engine.tool_context["skill_registry"], "resolve", side_effect=AssertionError("Quoted data activated a skill")):
+            result = await engine._apply_selected_skills(text, None, None, [], None, None)
+        self.assertEqual(result[0], text)
+
     async def test_nested_invalid_or_unowned_creation_is_refused(self):
         child, _ = await self.child()
         for bridge, params in [(child, {}), (self.parent, {"draft": "x" * 20001}), (self.parent, {"scope": "other"})]:

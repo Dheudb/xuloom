@@ -63,7 +63,9 @@ async function select(){
  mainId=rows.find(r=>r.id!==sideId).id;
  assert.equal(requests.length,2,"Opening a side chat must not call a model");
  const sideConfig=await page.evaluate(id=>window.xuloom.invoke("config.get",{session:id}),sideId);assert.equal(sideConfig.model,"side-fixture");
- await side.getByRole("textbox",{name:"侧聊输入",exact:true}).fill("SIDE_QUESTION");
+ const sideDraft=await side.getByRole("textbox",{name:"侧聊输入",exact:true}).inputValue();
+ assert(sideDraft.includes("> A selected phrase"));
+ await side.getByRole("textbox",{name:"侧聊输入",exact:true}).fill(sideDraft+"SIDE_QUESTION");
  await side.getByRole("button",{name:"发送侧聊",exact:true}).click();await side.getByText("SIDE_ANSWER",{exact:true}).waitFor();
  assert(mainResponse&&!mainResponse.writableEnded,"The main task must continue");
  await page.waitForFunction(()=>!document.querySelector(".side-chat textarea")?.disabled);
@@ -86,6 +88,7 @@ async function select(){
  await page.getByRole("button",{name:"Open side chat",exact:true}).click();
  assert.equal(await page.getByRole("textbox",{name:"Side chat input",exact:true}).inputValue(),"Unsaved side draft 原文");
  await page.getByRole("region",{name:"Side chat",exact:true}).getByText("SIDE_ANSWER",{exact:true}).waitFor();
+ assert(requests.some(body=>body.messages.some(m=>m.role==="user" && typeof m.content==="string" && m.content.includes("> A selected phrase") && m.content.includes("SIDE_QUESTION"))));
  assert.deepEqual(errors,[]);
  fs.mkdirSync(path.join(root,"build"),{recursive:true});
  await page.screenshot({path:path.join(root,"build","side-chat-e2e.png")});

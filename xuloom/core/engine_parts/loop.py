@@ -498,7 +498,9 @@ class TurnLoopMixin(EngineState):
         registry = self.tool_context["skill_registry"]
         names = list(dict.fromkeys(selected_skills or []))
         # CLI mentions and desktop selections use the same loader and stored input.
-        for mention in re.finditer(r"(?:^|\s)\$([a-z][a-z0-9]*(?:-[a-z0-9]+)*)(?=\s|$)", user_input):
+        # A Markdown quote is selected/source material, not an invocation.
+        mention_input = "\n".join(line for line in user_input.splitlines() if not line.lstrip().startswith(">"))
+        for mention in re.finditer(r"(?:^|\s)\$([a-z][a-z0-9]*(?:-[a-z0-9]+)*)(?=\s|$)", mention_input):
             name = mention.group(1)
             if name not in names:
                 names.append(name)
