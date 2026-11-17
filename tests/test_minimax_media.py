@@ -236,6 +236,46 @@ class MiniMaxTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             download_url({**binding, "base_url": "https://unrelated.example/v2/video_generation"}, url)
 
+    async def test_official_image_oss_is_scoped_to_minimax_https(self):
+        from xuloom.media.queue import download_url
+        host = "hailuo-image-algeng-data.oss-cn-wulanchabu.aliyuncs.com"
+        binding = {"base_url": "https://api.minimax.cn/v1/images/generations", "download_origins": []}
+        url = "https://" + host + "/image.png?signature=owned"
+        self.assertEqual(download_url(binding, url), url)
+        for rejected in ("http://" + host + "/image.png", "https://" + host + ":444/image.png",
+                         "https://" + host + ".example/image.png", "https://other.oss-cn-wulanchabu.aliyuncs.com/image.png"):
+            with self.assertRaises(ValueError):
+                download_url(binding, rejected)
+        with self.assertRaises(ValueError):
+            download_url({**binding, "base_url": "https://unrelated.example/v1"}, url)
+
+    async def test_saved_minimax_image_download_resumes_without_generation(self):
+        import httpx
+        from PIL import Image
+        from xuloom.media import generation
+        url = "https://hailuo-image-algeng-data.oss-cn-wulanchabu.aliyuncs.com/owned.png?signature=owned"
+        image = io.BytesIO()
+        Image.new("RGB", (2, 2)).save(image, format="PNG")
+        row = config.save_model({"kind": "image", "base_url": "https://api.minimax.cn/v1/images/generations",
+                                 "apiKey": "OWNED_SECRET", "model": "MiniMax-H3-Image"})[0]
+        with patch.object(adapters, "request", new=AsyncMock(return_value=(
+                json.dumps({"data": [{"url": url}]}).encode(), "application/json"))),                 patch("xuloom.media.files.download", new=AsyncMock(side_effect=ValueError("download blocked"))):
+            await self.call(row)
+        record = self.latest()
+        self.assertEqual(record["phase"], "download_failed")
+        requests = []
+        def handle(request):
+            requests.append(request)
+            self.assertEqual(request.method, "GET")
+            self.assertNotIn("authorization", request.headers)
+            return httpx.Response(200, content=image.getvalue(), headers={"Content-Type": "image/png"})
+        with patch("xuloom.media.files.client", side_effect=lambda _: httpx.AsyncClient(
+                transport=httpx.MockTransport(handle))),                 patch.object(generation, "submit", new=AsyncMock(side_effect=AssertionError("Must not regenerate"))):
+            result = await self.call(action="status", job_id=record["id"])
+        self.assertFalse(result["is_error"], result)
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(Path(self.latest()["files"][0]["path"]).read_bytes(), image.getvalue())
+
     async def test_invalid_audio_is_not_published(self):
         self.scenario = "bad-audio"
         result = await self.call(self.add("speech"))

@@ -61,6 +61,8 @@ xuloom media cancel --cwd WORKSPACE --session SESSION_ID JOB_ID --permission ful
 
 控制操作不新增聊天 prompt、不清空草稿、不调用聊天模型。无交互权限需要批准时返回 `approval_required`。删除模型不会取消供应商已有任务，且会使其后续查询缺少原配置，删除前界面要求确认。
 
+MiniMax 官方连接内置允许图片 CDN `hailuo-image-algeng-data.oss-cn-wulanchabu.aliyuncs.com`（HTTPS 443），不放行整个阿里云 OSS 域名。下载被拦截时，响应保留在原任务；修复后查询原任务即可继续下载，不需要重新提交生成。
+
 ## 可靠性与完成
 
 - 每次生成先保存提交意图，**只发一次 POST**；没有应用层生成重试或协议回退。超时、断线、响应丢失时保留未知结果，不能冒充失败后偷偷重试。
