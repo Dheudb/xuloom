@@ -192,7 +192,7 @@ class ParityTests(unittest.IsolatedAsyncioTestCase):
     async def test_exited_parent_with_inherited_pipes_has_bounded_drain(self):
         with tempfile.TemporaryDirectory() as directory:
             manager = CommandSessions(Path(directory) / "logs"); manager.OUTPUT_DRAIN_TIMEOUT = .05
-            code = "import subprocess,sys; subprocess.Popen([sys.executable,'-c','import time;time.sleep(.8)']); print('parent done',flush=True)"
+            code = "import subprocess,sys; subprocess.Popen([sys.executable,'-c','import time;time.sleep(.8)'], cwd=sys.prefix); print('parent done',flush=True)"
             try:
                 identity = await manager.start(argv=[sys.executable, "-c", code], cwd=directory, owner="test", timeout_ms=5000)
                 result = await asyncio.wait_for(manager.poll(identity, "test", 1000), 2)
