@@ -91,7 +91,12 @@ async function select(){
  assert(requests.some(body=>body.messages.some(m=>m.role==="user" && typeof m.content==="string" && m.content.includes("> A selected phrase") && m.content.includes("SIDE_QUESTION"))));
  assert.deepEqual(errors,[]);
  fs.mkdirSync(path.join(root,"build"),{recursive:true});
- await page.screenshot({path:path.join(root,"build","side-chat-e2e.png")});
+ const snapshot=await app.evaluate(async({BrowserWindow})=>{
+  const image=await Promise.race([BrowserWindow.getAllWindows()[0].webContents.capturePage(undefined,{stayHidden:true,stayAwake:true}),new Promise((_,reject)=>setTimeout(()=>reject(new Error("Hidden snapshot timed out")),15000))]);
+  if(image.isEmpty())throw new Error("Hidden snapshot is empty");
+  return image.toPNG().toString("base64");
+ });
+ fs.writeFileSync(path.join(root,"build","side-chat-e2e.png"),Buffer.from(snapshot,"base64"));
  console.log("Side chat E2E passed: quote, concurrent main, independent cancel, close/reopen, persisted history/draft; no remote providers.");
 }finally{
  finishMain?.();finishSide?.();if(app)await app.close();server.closeAllConnections?.();await new Promise(resolve=>server.close(resolve));
