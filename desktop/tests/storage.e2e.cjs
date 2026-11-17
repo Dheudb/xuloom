@@ -18,7 +18,7 @@ async function launch() {
   for (const key of ["ELECTRON_RUN_AS_NODE", "XULOOM_DEV_URL", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL", "XULOOM_MODEL_PROVIDER"]) delete env[key];
   app = await electron.launch({ executablePath: process.env.XULOOM_TEST_EXECUTABLE, args: process.env.XULOOM_TEST_EXECUTABLE ? [] : [root], env, timeout: 30000 });
   page = await app.firstWindow(); page.setDefaultTimeout(30000); page.on("pageerror", (error) => errors.push(error.message));
-  await page.waitForFunction(() => !document.querySelector(".new-task")?.disabled);
+  await page.waitForFunction(() => document.querySelector(".new-task")?.disabled === false);
 }
 // Legacy history is migrated by the storage actor (a Python process) when the catalog is first read, so
 // the sidebar fills in shortly after the window is ready; wait for it rather than counting immediately.
@@ -26,6 +26,7 @@ const sessionsShown = (count) => page.waitForFunction((count) => document.queryS
 async function main() {
   try {
     await launch(); await sessionsShown(2);
+    await page.waitForFunction(() => !!document.querySelector(".breadcrumbs button")?.getAttribute("title") && document.querySelector(".new-task")?.disabled === false);
     const first = await page.locator(".breadcrumbs button").getAttribute("title"); assert.notEqual(first, shared);
     assert.equal(fs.readFileSync(path.join(first, "artifact.txt"), "utf8"), "existing output");
     await page.locator(".inline-file-link").click(); await page.getByRole("region", { name: "文件预览", exact: true }).getByText("existing output", { exact: true }).waitFor();
