@@ -84,6 +84,13 @@ class MaintenanceTests(unittest.TestCase):
         self.assertNotIn('private', out.read_text())
         self.assertNotIn(str(self.root), out.read_text())
 
+    def test_portable_connection_metadata_removes_url_credentials(self):
+        from xuloom.maintenance.archive import portable_config
+        value = portable_config({'model_connections':[{'id':'a','provider':'openai','models':['m'],
+            'base_url':'https://user:private-password@api.invalid/v1?key=private-query'}]})
+        self.assertNotIn('private-', json.dumps(value))
+        self.assertEqual(value['model_connections'][0]['base_url'], 'https://api.invalid/v1')
+
     def test_zip_traversal_is_rejected(self):
         with zipfile.ZipFile(self.zip, 'w') as out:
             out.writestr('../outside', b'test')

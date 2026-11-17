@@ -67,7 +67,12 @@ def portable_config(cfg):
     """Only connection metadata is portable; secrets and executable plugin settings are excluded."""
     from xuloom.core.model_catalog import connections
     allowed = {'id', 'name', 'provider', 'model', 'models', 'base_url', 'network_mode', 'model_context', 'reasoning_effort'}
-    return {'model_connections': [{k: v for k, v in c.items() if k in allowed} for c in connections(cfg, defaults=False)],
+    values = [{k: v for k, v in c.items() if k in allowed} for c in connections(cfg, defaults=False)]
+    from urllib.parse import urlsplit, urlunsplit
+    for item in values:
+        parsed = urlsplit(item.get('base_url') or '')
+        item['base_url'] = urlunsplit((parsed.scheme, parsed.netloc.rsplit('@', 1)[-1], parsed.path, '', ''))
+    return {'model_connections': values,
             'active_model_connection': cfg.get('active_model_connection', '')}
 
 
