@@ -515,7 +515,8 @@ class QueryEngine(
         next_model = model if model is not None else self.primary_model
         next_base = api_base_url if api_base_url is not None else (self.api_base_url if next_provider == self.model_provider else environment_base_url(next_provider))
         next_key = api_key if api_key is not None else (self._api_key if next_provider == self.model_provider else environment_api_key(next_provider))
-        route_changed = (next_provider, next_model, next_base, next_key) != (self.model_provider, self.primary_model, self.api_base_url, self._api_key)
+        connection_changed = (next_provider, next_base, next_key) != (self.model_provider, self.api_base_url, self._api_key)
+        route_changed = connection_changed or next_model != self.primary_model
         next_fallback = self._resolve_fallback_model(None, provider=next_provider, primary_model=next_model)
         next_profile = configured_profile(next_provider, next_model, next_base)
         next_client = create_model_client(provider=next_provider, model=next_model, api_base_url=next_base, api_key=next_key, network_mode=next_network, request_owner=self._request_owner)
@@ -554,7 +555,7 @@ class QueryEngine(
         self.config = self.config.replace(
             model_provider=next_provider, model=next_model, api_base_url=next_base, api_key=next_key,
             network_mode=next_network, fallback_model=next_fallback, model_contract=None, reasoning_effort=None,
-            model_connection_id=None if route_changed else self.config.model_connection_id)
+            model_connection_id=None if connection_changed else self.config.model_connection_id)
         self._sync_model_runtime_context()
         if persist:
             self.persist_session_state()

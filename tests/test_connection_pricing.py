@@ -30,6 +30,8 @@ class ConnectionPricingTests(unittest.TestCase):
                 api_base_url='http://127.0.0.1:9/v1', network_mode='direct', bundled_plugins=False, model_connection_id='old'))
             try:
                 self.assertEqual(engine.tool_context['pricing_connection_id'], 'old')
+                engine.switch_model_runtime(model='other-model', persist=False)
+                self.assertEqual(engine.tool_context['pricing_connection_id'], 'old')
                 engine.switch_model_runtime(api_base_url='http://127.0.0.1:10/v1', persist=False)
                 self.assertIsNone(engine.tool_context['pricing_connection_id'])
             finally:
