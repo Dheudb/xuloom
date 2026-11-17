@@ -75,6 +75,7 @@ const engineMethods = new Set([
   "stop",
   "changes",
   "files.read",
+  "files.documentInfo", "files.documentPage",
   "files.reference",
   "files.image",
   "files.mediaInfo", "files.mediaChunk",

@@ -1,6 +1,6 @@
 const { _electron: electron } = require('playwright');
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), assert = require('node:assert/strict');
-const { spawn } = require('node:child_process'), readline = require('node:readline');
+const { spawn, execFileSync } = require('node:child_process'), readline = require('node:readline');
 const { resolveEnginePython } = require('../electron/runtime.cjs');
 const root = path.resolve(__dirname, '..'), repository = path.resolve(root, '..');
 const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'xuloom-remote-html-'));
@@ -63,6 +63,15 @@ async function cli(args, env, expected = 0) {
   assert.equal((rejected.result || rejected).ok, false);
   const denied = await page.evaluate(async ({ id, entry }) => { try {await window.xuloom.invoke('files.htmlInfo', {session:id,path:entry,asset:'.secret.json'});return false;}catch{return true;} }, { id, entry }); assert(denied);
   assert(!fs.existsSync(path.join(fixture, 'wire.jsonl')), 'Preview, navigation and CLI must not invoke a model');
+  const documents = path.join(info.remote, 'documents');
+  execFileSync(fixturePython, ['-X', 'utf8', '-c', 'import sys;sys.path.insert(0,"tests");from preview_fixtures import create_fixtures;create_fixtures(sys.argv[1])', documents], { cwd: repository, windowsHide: true });
+  for (const [name, proof] of [['report.docx', 'DOCX_BODY_PROOF'], ['data.csv', 'sample0'], ['paper.pdf', 'data:image/png;base64,']]) {
+    const result = await page.evaluate(async ({id, file}) => {
+      const metadata = await window.xuloom.invoke('files.documentInfo', {session: id, path: file});
+      return window.xuloom.invoke('files.documentPage', {session: id, path: file, version: metadata.version});
+    }, {id, file: path.join(documents, name)});
+    assert(JSON.stringify(result).includes(proof), 'Document content must be read from the SSH host: ' + name);
+  }
   const previous = await preview.locator('iframe').getAttribute('src');
   await preview.getByRole('button', { name: '关闭文件预览', exact: true }).click(); assert.equal(await page.locator('iframe').count(), 0);
   assert.equal(await app.evaluate(async ({net}, url) => (await net.fetch(url)).status, previous), 404);
@@ -71,5 +80,5 @@ async function cli(args, env, expected = 0) {
   service.stdin.write(JSON.stringify({action:'disconnect'})+'\n');
   await page.waitForFunction(async ({id,entry}) => {try{await window.xuloom.invoke('files.htmlInfo',{session:id,path:entry});return false;}catch{return true;}}, {id,entry});
   assert.equal(await app.evaluate(async ({net}, url) => (await net.fetch(url)).status, open.url), 404);
-  console.log('Remote HTML App + formal CLI passed: real encrypted SSH, relative CSS/image/module/JSON, interaction, refresh, isolation, bounded binary CLI read, hidden resource denial, token revocation, disconnect without fallback and no model requests');
+  console.log('Remote HTML App + formal CLI passed: real encrypted SSH, relative CSS/image/module/JSON, interaction, refresh, isolation, bounded binary CLI read, hidden resource denial, token revocation, disconnect without fallback and PDF/DOCX/CSV previews over SSH without model requests');
 } catch (error) { console.error(diagnostic); throw error; } finally { if (app) await app.close().catch(() => {}); service.stdin.end(JSON.stringify({action:'stop'})+'\n'); } })().catch(error => { console.error(error); process.exitCode = 1; });

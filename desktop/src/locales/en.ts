@@ -2,6 +2,19 @@
 // placeholder filled with a value that is never translated. English may use plural forms:
 // "{count, plural, one {# file} other {# files}}". `npm run i18n:check` lists messages without an entry.
 export const english: Record<string, string> = {
+  "文档分区": "Document section",
+  "幻灯片 {number}": "Slide {number}",
+  "预览缩放": "Preview zoom",
+  "{current} / {total}": "{current} / {total}",
+  "内容预览，复杂版式、图表与公式样式可能与原文件不同。": "Content preview. Complex layouts, charts and formula formatting may differ from the original.",
+  "内容已分页，表格最多 100 列；超长单元格与段落会截断。": "Content is paginated with up to 100 table columns. Long cells and paragraphs are truncated.",
+  "正在渲染文件…": "Rendering file…",
+  "文档第 {number} 页": "Document page {number}",
+  "文档内嵌图片": "Embedded document image",
+  "此嵌入对象无法预览。": "This embedded object cannot be previewed.",
+  "文件没有可显示的内容。": "The file has no displayable content.",
+  "大小（字节）": "Size (bytes)",
+  "文件名": "File name",
   "任务已完成": "Task completed",
   "任务未完成，请回到会话查看结果": "The task did not complete. Open the conversation to see the result.",
   "启用 Windows 桌面操控": "Enable Windows Computer Use",

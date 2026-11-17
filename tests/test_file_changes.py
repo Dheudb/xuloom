@@ -37,6 +37,12 @@ class FileChangeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(recorder.record["files"][0]["added"], 0)
             self.assertEqual(preview_file(directory, "empty.txt", [])['content'], "")
 
+    def test_text_preview_handles_unicode_boms_and_chinese_csv(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for encoding in ("utf-16", "utf-32", "gb18030", "utf-8-sig"):
+                Path(directory, "data.csv").write_bytes("name,value\n样品,中文".encode(encoding))
+                self.assertEqual(preview_file(directory, "data.csv", [])["content"], "name,value\n样品,中文")
+
     def test_preview_reads_latest_disk_content_and_enforces_workspace_or_actual_changes(self):
         with tempfile.TemporaryDirectory() as directory:
             project = Path(directory) / "project"; project.mkdir()

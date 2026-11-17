@@ -294,6 +294,18 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.events = []
         self.bridge = DesktopBridge(self.events.append, self.root)
 
+    async def test_document_preview_rpc_is_read_only_without_initializing_a_model(self):
+        source = self.root / "data.json"
+        source.write_text('{"value": 7}', encoding="utf-8")
+        info = await self.bridge.dispatch("files.documentInfo", {"path": str(source)})
+        result = await self.bridge.dispatch("files.documentPage", {"path": str(source), "version": info["version"]})
+        self.assertEqual(result["kind"], "text")
+        self.assertIn('"value": 7', result["text"])
+        self.assertIsNone(self.bridge.engine)
+        source.write_text('{"value": 8}', encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "changed"):
+            await self.bridge.dispatch("files.documentPage", {"path": str(source), "version": info["version"]})
+
     async def test_initialization_does_not_require_model_or_create_engine(self):
         initial = await self.bridge.dispatch("initialize", {})
         self.assertEqual(initial["project"], str(self.root.resolve()))

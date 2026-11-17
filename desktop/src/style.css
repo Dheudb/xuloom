@@ -2179,3 +2179,23 @@ body.panel-resizing iframe { pointer-events: none; }
 }
 .form-section .computer-use-toggle { display: flex; align-items: center; gap: 8px; }
 .form-section .computer-use-toggle input { width: 14px; height: 14px; margin: 0; accent-color: var(--action); }
+
+.document-preview { min-width: 0; color: var(--text); }
+.document-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 4px 14px 12px; position: sticky; top: -12px; z-index: 2; background: var(--surface, var(--bg)); border-bottom: 1px solid var(--line); }
+.document-toolbar select { min-width: 0; max-width: min(100%, 220px); padding: 6px 9px; font-size: 12px; }
+.document-page-count { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--text-secondary); }
+.document-notice { margin: 10px 16px; font-size: 12px; line-height: 1.6; color: var(--text-muted); }
+.document-preview > [role=status], .document-preview > [role=alert] { margin: 16px; overflow-wrap: anywhere; }
+.document-content { min-width: 0; }
+.document-page-scroll { padding: 12px; overflow: auto; background: var(--bg-secondary, var(--line)); }
+.document-page-image { display: block; height: auto; max-width: none; background: white; box-shadow: 0 1px 7px #0002; }
+.document-paper { padding: 20px; line-height: 1.7; overflow-wrap: anywhere; }
+.document-paper > p { margin: 0 0 12px; white-space: pre-wrap; }
+.document-paper h3 { margin: 18px 0 12px; line-height: 1.4; }
+.document-paper > img { display: block; max-width: 100%; height: auto; margin: 14px auto; }
+.document-table-scroll { overflow: auto; max-width: 100%; }
+.document-table { border-collapse: collapse; font-size: 12px; min-width: 100%; }
+.document-table th, .document-table td { padding: 8px 12px; border: 1px solid var(--line); text-align: left; vertical-align: top; white-space: pre-wrap; overflow-wrap: anywhere; min-width: 52px; max-width: 360px; }
+.document-table th { background: var(--bg-secondary, var(--line)); font-weight: 500; }
+.document-table tbody tr:hover td { background: var(--hover, #8881); }
+.document-code { font: 12px/1.7 Consolas, monospace; margin: 0; padding: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }

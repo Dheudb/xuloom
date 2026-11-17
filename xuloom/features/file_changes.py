@@ -138,8 +138,18 @@ def preview_file(cwd, requested, known):
     with path.open("rb") as stream: data = stream.read(500_001)
     truncated = len(data) > 500_000
     data = data[:500_000]
-    if b"\0" in data: raise ValueError("此文件是二进制文件，暂不支持文本预览")
-    try: content = data.decode("utf-8-sig", errors="strict" if not truncated else "replace")
-    except UnicodeError: raise ValueError("此文件不是 UTF-8 文本，暂不支持预览")
+    errors = "replace" if truncated else "strict"
+    if data.startswith((b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff")):
+        content = data.decode("utf-32", errors=errors)
+    elif data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        content = data.decode("utf-16", errors=errors)
+    else:
+        if b"\0" in data: raise ValueError("此文件是二进制文件，暂不支持文本预览")
+        try: content = data.decode("utf-8-sig", errors=errors)
+        except UnicodeError:
+            if path.suffix.lower() not in {".txt", ".log", ".csv", ".tsv", ".md", ".xml", ".html", ".htm", ".json", ".yaml", ".yml", ".ini", ".cfg", ".conf", ".rst"}:
+                raise ValueError("此文件不是 UTF-8 文本，暂不支持预览") from None
+            try: content = data.decode("gb18030", errors=errors)
+            except UnicodeError: raise ValueError("无法识别此文本文件的编码") from None
     return {"path": str(path), "content": content, "truncated": truncated, "size": path.stat().st_size,
             "modifiedAt": int(path.stat().st_mtime * 1000)}

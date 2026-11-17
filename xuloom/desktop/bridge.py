@@ -907,6 +907,11 @@ class DesktopBridge:
             controlled = bool(raw.get("metadata", {}).get("delegation", {}).get("authority_required")) if isinstance(raw, dict) else False
             controlled_model = raw.get("metadata", {}).get("delegation", {}).get("remote_worker", {}).get("model_binding", {}).get("model") if controlled else None
             return {"steering": True, "pendingInputs": raw.get("metadata", {}).get("user_inbox", []) if isinstance(raw, dict) else [], "controlledExecution": controlled, "controlledModel": controlled_model, "project": str(self.cwd), "persistedId": sid, "executionMode": self.execution_mode, "collaborationMode": self.collaboration_mode, "permissionMode": self.approval_policy.mode, "config": self.config(), "capabilities": self.capabilities(), "sessions": self.sessions(), "history": self.history(messages, traces), "activity": activity, "workers": workers, "fileChanges": self.file_changes}
+        if method in {"files.documentInfo", "files.documentPage"}:
+            from xuloom.features.document_preview import inspect
+            return await asyncio.to_thread(inspect, self.cwd, params.get("path"), self.file_changes,
+                metadata=method == "files.documentInfo", expected_version=params.get("version"),
+                section=params.get("section", 0), offset=params.get("offset", 0), width=params.get("width", 1200))
         if method == "files.read":
             return preview_file(self.cwd, params.get("path"), self.file_changes)
         if method == "files.reference":

@@ -4,6 +4,16 @@
 
 ## [未发布]
 
+## [0.2.5] - 2026-11-17
+
+### 新增
+- 侧栏支持 PDF/SVG/XPS/电子书的逐页预览与缩放、TIFF/ICO/AVIF 图片，以及 DOCX/XLSX/PPTX 和 OpenDocument 的内容视图。
+- CSV/TSV 表格、JSON/XML 格式化文本、YAML、Notebook 保存内容、RTF 正文和 ZIP 目录预览支持分页。办公文档按工作表或幻灯片切换。
+- 本地与 SSH 使用相同的只读预览接口，按会话验证路径和文件版本，保留文本文件的源码及差异入口。
+
+### 修复
+- 文本预览支持带 BOM 的 UTF-16/UTF-32 及常见文本格式的 GB18030，避免中文表格被误判为二进制。
+
 ## [0.2.4] - 2026-11-16
 
 ### 新增
@@ -197,7 +207,8 @@
 - 引擎拆分为 `xuloom/core/engine_parts/` 下的多个 mixin，主循环拆成多个阶段方法。
 - 新增不可变的 `EngineConfig` 和顶层公开 API（`from xuloom import ...`）。
 
-[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.4...HEAD
+[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/Dheudb/xuloom/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/Dheudb/xuloom/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/Dheudb/xuloom/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/Dheudb/xuloom/compare/v0.2.1...v0.2.2
