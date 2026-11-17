@@ -3,6 +3,7 @@ import { ArrowUp, Square, X } from "lucide-react";
 import type { SessionView } from "./types";
 import Markdown from "./Markdown";
 import TurnProcess from "./TurnProcess";
+import GeneratedImages from "./GeneratedImages";
 import { InteractionCard } from "./Dialogs";
 import { t, tServer } from "./i18n";
 
@@ -25,6 +26,7 @@ export default function SideChat({ session, pending, close, update, send, stop, 
         <div className="markdown" data-quote-owner={session.id} data-quote-source={t("侧聊 · 消息 {number}", { number: index + 1 })}>
           {message.role === "user" ? <div className="user-prompt-text">{message.text}</div> : <Markdown text={message.text} sessionId={session.id} />}
         </div>
+        <GeneratedImages files={message.trace?.files} sessionId={session.id} />
       </article>)}
       {session?.interactions.map(interaction => <InteractionCard key={interaction.requestId} interaction={interaction}
         respond={(requestId, answer) => window.xuloom.invoke("respond", { session: session.id, requestId, answer }).catch(onError)} />)}

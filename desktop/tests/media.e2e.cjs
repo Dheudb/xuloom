@@ -136,7 +136,21 @@ async function preview(extension) {
   modelIds = Object.fromEntries(publicConfig[0].models.map(model => [model.kind, model.id]));
   await page.getByRole("button", { name: "关闭设置", exact: true }).click(); await page.locator(".new-task").click(); await page.locator(".session-item.active").waitFor();
   await page.getByLabel("访问权限", { exact: true }).selectOption("full"); await page.waitForFunction(() => !document.querySelector(".permission-picker")?.disabled);
-  await run("image"); let region = await preview("png"); await region.getByAltText("文件图片预览", { exact: true }).waitFor();
+  await run("image");
+  const generated = page.locator('.message.assistant .generated-images .markdown-image');
+  assert.equal(await generated.count(), 1, 'A downloaded generated image must appear in the chat even when the model only returns plain text');
+  await page.waitForFunction(() => document.querySelector('.generated-images img')?.naturalWidth === 96);
+  const beforePreview = { posts: posts.length, chat: chatRequests.length };
+  await generated.click();
+  const pictureDialog = page.getByRole('dialog', { name: '图片附件预览', exact: true });
+  await pictureDialog.waitFor();
+  assert.equal(await pictureDialog.locator('img').evaluate(image => image.naturalWidth), 96);
+  await page.keyboard.press('Escape'); await pictureDialog.waitFor({ state: 'detached' });
+  assert.equal(posts.length, beforePreview.posts); assert.equal(chatRequests.length, beforePreview.chat);
+  const native = await app.evaluate(async ({ BrowserWindow }) =>
+    (await BrowserWindow.getAllWindows()[0].webContents.capturePage(undefined, { stayHidden: true, stayAwake: true })).toDataURL());
+  fs.writeFileSync(path.join(root, 'test-results/media-inline.png'), Buffer.from(native.split(',')[1], 'base64'));
+  let region = await preview("png"); await region.getByAltText("文件图片预览", { exact: true }).waitFor();
   await page.waitForFunction(() => document.querySelector('.media-preview img')?.naturalWidth > 0);
   await page.getByRole("button", { name: "关闭文件预览", exact: true }).click();
   await run("speech"); region = await preview("wav"); await region.getByLabel("音频预览", { exact: true }).waitFor();
@@ -180,6 +194,8 @@ async function preview(extension) {
   await page.waitForFunction(() => !document.querySelector('.send-button.stop'));
   assert.equal(chatRequests.length, callsBeforeCancel); assert.equal(await page.getByRole('alert').count(), 0, 'Confirmed cancellation is a successful control, not a generated artifact or tool error');
   await app.close(); app = null; await launch(); await page.locator(".session-item.active").waitFor();
+  await page.waitForFunction(() => [...document.querySelectorAll('.generated-images img')].some(image => image.naturalWidth === 96));
+  assert.equal(posts.length, 5, 'Restoring inline images must only read saved files, not generate again');
   await settings(); await page.getByText("此会话已保存的生成任务", { exact: true }).waitFor();
   assert.equal(await page.locator(".media-job-history details").count(), 5); assert.equal(posts.length, 5);
   assert(!(await page.locator("body").innerText()).includes("MEDIA_FIXTURE_KEY"));

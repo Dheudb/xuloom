@@ -140,6 +140,9 @@ a, .markdown-link, .inline-file-link { color: var(--link); text-decoration-color
 .tool-image-error { margin-left: 22px; color: var(--danger); font-size: 12px; }
 .markdown-image { display: inline-block; max-width: 100%; padding: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--surface); vertical-align: middle; cursor: zoom-in; }
 .markdown-image img { display: block; max-width: 100%; max-height: 420px; width: auto; object-fit: contain; }
+.generated-images { display: flex; flex-wrap: wrap; gap: 12px; margin: 12px 0; }
+.generated-images .markdown-image { max-width: min(100%, 240px); }
+.generated-images .markdown-image img { max-height: 240px; }
 .composer-area { padding: 14px 32px 15px; background: linear-gradient(0deg, var(--canvas) 86%, transparent); }
 .composer { max-width: var(--chat-width); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-composer); background: var(--surface); }
 .composer:focus-within { border-color: var(--line-strong); box-shadow: 0 8px 32px #203c500d; }

@@ -57,6 +57,7 @@ import SelectionActions from "./SelectionActions";
 import SideChat from "./SideChat";
 import { quoteDraft, type QuotedSelection } from "./quoted-selection";
 import FileChanges, { relativeFile } from "./FileChanges";
+import GeneratedImages from "./GeneratedImages";
 import FilePreview from "./FilePreview";
 import { clampPanelWidth, clampSidebarWidth, defaultSidebarWidth, DEFAULT_PANEL_WIDTH } from "./panel-width";
 import useConversationScroll from "./useConversationScroll";
@@ -832,6 +833,7 @@ export default function App() {
                       ) : null}
                     </div>
                     {!!message.attachments?.length && <Attachments items={message.attachments} open={openAttachment} remote={!!active?.remote} />}
+                    <GeneratedImages files={message.trace?.files} sessionId={activeId} />
                     {!!message.trace?.files?.length && <FileChanges files={message.trace.files} project={active.project} onOpen={openFile}
                       onUndo={!active.busy && !runningWorkers && !runningCommands ? async (file) => {
                         await window.xuloom.invoke("files.undo", { session: active.id, revisionId: file.revisionId, confirm: true });

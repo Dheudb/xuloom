@@ -1868,6 +1868,7 @@ export const english: Record<string, string> = {
   "项目：": "Project: ",
   "项过程": "steps",
   "领先": "ahead",
+  "生成的图片": "Generated images",
   "首个文本": "first text",
   "默认工作目录必须是完整的绝对路径": "The default working folder must be a full absolute path",
   "（分支）": " (branch)",

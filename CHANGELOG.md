@@ -4,6 +4,11 @@
 
 ## [未发布]
 
+## [0.2.10] - 2026-11-17
+
+### 修复
+- 已下载的生成图片直接显示在主对话和侧聊中，点击缩略图放大；重启后复用本地文件，不重复生成。沿用会话文件读取权限，不增加默认 Prompt、依赖或模型请求。
+
 ## [0.2.9] - 2026-11-17
 
 ### 修复
@@ -247,7 +252,8 @@
 - 引擎拆分为 `xuloom/core/engine_parts/` 下的多个 mixin，主循环拆成多个阶段方法。
 - 新增不可变的 `EngineConfig` 和顶层公开 API（`from xuloom import ...`）。
 
-[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.9...HEAD
+[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.10...HEAD
+[0.2.10]: https://github.com/Dheudb/xuloom/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/Dheudb/xuloom/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/Dheudb/xuloom/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/Dheudb/xuloom/compare/v0.2.6...v0.2.7
