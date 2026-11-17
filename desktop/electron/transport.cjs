@@ -77,7 +77,7 @@ class EngineTransport {
     if (this.closed) return Promise.reject(new Error("Engine is closed"));
     return new Promise((resolve, reject) => {
       const id = ++this.sequence;
-      const timer = ["attachments.import", "attachments.download"].includes(method) ? undefined : setTimeout(
+      const timer = ["attachments.import", "attachments.download", "maintenance.backup", "maintenance.inspect"].includes(method) ? undefined : setTimeout(
         () => {
           this.pending.delete(id);
           reject(new Error("请求超时：" + method));
