@@ -229,7 +229,7 @@ class ContextManagementMixin(EngineState):
         if meter is not None and usage.get("replayed"):
             pass  # answered from a recording: nothing was spent
         elif meter is not None:
-            cost = meter.record(usage.get("model"), usage)
+            cost = meter.record(usage.get("model"), usage, connection=self.tool_context.get("pricing_connection_id"))
             if cost is None:
                 self.session_cost["unpriced_requests"] = int(self.session_cost.get("unpriced_requests", 0) or 0) + 1
             else:
@@ -258,7 +258,7 @@ class ContextManagementMixin(EngineState):
 
     def _auxiliary_cost_check(self, model):
         meter = getattr(self, "cost_meter", None)
-        reason = meter.blocked_reason(model) if meter is not None else None
+        reason = meter.blocked_reason(model, connection=self.tool_context.get("pricing_connection_id")) if meter is not None else None
         if reason:
             from xuloom.observability.cost import CostLimitError
             raise CostLimitError(reason)
@@ -271,7 +271,7 @@ class ContextManagementMixin(EngineState):
             raise ReplayMissError("XULOOM_VCR_MODE=replay: native compaction cannot be recorded or replayed, "
                                   "so none was sent; no live request is made in strict replay")
         meter = getattr(self, "cost_meter", None)
-        reason = meter.blocked_reason(model) if meter is not None else None
+        reason = meter.blocked_reason(model, connection=self.tool_context.get("pricing_connection_id")) if meter is not None else None
         if reason:
             from xuloom.observability.cost import CostLimitError
             raise CostLimitError(reason)

@@ -251,7 +251,7 @@ class TurnLoopMixin(EngineState):
                 # before any new reasoning request, using the existing inbox path.
                 if self.user_inbox or mailbox and mailbox():
                     continue
-                blocked = self.cost_meter.blocked_reason(loop_state.get("active_model"))
+                blocked = self.cost_meter.blocked_reason(loop_state.get("active_model"), connection=self.tool_context.get("pricing_connection_id"))
                 if blocked:
                     return await self._stop_for_cost(blocked, turn_count, event_callback)
                 await self._apply_layered_compaction_if_needed(sys_print_callback, event_callback=event_callback)
@@ -267,7 +267,7 @@ class TurnLoopMixin(EngineState):
                     )
                     self.persist_session_state()
                     return finish_run(self, "已达到已设置的输出 Token 预算，已有结果已保存。", 'budget_exhausted')
-                blocked = self.cost_meter.blocked_reason(loop_state.get("active_model"))
+                blocked = self.cost_meter.blocked_reason(loop_state.get("active_model"), connection=self.tool_context.get("pricing_connection_id"))
                 if blocked:  # compaction may have spent the rest of the budget
                     return await self._stop_for_cost(blocked, turn_count, event_callback)
                 request = await self._build_turn_request(

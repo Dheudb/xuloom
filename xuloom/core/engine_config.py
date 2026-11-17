@@ -63,7 +63,7 @@ def resolve_primary_model(provider: str, model: Optional[str], environ: Mapping[
         return candidate
     if provider == "openai":
         return environ.get("OPENAI_MODEL", "") or environ.get("XULOOM_OPENAI_MODEL", "") or ""
-    return environ.get("ANTHROPIC_MODEL", "") or environ.get("XULOOM_ANTHROPIC_MODEL", "") or ""
+    return environ.get(provider.upper() + "_MODEL", "") or environ.get("XULOOM_" + provider.upper() + "_MODEL", "") or ""
 
 
 def resolve_fallback_model(provider: str, fallback_model: Optional[str], primary_model: str,
@@ -73,7 +73,7 @@ def resolve_fallback_model(provider: str, fallback_model: Optional[str], primary
         return candidate
     if provider == "openai":
         return environ.get("OPENAI_FALLBACK_MODEL", "") or environ.get("XULOOM_OPENAI_FALLBACK_MODEL", "") or primary_model
-    return environ.get("ANTHROPIC_FALLBACK_MODEL", "") or primary_model
+    return environ.get(provider.upper() + "_FALLBACK_MODEL", "") or primary_model
 
 
 def environment_base_url(provider: str, environ: Mapping[str, str] = os.environ) -> str:
@@ -105,6 +105,8 @@ class EngineConfig:
     """Model retried when the primary model fails; defaults to the primary model."""
     network_mode: Optional[str] = None
     """``"auto"``, ``"direct"``, ``"system"`` or ``None`` for the configured default."""
+    model_connection_id: Optional[str] = None
+    """Saved connection ID used for connection-specific pricing (no credentials)."""
     model_contract: Optional[Mapping[str, Any]] = None
     """Exact capability contract of a saved connection (reasoning/search/inputs)."""
 

@@ -74,6 +74,8 @@ def sheets(text, suffix):
             delimiter = csv.Sniffer().sniff(text[:16000], delimiters=",;\t|").delimiter
         except csv.Error:
             pass
+    # Input bytes are already bounded by MAX_TEXT; allow a long quoted field.
+    csv.field_size_limit(max(csv.field_size_limit(), MAX_TEXT))
     rows = csv.reader(io.StringIO(text, newline=""), delimiter=delimiter)
     for index, row in enumerate(rows):
         if index >= 100000:

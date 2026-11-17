@@ -245,7 +245,7 @@ class DesktopBridge:
         config = public_config(cfg)
         provider = config["provider"]
         key = active_connection(cfg).get("api_key", "")
-        signature = (provider, config["model"], config["baseUrl"], key, config["networkMode"],
+        signature = (config["connectionId"], provider, config["model"], config["baseUrl"], key, config["networkMode"],
             json.dumps(config.get("modelReasoning", {}).get(config["model"]), sort_keys=True))
         if not force and signature == self.model_signature:
             return
@@ -255,6 +255,7 @@ class DesktopBridge:
             apply_connection_env(active_connection(cfg))
         previous_client, previous_compactor = engine.client, engine.compactor
         engine.switch_model_runtime(provider=provider, model=config["model"], api_base_url=config["baseUrl"], api_key=key, network_mode=config["networkMode"], persist=False)
+        engine.config = engine.config.replace(model_connection_id=config["connectionId"])
         engine.reasoning_profile = copy.deepcopy(config.get("modelReasoning", {}).get(config["model"]))
         engine._sync_model_runtime_context()
         if previous_client is not None:

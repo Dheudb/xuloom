@@ -2199,3 +2199,14 @@ body.panel-resizing iframe { pointer-events: none; }
 .document-table th { background: var(--bg-secondary, var(--line)); font-weight: 500; }
 .document-table tbody tr:hover td { background: var(--hover, #8881); }
 .document-code { font: 12px/1.7 Consolas, monospace; margin: 0; padding: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.maintenance-settings { max-width: 850px; line-height: 1.6; }
+.maintenance-settings h4 { margin: 24px 0 10px; }
+.maintenance-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.maintenance-confirm { display: grid; gap: 12px; margin-top: 16px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; }
+.cost-table { display: block; overflow-x: auto; }
+.cost-table select { min-width: 130px; max-width: 200px; }
+
+.maintenance-confirm label { display: flex !important; align-items: center; gap: 10px; }
+.maintenance-confirm input[type="checkbox"] { flex: 0 0 auto; width: 16px; height: 16px; margin: 0; }
+.maintenance-actions { margin: 8px 0; }

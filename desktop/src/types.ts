@@ -46,6 +46,7 @@ export type ReasoningProfile = {
   budgetTokens: number;
 };
 export type ModelConfig = {
+  adapters?: string[];
   modelSpecs?: Record<string, { window: number; maxOutput: number; transport: string; efforts: string[] }>;
   modelContext?: Record<string, { window: number; reserve: number; keepRecent: number; backend: "summary" | "openai-responses" }>;
   nativeSearch?: { backend: string; model: string; baseUrl: string };

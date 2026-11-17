@@ -29,3 +29,5 @@
 运行中补充要求、撤回与 CLI 输入流：[运行中追加指令](live-input.md)。
 
 完整 ZIP 的体积精简和依赖保留：[打包体积](packaging-size.md)。
+
+- [Local backup, restore, diagnostics and Windows updates](maintenance.md)

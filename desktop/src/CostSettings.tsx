@@ -4,10 +4,11 @@ import { t, tServer, tx } from "./i18n";
 
 type Price = { input: number; output: number; cache_write?: number; cache_read?: number };
 type Pricing = { models: Record<string, Price>; maxCostUsd: number | null; path: string; capFromEnvironment: boolean };
-type Row = { model: string; input: string; output: string; cacheRead: string; cacheWrite: string };
+type Row = { connection: string; model: string; input: string; output: string; cacheRead: string; cacheWrite: string };
 
 const toRows = (models: Record<string, Price>): Row[] => Object.entries(models).map(([model, price]) => ({
-  model, input: String(price.input), output: String(price.output),
+  connection: model.startsWith("@") ? model.slice(1, model.indexOf("/")) : "",
+  model: model.startsWith("@") ? model.slice(model.indexOf("/") + 1) : model, input: String(price.input), output: String(price.output),
   cacheRead: price.cache_read === undefined ? "" : String(price.cache_read),
   cacheWrite: price.cache_write === undefined ? "" : String(price.cache_write),
 }));
@@ -15,6 +16,8 @@ const toRows = (models: Record<string, Price>): Row[] => Object.entries(models).
 /** Model prices (USD per million tokens) and the per-task cost cap, kept in ~/.xuloom/pricing.json. */
 export default function CostSettings({ invoke }: { invoke: (method: string, params?: any) => Promise<any> }) {
   const [pricing, setPricing] = useState<Pricing>();
+  const [connections, setConnections] = useState<{connectionId: string; connectionName: string}[]>([]);
+  useEffect(() => { let live = true; invoke("config.get").then(value => { if (live) setConnections(value.connections || []); }).catch(() => {}); return () => { live = false; }; }, []);
   const [rows, setRows] = useState<Row[]>([]);
   const [cap, setCap] = useState("");
   const [error, setError] = useState("");
@@ -34,7 +37,8 @@ export default function CostSettings({ invoke }: { invoke: (method: string, para
     setError(""); setSaved(false);
     const models: Record<string, Price> = {};
     for (const row of rows) {
-      const name = row.model.trim();
+      const model = row.model.trim();
+      const name = row.connection && model ? "@" + row.connection + "/" + model : model;
       if (!name && !row.input && !row.output) continue;
       if (!name) return setError(t("请填写模型名称或通配符，例如 gpt-4.1 或 llama*。"));
       if (models[name]) return setError(t("模型 {name} 重复了。", { name }));
@@ -61,8 +65,13 @@ export default function CostSettings({ invoke }: { invoke: (method: string, para
     {!pricing && !error && <p role="status" className="fine-print">{t("正在读取…")}</p>}
     {pricing && <>
       <table className="cost-table" aria-label={t("模型价格")}>
-        <thead><tr><th>{t("模型或通配符")}</th><th>{t("输入")}</th><th>{t("输出")}</th><th>{t("缓存读取")}</th><th>{t("缓存写入")}</th><th /></tr></thead>
+        <thead><tr><th>{t("API 连接")}</th><th>{t("模型或通配符")}</th><th>{t("输入")}</th><th>{t("输出")}</th><th>{t("缓存读取")}</th><th>{t("缓存写入")}</th><th /></tr></thead>
         <tbody>{rows.map((row, index) => <tr key={index}>
+          <td><select aria-label={t("价格适用连接")} value={row.connection} onChange={e => update(index, { connection: e.target.value })}>
+            <option value="">{t("所有连接（默认价格）")}</option>
+            {connections.map(c => <option key={c.connectionId} value={c.connectionId}>{c.connectionName}</option>)}
+            {row.connection && !connections.some(c => c.connectionId === row.connection) && <option value={row.connection}>{row.connection}</option>}
+          </select></td>
           <td><input aria-label={t("模型名称")} value={row.model} placeholder="gpt-4.1" onChange={e => update(index, { model: e.target.value })} /></td>
           <td><input aria-label={t("输入价格")} inputMode="decimal" value={row.input} placeholder="2" onChange={e => update(index, { input: e.target.value })} /></td>
           <td><input aria-label={t("输出价格")} inputMode="decimal" value={row.output} placeholder="8" onChange={e => update(index, { output: e.target.value })} /></td>
@@ -71,7 +80,7 @@ export default function CostSettings({ invoke }: { invoke: (method: string, para
           <td><button aria-label={t("删除 {value}", { value: row.model || t("这一行") })} onClick={() => { setSaved(false); setRows(rows.filter((_, i) => i !== index)); }}><Trash2 size={15} /></button></td>
         </tr>)}</tbody>
       </table>
-      <button className="cost-add" onClick={() => { setSaved(false); setRows([...rows, { model: "", input: "", output: "", cacheRead: "", cacheWrite: "" }]); }}><Plus size={15} />{t("添加模型价格")}</button>
+      <button className="cost-add" onClick={() => { setSaved(false); setRows([...rows, { connection: "", model: "", input: "", output: "", cacheRead: "", cacheWrite: "" }]); }}><Plus size={15} />{t("添加模型价格")}</button>
       <label className="cost-cap">{t("每个任务的花费上限（美元）")}<input aria-label={t("任务花费上限")} inputMode="decimal" value={cap} placeholder={t("不限制")} onChange={e => { setSaved(false); setCap(e.target.value); }} />
       </label>
       <p className="fine-print">{t("这是停止条件，不是账单保证：达到上限后，任务不再发出新的模型请求，子代理计入同一个任务；已经发出的请求（包括并行子代理的请求）仍会完成并计费，所以最终花费可能超过上限。费用按这里填写的价格计算，以供应商账单为准。设置了上限时，没有价格的模型会被拒绝运行；本地模型请把价格填 0。")}</p>

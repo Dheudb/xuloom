@@ -433,7 +433,12 @@ function notifyFinished(id, body) {
   note.show();
   return true;
 }
+const maintenance = require("./maintenance.cjs").createMaintenance({ app, dialog, shell, dataRoot,
+  python: () => resolveEnginePython({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, projectRoot: path.resolve(__dirname, "../..") }),
+  rpc: (method, params) => globalConfig().request(method, params), isBusy: () => [...sessions.values()].some(running) });
 async function invoke(method, params) {
+  const maintained = await maintenance.handle(method);
+  if (maintained.handled) return maintained.value;
   if (method === "app.ready") { uiReady = true; deliverLinks(); return true; }
   if (method === "app.notify") return notifyFinished(params.session, params.body);
   const routed = await remote.handle(method, params);

@@ -58,7 +58,7 @@ class UsageAccountingMixin(EngineState):
         loop_state["turn_input_tokens"] = turn_record["input_tokens"]
         loop_state["turn_output_tokens"] = turn_record["output_tokens"]
         # Cost: replayed (VCR) responses cost nothing; estimated usage is still priced.
-        cost = 0.0 if replayed else self.cost_meter.record(turn_record["model"], turn_record)
+        cost = 0.0 if replayed else self.cost_meter.record(turn_record["model"], turn_record, connection=self.tool_context.get("pricing_connection_id"))
         turn_record["cost_usd"] = None if cost is None else round(cost, 8)
         if cost is None:
             self.session_cost["unpriced_requests"] = int(self.session_cost.get("unpriced_requests", 0) or 0) + 1

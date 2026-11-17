@@ -144,7 +144,7 @@ class OfficeArchive:
             elif local(node) == "tbl":
                 rows = [["\n".join("".join(item.text or "" for item in descendants(p, "t")) for p in descendants(cell, "p"))[:TEXT_LIMIT]
                     for cell in row if local(cell) == "tc"][:100] for row in node if local(row) == "tr"]
-                for start in range(0, min(len(rows), 200), 20):
+                for start in range(0, min(len(rows), MAX_BLOCKS * 20), 20):
                     blocks.append({"type": "table", "rows": [[cell[:200] for cell in row[:50]] for row in rows[start:start + 20]]})
             if len(blocks) >= MAX_BLOCKS:
                 break
@@ -243,7 +243,19 @@ def content(package, suffix, part, section, offset, limit):
     else:
         blocks = package.odf(suffix, section)
     if suffix == ".ods":
-        return {"kind": "table", "rows": [b["values"] for b in blocks[offset:offset + limit]], "total": len(blocks)}
+        rows = [b["values"] for b in blocks if b["type"] == "row"]
+        return {"kind": "table", "rows": rows[offset:offset + limit], "total": len(rows)}
+    if suffix in {".odt", ".odp"}:
+        normalized = []
+        for block in blocks:
+            if block["type"] == "row":
+                if normalized and normalized[-1]["type"] == "table" and len(normalized[-1]["rows"]) < 20:
+                    normalized[-1]["rows"].append(block["values"])
+                else:
+                    normalized.append({"type": "table", "rows": [block["values"]]})
+            else:
+                normalized.append(block)
+        blocks = normalized
     selected = blocks[offset:offset + limit]
     images = 0
     for block in selected:

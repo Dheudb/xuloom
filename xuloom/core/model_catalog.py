@@ -22,12 +22,28 @@ def model_ids(values):
     return result
 
 
+def adapter_options():
+    """Inspect explicitly enabled plugins without changing live adapter registrations."""
+    from xuloom.models.registry import adapter_names
+    from xuloom.plugins import default_plugin_names, load_plugins
+    names = set(adapter_names())
+    loaded = load_plugins(default_plugin_names(), strict=False, register_adapters=False)
+    try:
+        for plugin in loaded:
+            if plugin.ok:
+                names.update(adapter.name for adapter in plugin.api.adapters)
+        return sorted(names)
+    finally:
+        for plugin in reversed(loaded):
+            plugin.rollback_adapters()
+
+
 def connections(cfg, *, defaults=True):
     saved = cfg.get("model_connections") or []
     if not isinstance(saved, list):
         raise ValueError("model_connections 必须是数组")
     result = [dict(item, models=model_ids(item.get("models", []))) for item in saved
-              if isinstance(item, dict) and isinstance(item.get("id"), str) and item.get("provider") in {"openai", "anthropic"}]
+              if isinstance(item, dict) and isinstance(item.get("id"), str) and isinstance(item.get("provider"), str) and re.fullmatch(r"[a-z][a-z0-9_.-]{0,63}", item["provider"])]
     if result or "model_connections" in cfg:
         from xuloom.core.model_specs import with_defaults
         return [with_defaults(item) for item in result] if defaults else result
@@ -71,7 +87,7 @@ def public_connection(item):
 def public_config(cfg):
     from xuloom.security.credentials import storage_status
     active = active_connection(cfg)
-    return {**public_connection(active), "connections": [public_connection(item) for item in connections(cfg)],
+    return {**public_connection(active), "adapters": adapter_options(), "connections": [public_connection(item) for item in connections(cfg)],
             "credentialStorage": storage_status(cfg)}
 
 
@@ -143,8 +159,8 @@ def project_active(cfg, item, items):
 def save_connection(cfg, params):
     cfg = dict(cfg)
     provider = params.get("provider")
-    if provider not in {"openai", "anthropic"}:
-        raise ValueError("Unsupported protocol")
+    if provider not in {"openai", "anthropic"} and provider not in adapter_options():
+        raise ValueError("Enable the model adapter plugin before saving this protocol")
     model = str(params.get("model", "")).strip()
     if not model:
         raise ValueError("Model ID is required")

@@ -4,6 +4,19 @@
 
 ## [未发布]
 
+## [0.2.6] - 2026-11-17
+
+### 修复
+- ODT 表格显示、含图片 ODS 读取、Word 大表分页及 CSV 长单元格解析；预览上限明确提示。
+- 计价可按连接设置，同名模型不再只能共用价格；主模型、压缩及子代理共用任务预算。
+- 桌面可选择已启用插件提供的模型适配器，配置保留自定义协议，环境模型不会误用 Anthropic 默认值。
+- Ultra 能力文档与现有执行路径统一。
+
+### 新增
+- 按需维护入口与 CLI：数据备份、校验、退出后恢复、设置导入、只含允许字段的诊断导出。恢复保留旧数据，不自动重放任务；外部项目及扩展代码需另行保存。
+- Windows 完整 ZIP 校验更新与上一版本回退；用户从同一 Release 下载 ZIP 和 SHA256SUMS.txt，正常退出后替换原安装目录。尚无数字签名与后台自动下载。
+- 不新增模型提示词、默认监督模型或远端模型请求。
+
 ## [0.2.5] - 2026-11-17
 
 ### 新增
@@ -207,7 +220,8 @@
 - 引擎拆分为 `xuloom/core/engine_parts/` 下的多个 mixin，主循环拆成多个阶段方法。
 - 新增不可变的 `EngineConfig` 和顶层公开 API（`from xuloom import ...`）。
 
-[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.5...HEAD
+[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.6...HEAD
+[0.2.6]: https://github.com/Dheudb/xuloom/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/Dheudb/xuloom/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/Dheudb/xuloom/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/Dheudb/xuloom/compare/v0.2.2...v0.2.3

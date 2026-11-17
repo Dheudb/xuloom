@@ -11,6 +11,7 @@ import { ReasoningSettings } from "./ReasoningControls";
 import { ContextSettings } from "./ContextSettings";
 import TaskReadiness from './TaskReadiness';
 import CostSettings from "./CostSettings";
+import MaintenanceSettings from "./MaintenanceSettings";
 import { displayName, getLanguage, setLanguage, t, tServer, tx, untranslated, type Language } from "./i18n";
 import BuildDetails from './BuildDetails';
 import ComputerUseSettings from "./ComputerUseSettings";
@@ -181,13 +182,14 @@ export function SettingsDialog({
               const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
               buttons[event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (index + (event.key === "ArrowUp" ? -1 : 1) + buttons.length) % buttons.length]?.click();
             }}>
-            {[{ id: "readiness", label: t("任务准备"), icon: Check }, { id: "model", label: t("模型连接"), icon: KeyRound }, { id: "media", label: t("生成模型"), icon: ImagePlus }, { id: "cost", label: t("费用"), icon: Coins }, { id: "skills", label: "Skills", icon: Puzzle }, { id: "agents", label: "Subagents", icon: Bot }, { id: "mcp", label: t("MCP 服务"), icon: Plug }, { id: "remote", label: t("SSH 远程"), icon: Server }, { id: "workspace", label: t("工作区"), icon: FolderOpen }, { id: "archives", label: t("已归档会话"), icon: Archive }].filter(({ id }) => id !== "media" || mediaAvailable).map(({ id, label, icon: Icon }) =>
+            {[{ id: "readiness", label: t("任务准备"), icon: Check }, { id: "model", label: t("模型连接"), icon: KeyRound }, { id: "media", label: t("生成模型"), icon: ImagePlus }, { id: "cost", label: t("费用"), icon: Coins }, { id: "maintenance", label: t("备份与维护"), icon: Archive }, { id: "skills", label: "Skills", icon: Puzzle }, { id: "agents", label: "Subagents", icon: Bot }, { id: "mcp", label: t("MCP 服务"), icon: Plug }, { id: "remote", label: t("SSH 远程"), icon: Server }, { id: "workspace", label: t("工作区"), icon: FolderOpen }, { id: "archives", label: t("已归档会话"), icon: Archive }].filter(({ id }) => id !== "media" || mediaAvailable).map(({ id, label, icon: Icon }) =>
               <button key={id} role="tab" id={"settings-tab-" + id} aria-selected={tab === id} aria-controls={"settings-panel-" + id} tabIndex={tab === id ? 0 : -1}
                 onClick={(event) => { setTab(id); setError(""); event.currentTarget.focus(); }}><Icon size={16} />{label}</button>)}
           </nav>
           <div className={"settings-content" + (tab === "model" ? " model-settings-content" : "")}>
         {tab === 'readiness' && <div role="tabpanel" id="settings-panel-readiness" aria-labelledby="settings-tab-readiness"><TaskReadiness invoke={extensions?.invoke || ((method,params)=>window.xuloom.invoke(method,params))} /></div>}
         {tab === "media" && mediaAvailable && <div role="tabpanel" id="settings-panel-media" aria-labelledby="settings-tab-media"><MediaSettings invoke={extensions?.invoke || ((method, params) => window.xuloom.invoke(method, params))} busy={extensions?.busy} hasSession={!!extensions} control={mediaControl} /></div>}
+        {tab === "maintenance" && <div role="tabpanel" id="settings-panel-maintenance" aria-labelledby="settings-tab-maintenance"><MaintenanceSettings /></div>}
         {tab === "cost" && <div role="tabpanel" id="settings-panel-cost" aria-labelledby="settings-tab-cost"><CostSettings invoke={(method, params) => window.xuloom.invoke(method, params)} /></div>}
         {tab === "remote" && <div role="tabpanel" id="settings-panel-remote" aria-labelledby="settings-tab-remote"><RemoteSettings navigationAction={workspaceAction} open={async (id, sessionId) => { await workspaceAction("remote.open", { id, sessionId }); close(); }} /></div>}
         {["skills", "agents", "mcp"].includes(tab) && <div role="tabpanel" id={"settings-panel-" + tab} aria-labelledby={"settings-tab-" + tab}>
@@ -249,6 +251,7 @@ export function SettingsDialog({
             >
               <option value="openai">{t("OpenAI 兼容")}</option>
               <option value="anthropic">Anthropic</option>
+              {[...new Set([...(config.adapters || []), form.provider])].filter(name => !["openai", "anthropic"].includes(name)).map(name => <option key={name} value={name}>{name}</option>)}
             </select>
           </label>
 </div>
@@ -288,7 +291,7 @@ export function SettingsDialog({
           <div role="group" aria-label={t("已配置模型")} className="configured-models">{modelNames.map(name => <button key={name} aria-pressed={form.model === name} onClick={() => setForm({ ...form, model: name })}>{name}{form.model === name && <Check size={14} />}</button>)}</div>
           <label>{t("模型列表（每行一个）")}<textarea aria-label={t("可选模型列表")} rows={3} value={modelsText} placeholder="model-a\nmodel-b\nmodel-c" onChange={(event) => setModelsText(event.target.value)} />
           </label>
-          <div className="model-discovery-actions"><button disabled={discovering || saving} onClick={async () => {
+          <div className="model-discovery-actions"><button disabled={discovering || saving || !["openai", "anthropic"].includes(form.provider)} onClick={async () => {
             setDiscovering(true); setDiscoveryStatus(""); setError("");
             try {
               const value = await discoverModels(form);

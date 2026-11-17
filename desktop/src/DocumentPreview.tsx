@@ -70,7 +70,7 @@ export default function DocumentPreview({ sessionId, path, revision, onOpen }: {
         {[50, 75, 100, 125, 150, 200].map(value => <option key={value} value={value}>{value}%</option>)}
       </select>}
     </div>}
-    {info?.kind === "office" && <p className="document-notice">{t("内容预览，复杂版式、图表与公式样式可能与原文件不同。")}</p>}
+    {info?.kind === "office" && <p className="document-notice">{t("内容预览，复杂版式、图表与公式可能不同；长文本、超宽表格和超大文档有预览上限。ODS 内嵌图片不在表格中显示，完整内容请打开原文件。")}</p>}
     {page && !paged && info?.kind !== "office" && <p className="document-notice">{t("内容已分页，表格最多 100 列；超长单元格与段落会截断。")}</p>}
     {loading && <p role="status">{t("正在渲染文件…")}</p>}
     {error && <p role="alert" className="error">{tServer(error)}</p>}

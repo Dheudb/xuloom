@@ -553,7 +553,8 @@ class QueryEngine(
             for message in self.messages: message.pop("_responses_output", None)
         self.config = self.config.replace(
             model_provider=next_provider, model=next_model, api_base_url=next_base, api_key=next_key,
-            network_mode=next_network, fallback_model=next_fallback, model_contract=None, reasoning_effort=None)
+            network_mode=next_network, fallback_model=next_fallback, model_contract=None, reasoning_effort=None,
+            model_connection_id=None if route_changed else self.config.model_connection_id)
         self._sync_model_runtime_context()
         if persist:
             self.persist_session_state()
@@ -585,6 +586,8 @@ class QueryEngine(
         self.tool_context["thinking_config_explicit"] = self._thinking_config_explicit
         # Internal callable only: never place credentials into serializable
         # tool descriptions, worker records or checkpoint metadata.
+        from xuloom.observability.cost import runtime_connection
+        self.tool_context["pricing_connection_id"] = runtime_connection(self)
         self.tool_context["model_client_options"] = lambda: {"api_key": self._api_key, "network_mode": self.network_mode}
         self.tool_context["model_input_contract"] = self._input_contract
         from xuloom.tools.native_search import configured, normalize

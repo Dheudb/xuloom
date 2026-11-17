@@ -105,7 +105,12 @@ def load_config_into_env():
     if cfg.get("model_connections"):
         from xuloom.core.model_catalog import active_connection, connections, project_active
         cfg = project_active(dict(cfg), active_connection(cfg), connections(cfg))
-    for cfg_key, env_key in _PERSISTED_KEYS.items():
+    persisted = dict(_PERSISTED_KEYS)
+    provider = cfg.get("model_provider", "")
+    if provider and provider not in {"openai", "anthropic"}:
+        for suffix in ("model", "base_url", "api_key"):
+            persisted[provider + "_" + suffix] = provider.upper() + "_" + suffix.upper()
+    for cfg_key, env_key in persisted.items():
         val = cfg.get(cfg_key, "")
         if val and not os.environ.get(env_key):
             if cfg_key.endswith("_api_key"):

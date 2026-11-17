@@ -129,6 +129,31 @@ def _parse_models(path, raw) -> Dict[str, ModelPrice]:
         raise ValueError(f"{path}: {error}") from error
 
 
+def scoped_model(connection, model):
+    """A backwards-compatible pricing key; connection IDs contain no slashes."""
+    return f"@{connection}/{model}" if connection else model
+
+
+def runtime_connection(engine):
+    """Resolve once when a runtime is configured; never infer from model name alone."""
+    explicit = engine.config.model_connection_id
+    if explicit:
+        return explicit
+    from xuloom.core.config import load_config
+    from xuloom.core.model_catalog import connections
+    try:
+        cfg = load_config()
+        matches = [row for row in connections(cfg, defaults=False)
+                   if row["provider"] == engine.model_provider
+                   and (row.get("base_url") or "").rstrip("/") == (engine.api_base_url or "").rstrip("/")
+                   and row.get("api_key") == engine._api_key and engine.primary_model in row.get("models", [])]
+        if len(matches) == 1:
+            return matches[0]["id"]
+        return next((row["id"] for row in matches if row["id"] == cfg.get("active_model_connection")), None)
+    except (OSError, ValueError):
+        return None
+
+
 class CostMeter:
     """Prices requests and enforces the task cap. Subagents share their parent's meter."""
 
@@ -140,14 +165,22 @@ class CostMeter:
         self.task_usd = 0.0
         self.task_unpriced = 0
 
-    def price_for(self, model: Optional[str]) -> Optional[ModelPrice]:
+    def price_for(self, model: Optional[str], *, connection: Optional[str] = None) -> Optional[ModelPrice]:
         name = str(model or "")
         if not name:
             return None
+        if connection:
+            scoped = scoped_model(connection, name)
+            if scoped in self.prices:
+                return self.prices[scoped]
+            prefix = "@" + connection + "/"
+            for pattern, price in self.prices.items():
+                if pattern.startswith(prefix) and fnmatch.fnmatchcase(name, pattern[len(prefix):]):
+                    return price
         if name in self.prices:
             return self.prices[name]
         for pattern, price in self.prices.items():
-            if any(char in pattern for char in "*?[") and fnmatch.fnmatchcase(name, pattern):
+            if not pattern.startswith("@") and any(char in pattern for char in "*?[") and fnmatch.fnmatchcase(name, pattern):
                 return price
         return None
 
@@ -155,9 +188,9 @@ class CostMeter:
         self.task_usd = 0.0
         self.task_unpriced = 0
 
-    def record(self, model: Optional[str], usage: Mapping[str, Any]) -> Optional[float]:
+    def record(self, model: Optional[str], usage: Mapping[str, Any], *, connection: Optional[str] = None) -> Optional[float]:
         """Add one request to the task total; returns its cost or ``None`` when the model has no price."""
-        price = self.price_for(model)
+        price = self.price_for(model, connection=connection)
         if price is None:
             self.task_unpriced += 1
             return None
@@ -165,14 +198,14 @@ class CostMeter:
         self.task_usd += cost
         return cost
 
-    def blocked_reason(self, model: Optional[str]) -> Optional[str]:
+    def blocked_reason(self, model: Optional[str], *, connection: Optional[str] = None) -> Optional[str]:
         """Why the next request to ``model`` must not start, or ``None``."""
         if self.limit_usd is None:
             return None
         if self.task_usd >= self.limit_usd:
             return (f"Task cost limit reached: ${self.task_usd:.4f} spent of ${self.limit_usd:.4f}. "
                     "Raise max_cost_usd (XULOOM_MAX_COST_USD) or continue in a new task.")
-        if self.price_for(model) is None:
+        if self.price_for(model, connection=connection) is None:
             return (f"A task cost limit is set but model {model!r} has no price, so its cost cannot be limited. "
                     "Add it to ~/.xuloom/pricing.json or EngineConfig.model_prices.")
         if self.task_unpriced:

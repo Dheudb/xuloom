@@ -59,6 +59,8 @@ class SessionLock:
         if self.handle is not None:
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        if self.identity != "maintenance" and SessionLock(self.path.parent, "maintenance").locked() is not False:
+            raise SessionBusyError("Local data maintenance is in progress; try again after it finishes.")
         handle = self.path.open("a+b")
         try:
             if self.path.stat().st_size == 0:
@@ -75,6 +77,9 @@ class SessionLock:
             handle.close()
             raise SessionBusyError("Session is in use by another writer. Viewing is allowed; close or release the existing writer before continuing.") from None
         self.handle = handle
+        if self.identity != "maintenance" and SessionLock(self.path.parent, "maintenance").locked() is not False:
+            self.close()
+            raise SessionBusyError("Local data maintenance is in progress; try again after it finishes.")
         try:
             # Append mode is needed only for safe creation; write metadata through a separate descriptor
             # while the locked byte and its inode are retained.

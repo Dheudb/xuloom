@@ -279,6 +279,7 @@ class AgentTool(AgentLifecycle, BaseAgenticTool):
             reasoning_effort=(builtin_agent_def or {}).get("reasoning_effort") or (self.context.get("reasoning_effort") if same_model else None),
             collaboration_mode="solo",
             execution_mode=getattr(self.context.get("execution_sandbox"), "mode", "host"),
+            model_connection_id=connection_binding["connection_id"] if connection_binding is not None else self.context.get("pricing_connection_id"),
             model_contract=connection_binding["contract"] if connection_binding is not None else inherited_contract,
             plugins=self.context.get("plugin_specs", ()),
             bundled_plugins=False,  # inherit exactly the parent's loaded plugins

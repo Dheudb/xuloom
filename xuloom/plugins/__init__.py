@@ -35,7 +35,7 @@ __all__ = ["PluginAPI", "RpcContext", "LoadedPlugin", "PluginError", "load_plugi
 
 ENTRY_POINT_GROUP = "xuloom.plugins"
 #: Plugins shipped with Xuloom. Sensitive capabilities can require opt-in.
-BUNDLED_PLUGINS = {"media": "xuloom.media.plugin", "computer-use": "xuloom.computer_use.plugin"}
+BUNDLED_PLUGINS = {"media": "xuloom.media.plugin", "computer-use": "xuloom.computer_use.plugin", "maintenance": "xuloom.maintenance.plugin"}
 _OPT_IN_BUNDLED = frozenset({"computer-use"})
 _NAME = re.compile(r"[a-z][a-z0-9_-]{0,63}")
 _logger = logging.getLogger("xuloom.plugins")
@@ -336,7 +336,7 @@ def _register(target, name: str) -> PluginAPI:
     return api
 
 
-def load_plugins(specs: Iterable[Any], *, home: Optional[Path] = None, strict: bool = True) -> List[LoadedPlugin]:
+def load_plugins(specs: Iterable[Any], *, home: Optional[Path] = None, strict: bool = True, register_adapters: bool = True) -> List[LoadedPlugin]:
     """Load plugins from objects, modules, callables or enabled names.
 
     ``strict`` raises the first failure; otherwise failures are returned with
@@ -357,7 +357,7 @@ def load_plugins(specs: Iterable[Any], *, home: Optional[Path] = None, strict: b
                     raise PluginError(f"Invalid plugin name: {spec!r}")
                 target, source = _resolve_name(spec, home)
             api = _register(target, name)
-            snapshot = api._commit_adapters()
+            snapshot = api._commit_adapters() if register_adapters else {}
             loaded.append(LoadedPlugin(name, source, spec, api, adapter_snapshot=snapshot))
         except Exception as error:
             if strict:
