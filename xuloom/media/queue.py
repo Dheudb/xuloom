@@ -27,7 +27,10 @@ def download_url(binding, url):
     trusted = {origin(binding["base_url"]), *(origin(item) for item in binding["download_origins"])}
     fal_cdn = candidate[0] == "https" and candidate[2] == 443 and (host == "fal.media" or host.endswith(".fal.media") or host == "storage.googleapis.com")
     openai_cdn = candidate[0] == "https" and candidate[2] == 443 and host.endswith(".blob.core.windows.net")
-    if candidate not in trusted and not fal_cdn and not openai_cdn:
+    from xuloom.media.minimax import HOSTS
+    minimax_cdn = (urlsplit(binding["base_url"]).hostname in HOSTS and candidate[0] == "https" and candidate[2] == 443
+        and host in {"cdn.hailuoai.com", "filecdn.minimax.chat", "filecdn.minimax.io"})
+    if candidate not in trusted and not fal_cdn and not openai_cdn and not minimax_cdn:
         raise ValueError("Media download host is not authorized; add its origin to this connection explicitly")
     return url
 

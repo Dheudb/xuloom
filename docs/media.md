@@ -13,6 +13,7 @@
 | 标准 Images 接口 | 根地址自动拼接 `/images/generations`；有参考图时使用 `/images/edits`，自动处理 multipart；接受 Base64 或 URL 图片 |
 | 标准 Audio Speech 接口 | 自动拼接 `/audio/speech`；文字、音色、语速由适配器转换，接收实际音频字节 |
 | 标准 Videos 接口 | 自动使用 `/videos` 的 multipart 提交、任务查询及 `/content` 下载，不将删除视频当作取消生成 |
+| MiniMax 原生接口 | 自动识别官方根地址、`/v2/video_generation` 与 `/v1/t2a_v2`；H3 视频按任务 ID 查询，语音 hex 解码后保存为 WAV |
 | fal Queue 及同协议服务 | 使用填写的模型名作为 endpoint，读取公开模型 schema 后映射字段、默认值和限制；已有显式配置继续兼容 |
 | 已适配的音频接口 | 支持 `/sound-generation` 音效、`/music` 音乐、`/text-to-speech` 语音；自动转换音频鉴权和参数；需要音色时读取该服务可用声音 |
 
@@ -21,6 +22,16 @@
 **自动处理不等于所有互联网 API 都天然兼容。** 除已适配的标准及服务接口，未知专有协议仍需框架增加适配。普通聊天地址不会自动变成图像／视频模型。无法识别的音效、音乐接口会在生成前提示；不会依次向多个路径提交付费任务来猜测协议。自建兼容服务可公开 `/openapi.json` 帮助自动识别。公开 schema 读取不携带 Key、不跟随跨域重定向，也不会执行 schema 中的远程引用。
 
 fal 官方队列从公开 schema 自动读取所填写模型的字段。模型要求框架尚未覆盖的必填输入时会明确拒绝，不要求用户在设置中写 JSON，不虚构默认值。音效、音乐和语音是不同用途，可共用服务和 Key；同一地址与 Key 自动复用内部存储，界面始终以模型为入口。修改一个模型的地址、名称或 Key 不会改掉同组其他模型。
+
+## MiniMax 视频和语音
+
+官方中国区填写 `https://api.minimax.cn`（或对应完整生成接口）、Key、模型名即可。H3 视频当前支持 `MiniMax-H3`、`MiniMax-H3-Highspeed`、`MiniMax-H3-Lite`、`MiniMax-H3-Max`，不把旧 Hailuo 接口当成 H3。使用 768P，默认 5 秒、16:9；通过已有工具参数可指定时长和常用宽高比，最多上传四张本地参考图片。Max 最短 5 秒，其余最短 4 秒，最长 15 秒；2K 和视频／音频参考输入暂未接入。
+
+同步语音采用 `/v1/t2a_v2`，一次最多 10000 字符。框架选择官方系统音色 `Chinese (Mandarin)_Lyrical_Voice`，可通过已有 `voice` 覆盖；语速支持 0.5–2。完整响应先落盘，再解码和校验 WAV；保存失败可继续原任务，不再生成。HTTP 200 中的服务错误码也按失败处理，错误正文不回显。
+
+视频查询不重新提交，也不会把供应商完成等同于本地保存成功。MiniMax 的 DELETE 对排队任务表示取消、对完成任务却表示删除；接口没有条件取消，查询与删除之间存在竞态。因此这里不发送 DELETE 来模拟取消，明确提示用户检查供应商；停止本地等待仍不会停止远端生成。
+
+这是视频与语音的适配，不包含音色复刻、音色设计、MiniMax 音乐或音效。订阅 Key 的模型权限由套餐决定；保存配置不代表账户已获全部权限。实现依据：[视频创建](https://platform.minimax.cn/docs/api-reference/video-generation-v2-create)、[任务查询](https://platform.minimax.cn/docs/api-reference/video-generation-v2-query)、[取消语义](https://platform.minimax.cn/docs/api-reference/video-generation-v2-delete)、[同步语音](https://platform.minimax.cn/docs/api-reference/speech-t2a-http)。
 
 ## 配置与凭据
 

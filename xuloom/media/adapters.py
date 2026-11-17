@@ -12,7 +12,7 @@ import httpx
 
 from xuloom.media import queue
 
-PROTOCOLS = ("fal-queue", "openai-media", "eleven-audio")
+PROTOCOLS = ("fal-queue", "openai-media", "eleven-audio", "minimax-media")
 
 
 async def public_schema(binding, url):
@@ -52,6 +52,9 @@ async def json_request(binding, key, method, url, *, protocol, payload=None, mul
 async def request(binding, key, method, url, *, protocol, payload=None, multipart=False,
                   maximum=256 * 1024 * 1024, uploads=None):
     root, _ = api_root(binding["base_url"])
+    if protocol == "minimax-media":
+        from xuloom.media.minimax import root as minimax_root
+        root = minimax_root(binding)
     scope = {**binding, "base_url": root}
     queue.queue_url(scope, url)
     headers = {"xi-api-key": key} if protocol == "eleven-audio" else {"Authorization": "Bearer " + key}
@@ -73,6 +76,9 @@ async def request(binding, key, method, url, *, protocol, payload=None, multipar
 async def detect(binding):
     if binding["protocol"] != "auto":
         return binding["protocol"], None
+    from xuloom.media import minimax
+    if minimax.matches(binding):
+        return "minimax-media", None
     url = binding["base_url"]
     host = urlsplit(url).hostname.lower()
     root, suffix = api_root(url)
@@ -139,6 +145,9 @@ def endpoint(binding, protocol, *, edit=False):
 
 async def prepare(binding, key, protocol, prompt, values, images):
     values = options(values)
+    if protocol == "minimax-media":
+        from xuloom.media import minimax
+        return minimax.prepare(binding, prompt, values, images)
     kind = binding["model"]["kind"]
     model = binding["model"]["model"]
     url = endpoint(binding, protocol, edit=bool(images))

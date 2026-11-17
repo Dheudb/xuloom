@@ -4,6 +4,16 @@
 
 ## [未发布]
 
+## [0.2.7] - 2026-11-17
+
+### 新增
+- MiniMax 原生 H3 视频与同步语音适配：仍只需填写 API、Key 和模型；沿用媒体任务回执与 CLI／桌面接口，不增加 Prompt 或依赖。
+- 视频只提交一次、按原任务查询并下载；语音完整 hex 响应保存后解码 WAV，可在本地保存失败后继续。
+- 明确当前 768P、参考图片、语音长度和安全取消边界；未自动开通供应商权限或发起真实生成。
+
+### 修复
+- 明确的 HTTP 402 拒绝不再标为提交结果未知；HTTP 200 的 MiniMax 错误码也不会显示生成成功。
+
 ## [0.2.6] - 2026-11-17
 
 ### 修复
@@ -220,7 +230,8 @@
 - 引擎拆分为 `xuloom/core/engine_parts/` 下的多个 mixin，主循环拆成多个阶段方法。
 - 新增不可变的 `EngineConfig` 和顶层公开 API（`from xuloom import ...`）。
 
-[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.6...HEAD
+[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.7...HEAD
+[0.2.7]: https://github.com/Dheudb/xuloom/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/Dheudb/xuloom/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/Dheudb/xuloom/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/Dheudb/xuloom/compare/v0.2.3...v0.2.4

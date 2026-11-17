@@ -200,7 +200,7 @@ class MediaTool(BaseAgenticTool):
                 if record["phase"] in {"downloaded", "failed", "cancelled"}:
                     return self._response(record, cancel=action == "cancel")
                 binding, key = config.resolve(record["connection_id"], record["model_id"], frozen=record["binding"])
-                if record.get("adapter") in {"openai-media", "eleven-audio"}:
+                if record.get("adapter") in {"openai-media", "eleven-audio", "minimax-media"}:
                     return await generation.inspect(self, record, key, action, wait_ms)
                 if not all(record.get(field) for field in ("request_id", "status_url", "response_url", "cancel_url")):
                     record.update(phase="unknown", error="Submission outcome is unknown; no new POST was made. Inspect this task with the provider before any new generation.")
@@ -265,7 +265,7 @@ class MediaTool(BaseAgenticTool):
             if record:
                 phase = record["phase"]
                 if phase == "submitting":
-                    rejected = isinstance(error, httpx.HTTPStatusError) and error.response.status_code in {400, 401, 403, 404, 422, 429}
+                    rejected = isinstance(error, httpx.HTTPStatusError) and error.response.status_code in {400, 401, 402, 403, 404, 422, 429}
                     record["phase"] = "failed" if rejected else "unknown"
                 elif phase in {"downloading", "download_failed"}:
                     record["phase"] = "download_failed"

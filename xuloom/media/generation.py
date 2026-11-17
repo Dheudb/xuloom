@@ -32,6 +32,9 @@ def response_bytes(tool, record):
 
 async def finish(tool, record):
     source, body = response_bytes(tool, record)
+    if record.get("adapter") == "minimax-media" and record["kind"] == "speech":
+        from xuloom.media.minimax import finish_speech
+        return await finish_speech(tool, record, body)
     binding, completed = record["binding"], []
     kind, mime = binding["model"]["kind"], record["response_mime"]
     descriptors = None
@@ -67,6 +70,10 @@ async def submit(tool, record, key, protocol, url, payload, uploads):
     binding = record["binding"]
     record["adapter"] = protocol
     tool._save(record)
+    if protocol == "minimax-media" and record["kind"] == "video":
+        from xuloom.media.minimax import submit_video
+        await submit_video(tool, record, key, url, payload)
+        return None
     if protocol == "openai-media" and record["kind"] == "video":
         value = await adapters.json_request(binding, key, "POST", url, protocol=protocol, payload=payload, multipart=True, uploads=uploads)
         identity = value.get("id")
@@ -84,6 +91,9 @@ async def submit(tool, record, key, protocol, url, payload, uploads):
 async def inspect(tool, record, key, action, wait_ms):
     if record.get("response_sha256"):
         return await finish(tool, record)
+    if record.get("adapter") == "minimax-media" and record["kind"] == "video":
+        from xuloom.media.minimax import inspect_video
+        return await inspect_video(tool, record, key, action, wait_ms)
     if record.get("adapter") != "openai-media" or record["kind"] != "video" or not record.get("status_url"):
         record.update(phase="unknown", error="This synchronous request has no saved complete response; inspect the provider before submitting again.")
         tool._save(record); return tool._response(record)
