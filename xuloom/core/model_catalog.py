@@ -27,6 +27,12 @@ def adapter_options():
     from xuloom.models.registry import adapter_names
     from xuloom.plugins import default_plugin_names, load_plugins
     names = set(adapter_names())
+    from pathlib import Path
+    try:
+        Path.home()
+    except RuntimeError:
+        # Embedded hosts may have no user profile; registered adapters still work.
+        return sorted(names)
     loaded = load_plugins(default_plugin_names(), strict=False, register_adapters=False)
     try:
         for plugin in loaded:
