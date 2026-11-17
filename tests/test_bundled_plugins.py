@@ -37,20 +37,22 @@ class BundledMediaPluginTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("media", BUNDLED_PLUGINS)
         self.assertNotIn("media_tool", default_tools())
         async with self.engine() as engine:
-            self.assertEqual([(plugin.name, plugin.source) for plugin in engine.plugins], [("media", "bundled:xuloom.media.plugin")])
+            self.assertEqual([(plugin.name, plugin.source) for plugin in engine.plugins], [("media", "bundled:xuloom.media.plugin"), ("maintenance", "bundled:xuloom.maintenance.plugin")])
+            maintenance = next(p for p in engine.plugins if p.name == "maintenance")
+            self.assertEqual((maintenance.api.tools, maintenance.api.skill_dirs, maintenance.api.hooks), ([], [], []))
             self.assertIn("media_tool", engine.latent_tools)
             self.assertNotIn("media_tool", engine.available_tools)
             self.assertEqual(engine.activate_tools(["media_tool"]), ["media_tool"])
             self.assertIs(engine.available_tools["media_tool"].context, engine.tool_context)
-            self.assertEqual(engine.tool_context["plugin_specs"], ("media",))
+            self.assertEqual(engine.tool_context["plugin_specs"], ("media", "maintenance"))
 
     async def test_media_can_be_turned_off_by_hosts_and_users(self):
         for changes in ({"bundled_plugins": False}, {"disabled_plugins": {"media"}}):
             async with self.engine(**changes) as engine:
                 self.assertNotIn("media_tool", engine.latent_tools)
-                self.assertEqual(engine.plugins, [])
+                self.assertEqual([p.name for p in engine.plugins], [] if changes.get("bundled_plugins") is False else ["maintenance"])
         set_plugin_enabled("media", False)
-        self.assertEqual(default_plugin_names(), [])
+        self.assertEqual(default_plugin_names(), ["maintenance"])
         async with self.engine(load_enabled_plugins=True) as engine:
             self.assertNotIn("media_tool", engine.latent_tools)
         # Programmatic hosts do not read the user's plugin settings.
@@ -59,7 +61,7 @@ class BundledMediaPluginTests(unittest.IsolatedAsyncioTestCase):
         rows = {row["name"]: row for row in available_plugins()}
         self.assertFalse(rows["media"]["enabled"])
         set_plugin_enabled("media", True)
-        self.assertEqual(default_plugin_names(), ["media"])
+        self.assertEqual(default_plugin_names(), ["media", "maintenance"])
 
     async def test_host_disabled_tools_also_cover_plugin_tools(self):
         async with self.engine(disabled_tools={"media_tool"}) as engine:
@@ -91,7 +93,8 @@ class BundledMediaPluginTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(disabled.close)
         with self.assertRaisesRegex(ValueError, "Unknown method: media.connections"):
             await disabled.dispatch("media.connections", {})
-        self.assertEqual((await disabled.dispatch("plugins.rpc", {}))["methods"], [])
+        self.assertEqual({row["name"] for row in (await disabled.dispatch("plugins.rpc", {}))["methods"]},
+                         {"maintenance.backup", "maintenance.diagnose", "maintenance.importSettings", "maintenance.inspect"})
 
     def plugin(self, name, source):
         folder = self.home / ".xuloom" / "plugins" / name
