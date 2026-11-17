@@ -22,7 +22,11 @@ let app;
     const errors = []; page.on('pageerror',error=>errors.push(error.message));
     const trigger = page.getByRole('button',{name:'添加工具与模式',exact:true});
     await trigger.waitFor();
-    for (const item of ['上下文','执行隔离']) {
+    await trigger.click();
+    await page.getByRole('menuitem', { name: '上下文 查看用量或手动压缩' }).click();
+    await page.locator('.inspector').getByRole('region', { name: '上下文用量' }).waitFor();
+    assert.equal(await page.getByRole('dialog', { name: '上下文用量' }).count(), 0, 'Context belongs in the sidebar');
+    for (const item of ['执行隔离']) {
       await trigger.click(); await page.getByRole('menuitem',{name:new RegExp('^'+item)}).click();
       await page.getByRole('dialog').waitFor();
       for (const key of ['Tab','Shift+Tab',...Array(12).fill('Tab')]) {
