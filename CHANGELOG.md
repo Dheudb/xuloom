@@ -4,6 +4,8 @@
 
 ## [未发布]
 
+## [0.2.8] - 2026-11-17
+
 ### 修复
 - 补齐 MiniMax 图片返回的确切 OSS 下载域名，仅对 MiniMax 官方连接的 HTTPS 默认端口生效；已生成图片可按原任务恢复下载，不重复生成。
 
@@ -234,7 +236,8 @@
 - 引擎拆分为 `xuloom/core/engine_parts/` 下的多个 mixin，主循环拆成多个阶段方法。
 - 新增不可变的 `EngineConfig` 和顶层公开 API（`from xuloom import ...`）。
 
-[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.7...HEAD
+[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.8...HEAD
+[0.2.8]: https://github.com/Dheudb/xuloom/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/Dheudb/xuloom/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/Dheudb/xuloom/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/Dheudb/xuloom/compare/v0.2.4...v0.2.5
