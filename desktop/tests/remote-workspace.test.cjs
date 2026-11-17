@@ -13,6 +13,7 @@ function fixture(options={}) {
    calls.push({method,params});
    if(method==='remote.connection')return {profile,machine:{hostname:'remote-host',platform:'linux',cwd:profile.cwd,...(options.attachments?{attachments:1}:{})}};
    if(method==='sessions.create')return {sessionId:'saved-1'};
+   if(method==='sessions.side')return {sessionId:'side-1'};
    if(method==='initialize')return {project:profile.cwd,history:[],config:{model:'remote-model'},capabilities:{skills:[],agents:[]}};
    if(method==='permissions.set'&&failPermission)throw new Error('lost reply');
    if(method==='schedule.due')return due;
@@ -171,4 +172,16 @@ test('remote user titles matching the former default are never erased',async()=>
  const f=fixture(); const {value}=await f.work.handle('remote.open',{id:'lab'});
  const saved=f.saved(); saved.remoteChats[value.id].title='新会话'; f.setSaved(saved);
  assert.equal(f.work.projects()[0].sessions[0].title,'新会话');
+});
+
+
+test('SSH side chat uses a new remote session without changing the active running parent', async()=>{
+ const f=fixture();const {value:parent}=await f.work.handle('remote.open',{id:'lab'});
+ f.sessions.get(parent.id).busy=true;
+ const {value:side}=await f.work.handle('session.side',{session:parent.id,draft:'> selected',title:'Side'});
+ assert.notEqual(side.id,parent.id);assert.equal(f.active(),parent.id);
+ assert.equal(f.sessions.get(parent.id).busy,true);assert.deepEqual(f.disposed,[]);
+ assert.equal(side.savedDraft,'> selected');
+ assert(f.calls.some(call=>call.method==='sessions.side'));
+ assert(!f.calls.some(call=>['stop','prompt','storage.mutate'].includes(call.method)));
 });

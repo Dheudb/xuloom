@@ -351,3 +351,30 @@ a, .markdown-link, .inline-file-link { color: var(--link); text-decoration-color
   .topbar-actions { gap: 4px; }
   .local-tag { display: none; }
 }
+
+.selection-actions { position: fixed; z-index: 1200; display: flex; padding: 4px; gap: 2px; background: var(--surface, white); color: var(--text, #253746); border: 1px solid #dce4ea; border-radius: 10px; box-shadow: 0 4px 18px #172c4320; }
+.selection-actions button { padding: 7px 10px; border: 0; border-radius: 6px; background: transparent; font-size: 13px; }
+.selection-actions button:hover, .selection-actions button:focus-visible { background: #edf3f7; }
+.side-chat { width: clamp(320px, 34vw, 560px); flex: 0 0 auto; min-width: 0; height: 100vh; display: flex; flex-direction: column; border-left: 1px solid #dce4ea; background: var(--surface, #fff); }
+.side-chat > header { display: flex; justify-content: space-between; align-items: center; padding: 18px 20px; border-bottom: 1px solid #e8edf1; }
+.side-chat header div { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.side-chat header small { overflow-wrap: anywhere; }
+.side-chat small, .side-chat-hint { color: #748391; font-size: 12px; }
+.side-chat-hint { margin: 12px 20px; line-height: 1.6; }
+.side-chat-messages { flex: 1; overflow: auto; min-height: 0; padding: 0 20px; }
+.side-message { margin: 16px 0 24px; min-width: 0; overflow-wrap: anywhere; }
+.side-message > small { display: block; margin-bottom: 8px; }
+.side-message .markdown { font-size: 14px; line-height: 1.7; }
+.side-message.user .markdown { padding: 10px 12px; border-radius: 10px; background: #f2f6f9; }
+.side-chat > .error { margin: 8px 20px; }
+.side-chat form { padding: 14px 20px; display: grid; grid-template-columns: 1fr auto; gap: 9px; border-top: 1px solid #e8edf1; }
+.side-chat textarea { grid-column: 1 / -1; resize: vertical; min-height: 96px; max-height: 240px; padding: 12px; line-height: 1.5; }
+.side-chat form button { display: flex; align-items: center; gap: 5px; }
+@media(max-width: 1050px) { .side-chat { position: fixed; right: 0; top: 0; width: min(440px, 100vw); z-index: 110; box-shadow: -10px 0 35px #172c4320; } }
+
+.workbench.side-chat-open { grid-template-columns: var(--sidebar-width, 244px) minmax(400px, 1fr) clamp(320px, 34vw, 560px); }
+.workbench.side-chat-open .side-chat { width: 100%; }
+@media(max-width: 1050px) {
+ .workbench.side-chat-open { grid-template-columns: var(--sidebar-width, 244px) minmax(400px, 1fr); }
+ .workbench.side-chat-open .side-chat { width: min(440px, 100vw); }
+}

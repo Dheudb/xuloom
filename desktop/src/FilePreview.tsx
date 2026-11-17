@@ -87,7 +87,7 @@ export default function FilePreview({ sessionId, project, path, change, version,
   </section>;
   const shownChange = change?.source === "git" ? gitChange : change;
   const listedChanges = change?.source === "git" ? gitFiles : changes;
-  return <section className="file-preview docked-review" role="region" aria-label={t("文件预览")}>
+  return <section className="file-preview docked-review" data-quote-owner={sessionId} data-quote-source={path} role="region" aria-label={t("文件预览")}>
     <header><div><h2 title={path}>{relativeFile(path, project).split(/[\\/]/).pop()}</h2><small title={path}>{tab === "diff" ? (change?.source === "git" ? t("Git 工作区 · HEAD 与当前文件") : t("会话变更 · 任务修改前后")) : t("文件内容 · 磁盘最新版本")}</small></div>
       {!binaryPreview && <button className="icon-button" aria-label={t("自动换行")} aria-pressed={wrap} title={t("源码与差异自动换行")} onClick={() => setWrap(!wrap)}><WrapText size={16} /></button>}
       <button className="icon-button" aria-label={t("显示工作区文件树")} aria-pressed={tree} onClick={() => setTree(!tree)}><FolderTree size={16} /></button>

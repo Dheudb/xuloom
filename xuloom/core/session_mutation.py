@@ -415,8 +415,10 @@ def _metadata(spec):
     """Presentation fields merge under the index lease, independently of the engine writer."""
     root, checkpoint, _ = _paths(spec["project"], spec["session_id"])
     patch = spec.get("patch", {})
-    if not isinstance(patch, dict) or patch.keys() - {"title", "pinned", "archived", "draft", "draftAttachments", "draftEditId", "permissionMode"}:
+    if not isinstance(patch, dict) or patch.keys() - {"title", "pinned", "archived", "draft", "draftAttachments", "draftEditId", "permissionMode", "sideParent"}:
         raise ValueError("Invalid session metadata fields")
+    if "sideParent" in patch and (not isinstance(patch["sideParent"], str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", patch["sideParent"])):
+        raise ValueError("Invalid side chat parent")
     if "title" in patch and (not isinstance(patch["title"], str) or not 1 <= len(patch["title"].strip()) <= 200):
         raise ValueError("会话名称需为 1–200 个字符")
     if any(field in patch and not isinstance(patch[field], bool) for field in ("pinned", "archived")):

@@ -75,6 +75,7 @@ class SessionCatalog {
           const item = meta[sessionId] || {};
           return [{ id: sessionKey(project, sessionId), sessionId, project,
             scope: item.scope === "standalone" ? "standalone" : "project",
+            sideParent: item.sideParent,
             // No stored title and no first message: untitled. The renderer shows the default name in the
             // interface language; a stored title is always the user's (or derived) and shown as written.
             title: item.title || text.split("\n")[0].slice(0, 80) || "",

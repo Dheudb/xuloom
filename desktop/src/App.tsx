@@ -26,6 +26,7 @@ import {
   FolderTree,
   Target,
   Lightbulb,
+  MessageSquare,
 } from "lucide-react";
 import type { SessionView, ModelConfig, SessionCatalog, PermissionMode, FileChange, Attachment } from "./types";
 import { applyEvent, beginTurn, createSession } from "./state";
@@ -52,6 +53,9 @@ import { CatalogPreferences } from "./catalog-preferences";
 import PanelResizer from "./PanelResizer";
 import TurnProcess from "./TurnProcess";
 import SkillInput from "./SkillInput";
+import SelectionActions from "./SelectionActions";
+import SideChat from "./SideChat";
+import { quoteDraft, type QuotedSelection } from "./quoted-selection";
 import FileChanges, { relativeFile } from "./FileChanges";
 import FilePreview from "./FilePreview";
 import { clampPanelWidth, clampSidebarWidth, defaultSidebarWidth, DEFAULT_PANEL_WIDTH } from "./panel-width";
@@ -79,6 +83,9 @@ export default function App() {
   const [executionDialog, setExecutionDialog] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [sideOpen, setSideOpen] = useState(false), [sidePending, setSidePending] = useState(false);
+  useEffect(() => { if (panelOpen) setSideOpen(false); }, [panelOpen]);
+  const sideCreating = useRef(false), sideSending = useRef(new Set<string>());
   const [panelTab, setPanelTab] = useState("");
   const [settingsTab, setSettingsTab] = useState<string>();
   const [activityQuery, setActivityQuery] = useState("");
@@ -104,6 +111,7 @@ export default function App() {
   const navigation = useRef(0);
   const turnOutcomes = useRef(new Map<string, TurnOutcome>());
   const active = sessions.find((item) => item.id === activeId);
+  const sideSession = active && sessions.find(item => item.sideChat?.parentSessionId === active.persistedId && item.project === active.project && item.remote?.key === active.remote?.key);
   const selectedModel = active?.config || globalModel;
   const shownPanelTab = panelTab || (active?.fileChanges?.length ? "changes" : "activity");
   const conversationScroll = useConversationScroll(activeId, active?.messages, active?.interactions);
@@ -204,7 +212,14 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [activeId, active?.draft, active?.editingId, active?.attachments, opening, importing]);
   useEffect(() => {
+    if (!sideSession || opening || sidePending) return;
+    const { id, draft } = sideSession;
+    const timer = setTimeout(() => window.xuloom.invoke("session.update", { id, patch: { draft } }).catch(onError), 500);
+    return () => clearTimeout(timer);
+  }, [sideSession?.id, sideSession?.draft, opening, sidePending]);
+  useEffect(() => {
     if (activeId) window.xuloom.invoke("session.activate", { session: activeId }).catch(onError);
+    setSideOpen(false);
     setGoalDialog(null);
     setExecutionDialog(false);
     setActivityQuery("");
@@ -226,6 +241,7 @@ export default function App() {
     setPanelOpen(true);
   }
   function openFile(path: string, change?: FileChange) {
+    setSideOpen(false);
     if (!active) return;
     const initialView = change ? "diff" : "content";
     change ||= active.fileChanges?.find((file) => file.path === path || relativeFile(file.path, active.project) === path.replace(/^\.[\\/]/, ""));
@@ -443,6 +459,43 @@ export default function App() {
       );
     }
   }
+  function addQuote(quote: QuotedSelection) {
+    const owner = draftSessions.current.find(item => item.id === quote.owner);
+    if (!owner || owner.controlledExecution) return;
+    update({ draft: quoteDraft(owner.draft, quote) }, owner.id);
+    if (owner.id === activeId) requestAnimationFrame(() => input.current?.focus());
+  }
+  async function openSide(quote?: QuotedSelection) {
+    const owner = draftSessions.current.find(item => item.id === (quote?.owner || activeId));
+    if (!owner || owner.sideChat || sideCreating.current) return;
+    const intent = navigation.current;
+    setPanelOpen(false); setSideOpen(true);
+    const existing = draftSessions.current.find(item => item.sideChat?.parentSessionId === owner.persistedId &&
+      item.project === owner.project && item.remote?.key === owner.remote?.key);
+    if (existing) { if (quote) update({ draft: quoteDraft(existing.draft, quote) }, existing.id); return; }
+    sideCreating.current = true; setSidePending(true);
+    try {
+      const result = await window.xuloom.invoke("session.side", { session: owner.id,
+        title: t("侧聊：{title}", { title: owner.title || t("新会话") }), draft: quote ? quoteDraft("", quote) : "" });
+      if (result.catalog) receiveCatalog(result.catalog);
+      if (quote && result.savedDraft !== quoteDraft("", quote)) result.savedDraft = quoteDraft(result.savedDraft || "", quote);
+      setSessions(previous => previous.some(item => item.id === result.id) ? previous : [...previous, createSession(result)]);
+      if (intent !== navigation.current) setSideOpen(false);
+    } catch (error) { onError(error); setSideOpen(false); }
+    finally { sideCreating.current = false; setSidePending(false); }
+  }
+  async function sendSide() {
+    const session = sideSession;
+    if (!session || session.busy || sideSending.current.has(session.id) || !session.draft.trim()) return;
+    const text = session.draft.trim(), id = session.id;
+    sideSending.current.add(id);
+    setSessions(previous => previous.map(item => item.id === id ? beginTurn(item, text) : item));
+    try { await window.xuloom.invoke("prompt", { session: id, text, skills: [], mode: "normal", attachments: session.attachments.map(item => item.id) }); }
+    catch (error) {
+      setSessions(previous => previous.map(item => applyEvent(item, { session: id, type: "turn_error", message: String(error) })));
+      update({ draft: text }, id);
+    } finally { sideSending.current.delete(id); }
+  }
   async function importFiles(files: File[]) {
     if (active?.controlledExecution) { onError(t("此子代理只读；请回原主会话添加资料。")); return; }
     if (!files.length) return;
@@ -553,7 +606,7 @@ export default function App() {
 
   return (
     <ReferenceNavigation.Provider value={navigateReference}>
-    <div className={"workbench " + (!panelOpen ? "panel-hidden" : "")} style={{ "--sidebar-width": effectiveSidebarWidth + "px", "--inspector-width": clampPanelWidth(filePreview ? filePanelWidth : panelWidth, viewport, effectiveSidebarWidth) + "px" } as React.CSSProperties}
+    <div className={"workbench " + (!panelOpen ? "panel-hidden " : "") + (sideOpen ? "side-chat-open" : "")} style={{ "--sidebar-width": effectiveSidebarWidth + "px", "--inspector-width": clampPanelWidth(filePreview ? filePanelWidth : panelWidth, viewport, effectiveSidebarWidth) + "px" } as React.CSSProperties}
       onDragEnter={(event) => { if (Array.from(event.dataTransfer.types).includes("Files")) { event.preventDefault(); dragDepth.current++; setFileDrag(true); } }}
       onDragLeave={() => { if (--dragDepth.current <= 0) { dragDepth.current = 0; setFileDrag(false); } }}
       onDragOver={(event) => { if (Array.from(event.dataTransfer.types).includes("Files")) { event.preventDefault(); event.dataTransfer.dropEffect = active?.busy || importing ? "none" : "copy"; } }}
@@ -615,6 +668,8 @@ export default function App() {
             <span>{active ? displayName(title).slice(0, 35) : t("开始")}</span>
           </div>
           <div className="topbar-actions">
+            {active && !active.sideChat && <button className="icon-button" aria-label={t("打开侧边聊天")} title={t("打开侧边聊天")}
+              aria-pressed={sideOpen} disabled={sidePending} onClick={() => sideOpen ? setSideOpen(false) : void openSide()}><MessageSquare size={17} /></button>}
             {active && <SessionSummary key={active.id} sessionId={active.id} busy={active.busy} openFile={openFile}
               openActivity={tool => { setActivityQuery(tool || ""); setFilePreview(undefined); setPanelTab("activity"); setPanelOpen(true); }} />}
             {active && <GitStatus key={active.id + active.project} sessionId={active.id} project={active.project} busy={active.busy} />}
@@ -763,7 +818,7 @@ export default function App() {
                         )}
                     </div>
                     {message.trace && <TurnProcess trace={message.trace} sessionId={activeId} />}
-                    <div className="markdown message-text">
+                    <div className="markdown message-text" data-quote-owner={activeId} data-quote-source={t("消息 {number} · {title}", { number: index + 1, title: active.title || t("新会话") })}>
                       {message.text ? (
                         message.role === "user" ? <div className="user-prompt-text">{message.text}</div> : <Markdown text={message.text} onOpenFile={openFile} sessionId={activeId} />
                       ) : active.busy && index === active.streamIndex ? (
@@ -974,7 +1029,12 @@ export default function App() {
           {goalDialog === "goal" && active.goal ? <GoalEditor key={activeId} objective={active.goal.objective} invoke={invoke} close={() => setGoalDialog(null)} /> : <SchedulePanel key={activeId} invoke={invoke} onError={onError} />}
         </section>
       </div>}
-      {panelOpen && (
+      <SelectionActions scope={activeId} add={addQuote} side={quote => void openSide(quote)}
+        canSide={owner => !!sessions.find(item => item.id === owner && !item.sideChat)} onError={onError} />
+      {sideOpen && active && <SideChat session={sideSession} pending={sidePending} close={() => setSideOpen(false)}
+        update={draft => { if (sideSession) update({ draft }, sideSession.id); }} send={() => void sendSide()}
+        stop={() => { if (sideSession) void window.xuloom.invoke("stop", { session: sideSession.id }).catch(onError); }} onError={onError} />}
+      {panelOpen && !sideOpen && (
         <div className="inspector-shell">
         <PanelResizer width={clampPanelWidth(filePreview ? filePanelWidth : panelWidth, viewport, effectiveSidebarWidth)} viewport={viewport} sidebarWidth={effectiveSidebarWidth} change={filePreview ? setFilePanelWidth : setPanelWidth}
           save={(width) => { void window.xuloom.invoke("layout.save", { [filePreview ? "filePreviewWidth" : "inspectorWidth"]: width }).catch(onError); }} />

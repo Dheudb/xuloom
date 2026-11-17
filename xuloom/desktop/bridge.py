@@ -91,6 +91,7 @@ class DesktopBridge:
         self.collaboration_mode = "auto"
         self.execution_mode = "host"
         self.resume_id = None
+        self.side_chat = None
         self.loaded_skills = []
         self.protocol_task = None
         self.protocol_ready = None
@@ -215,6 +216,8 @@ class DesktopBridge:
 
     async def remember_preferences(self):
         """Only explicit user changes seed new chats; existing chats keep their checkpoint."""
+        if self.side_chat:
+            return
         values = {'model':copy.deepcopy(self.model_selection), 'permissionMode':self.approval_policy.mode,
             'collaborationMode':self.collaboration_mode}
         await asyncio.to_thread(update_config, lambda cfg:{**cfg,'new_session_preferences':values})
@@ -581,6 +584,30 @@ class DesktopBridge:
             raise ValueError("Unknown SSH configuration operation")
         if method == "sessions.list":
             return self.sessions()
+        if method == "sessions.side":
+            # A fresh session, never a fork/replay of the parent's active tools.
+            if not self.resume_id or self.side_chat:
+                raise ValueError("Side chat requires a parent conversation, not another side chat")
+            draft = params.get("draft", "")
+            if not isinstance(draft, str) or len(draft) > 20000:
+                raise ValueError("Invalid side chat context")
+            scope = params.get("scope", "project")
+            if scope not in {"project", "standalone"}:
+                raise ValueError("Invalid side chat scope")
+            from xuloom.core.session_mutation import mutate
+            from xuloom.core.session import SessionManager
+            identity = str(uuid.uuid4())
+            await asyncio.to_thread(mutate, {"action": "create", "project": str(self.cwd),
+                "session_id": identity, "scope": scope, "created": int(time.time() * 1000)})
+            metadata = {"side_chat": {"parentSessionId": self.resume_id},
+                "model_selection": copy.deepcopy(self.model_selection or model_selection(session_config(load_config(), self.model_selection))),
+                "collaboration_mode": "solo", "execution_mode": self.execution_mode}
+            with SessionManager(cwd=self.cwd) as manager:
+                manager.acquire_writer(identity)
+                manager.load_session_state(identity)
+                if not manager.save_session_state(identity, [], metadata):
+                    raise OSError("Could not save the side conversation")
+            return {"sessionId": identity, "project": str(self.cwd)}
         if method == "sessions.create":
             from xuloom.core.session import SessionManager
             identity = str(uuid.uuid4())
@@ -890,6 +917,7 @@ class DesktopBridge:
                         metadata = seeded; raw = {'messages':[], 'metadata':seeded}
                         if params.get('inheritPreferences') is True or 'permissionMode' not in params:
                             self.approval_policy.set_mode(preferences.get('permissionMode','ask') if preferences.get('permissionMode','ask') in {'ask','full'} else 'ask')
+            self.side_chat = metadata.get("side_chat")
             self.model_selection = metadata.get("model_selection")
             if not self.model_selection:
                 runtime = metadata.get("model_runtime", {})
@@ -907,7 +935,7 @@ class DesktopBridge:
             self.execution_mode = raw.get("metadata", {}).get("execution_mode", "host") if isinstance(raw, dict) else "host"
             controlled = bool(raw.get("metadata", {}).get("delegation", {}).get("authority_required")) if isinstance(raw, dict) else False
             controlled_model = raw.get("metadata", {}).get("delegation", {}).get("remote_worker", {}).get("model_binding", {}).get("model") if controlled else None
-            return {"steering": True, "pendingInputs": raw.get("metadata", {}).get("user_inbox", []) if isinstance(raw, dict) else [], "controlledExecution": controlled, "controlledModel": controlled_model, "project": str(self.cwd), "persistedId": sid, "executionMode": self.execution_mode, "collaborationMode": self.collaboration_mode, "permissionMode": self.approval_policy.mode, "config": self.config(), "capabilities": self.capabilities(), "sessions": self.sessions(), "history": self.history(messages, traces), "activity": activity, "workers": workers, "fileChanges": self.file_changes}
+            return {"sideChat": self.side_chat, "steering": True, "pendingInputs": raw.get("metadata", {}).get("user_inbox", []) if isinstance(raw, dict) else [], "controlledExecution": controlled, "controlledModel": controlled_model, "project": str(self.cwd), "persistedId": sid, "executionMode": self.execution_mode, "collaborationMode": self.collaboration_mode, "permissionMode": self.approval_policy.mode, "config": self.config(), "capabilities": self.capabilities(), "sessions": self.sessions(), "history": self.history(messages, traces), "activity": activity, "workers": workers, "fileChanges": self.file_changes}
         if method in {"files.documentInfo", "files.documentPage"}:
             from xuloom.features.document_preview import inspect
             return await asyncio.to_thread(inspect, self.cwd, params.get("path"), self.file_changes,

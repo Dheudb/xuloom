@@ -599,6 +599,30 @@ async function invoke(method, params) {
     const resumeId = active && active.scope !== "standalone" && projectKey(active.project) === projectKey(project) ? active.resumeId : latestSavedSession(project);
     return selectRow(resumeId ? catalog.find(sessionKey(project, resumeId)) : catalog.create(project));
   }
+  if (method === "session.side") {
+    const parent = sessions.get(params.session);
+    if (!parent || parent.transport.closed) throw new Error("请先打开父会话");
+    if (typeof params.draft !== "string" || params.draft.length > 20000 || typeof params.title !== "string")
+      throw new Error("侧聊引用无效");
+    const savedSide = catalog.list(parent.project).find(row => row.sideParent === parent.resumeId && !row.archived && !row.error);
+    if (savedSide) {
+      const initial = await createSession(savedSide.project, savedSide.sessionId);
+      saveWorkspace();
+      return { ...initial, catalog: broadcastCatalog() };
+    }
+    const created = await parent.transport.request("sessions.side", { draft: params.draft, scope: parent.scope });
+    // Same workspace, independent writer/model/history. Parent stays active/running.
+    if (parent.scope === "standalone") {
+      const before = settings();
+      saveSettings({ ...before, standaloneDirectories: [...new Set([...(before.standaloneDirectories || []), parent.project])] }, before);
+    }
+    let row = catalog.list(parent.project).find(row => row.sessionId === created.sessionId);
+    await updateRow(row, { permissionMode: "ask", sideParent: parent.resumeId, title: params.title.slice(0, 100), draft: params.draft });
+    row = catalog.list(parent.project).find(row => row.sessionId === created.sessionId);
+    const initial = await createSession(row.project, row.sessionId);
+    saveWorkspace();
+    return { ...initial, catalog: broadcastCatalog() };
+  }
   if (method === "session.select") return selectRow(catalog.find(params.id));
   if (method === "session.open" || method === "session.new") {
     if (method === "session.new") {

@@ -20,6 +20,7 @@ function validRow(id, row) {
       id === `ssh:${keyOf(row.binding)}:${row.sessionId}` && typeof row.project === "string" && !!row.project && flags(row) &&
       ["title", "draft", "draftEditId"].every(key => !(key in row) || typeof row[key] === "string" && row[key].length <= (key === "draft" ? 1000000 : key === "title" ? 200 : 128)) &&
       ["created", "updated"].every(key => !(key in row) || Number.isFinite(row[key]) && Math.abs(row[key]) <= 8640000000000000) &&
+      (!("sideParent" in row) || typeof row.sideParent === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(row.sideParent)) &&
       (!row.machine || object(row.machine) && ["hostname", "platform", "cwd"].every(key => typeof row.machine[key] === "string" && row.machine[key])) &&
       (!("draftAttachments" in row) || attachmentIds(row.draftAttachments)) &&
       (!("permissionMode" in row) || ["ask", "full"].includes(row.permissionMode));
@@ -104,14 +105,15 @@ function remoteWorkspaces(context) {
       created: old?.created || Date.now(), updated: old?.updated || Date.now(), permissionMode: old?.permissionMode || "ask",
       draft: old?.draft || "", draftEditId: old?.draftEditId || "", draftAttachments: old?.draftAttachments || [], pinned: !!old?.pinned, archived: !!old?.archived });
   }
-  async function openRow(row, { newChat = false } = {}) {
+  async function openRow(row, { newChat = false, background = false } = {}) {
     writable(`ssh:${keyOf(row.binding)}`);
     let id = newChat ? null : row.id;
     if (id && (row.archived || settings().remoteProjects?.[`ssh:${keyOf(row.binding)}`]?.archived)) throw new Error("请先恢复归档的远端会话");
     if (id && sessions.has(id)) {
       const existing = sessions.get(id);
       if (!existing.transport.closed && !existing.transport.closeError && !existing.disconnected) {
-        activate(id); saveWorkspace(); return { existingId: id, activeId: id, catalog: broadcast() };
+        if (!background) activate(id);
+        saveWorkspace(); return { existingId: id, activeId: id, catalog: broadcast() };
       }
       await dispose(id);
     }
@@ -125,7 +127,8 @@ function remoteWorkspaces(context) {
       id = row.id;
       sessions.set(id, { transport: pipe, project: initial.project, resumeId: sid, scope: "project", ...(initial.controlledExecution ? { controlledExecution: true } : {}), remote: { connectionId: row.binding.id, name: row.binding.name, host: row.binding.host, key: keyOf(row.binding), hostname: connection.machine.hostname, ...(connection.machine.attachments === 1 ? { attachments: true } : {}) }, busy: false, workers: new Map() });
       updateProject(`ssh:${keyOf(row.binding)}`, { open: true, collapsed: false });
-      activate(id); saveWorkspace();
+      if (!background) activate(id);
+      saveWorkspace();
       const ids = row.draftAttachments || [];
       const savedAttachments = !ids.length ? [] : connection.machine.attachments === 1 ? (await pipe.request("attachments.list", { ids })).items : ids.map(id => ({ id, name: "待恢复附件 " + id.slice(0, 8), kind: "file", size: 0, path: "", available: false, state: "interrupted" }));
       return { ...initial, id, title: titleOf(row), scope: "project", remote: sessions.get(id).remote, savedDraft: row.draft, savedDraftEditId: row.draftEditId, savedAttachments, activeId: id, catalog: broadcast() };
@@ -223,6 +226,20 @@ function remoteWorkspaces(context) {
       saveSettings({ ...before, remoteChats: chats }, before);
       if (ids.includes(active())) { activate(undefined); saveWorkspace(); }
       return { handled: true, value: { activeId: active() || null, catalog: broadcast() } };
+    }
+    if (method === "session.side" && sessions.get(params.session)?.remote) {
+      const parent = sessions.get(params.session), row = find(params.session);
+      if (parent.disconnected || parent.moving) throw new Error("SSH 连接已断开，请重新打开父会话");
+      if (typeof params.draft !== "string" || params.draft.length > 20000 || typeof params.title !== "string")
+        throw new Error("侧聊引用无效");
+      const savedSide = rows().find(side => side.sideParent === row.sessionId && keyOf(side.binding) === keyOf(row.binding) && !side.archived);
+      if (savedSide) return { handled: true, value: await openRow(savedSide, { background: true }) };
+      const created = await parent.transport.request("sessions.side", { draft: params.draft });
+      const result = await openRow({ ...row, id: undefined, sessionId: created.sessionId,
+        permissionMode: "ask", title: params.title.slice(0, 100), draft: params.draft, draftEditId: "", draftAttachments: [] }, { background: true });
+      const saved = find(result.id);
+      writeRow({ ...saved, sideParent: row.sessionId, draft: params.draft });
+      return { handled: true, value: { ...result, savedDraft: params.draft, catalog: broadcast() } };
     }
     if (method === "session.fork" && isRow) {
       const row = find(params.id);

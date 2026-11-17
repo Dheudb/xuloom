@@ -172,6 +172,8 @@ class SessionPersistenceMixin(EngineState):
             self.tool_context["file_changes"] = metadata.get("file_changes", [])
             self.tool_context["workspace_moves"] = metadata.get("workspace_moves", [])
             self.turn_traces = metadata.get("turn_traces", [])
+            if metadata.get("side_chat"):
+                self.tool_context["side_chat"] = copy.deepcopy(metadata["side_chat"])
             self.model_selection = metadata.get("model_selection")
             model_runtime = metadata.get("model_runtime", {}) or {}
             # Checkpoints describe past execution; they cannot redirect this
@@ -327,6 +329,7 @@ class SessionPersistenceMixin(EngineState):
             "pipelines": copy.deepcopy(self.tool_context.get("pipelines", {})),
             "delegation": self.tool_context.get("delegation", {}),
             "turn_traces": self.turn_traces,
+            **({"side_chat": copy.deepcopy(self.tool_context["side_chat"])} if self.tool_context.get("side_chat") else {}),
             "model_selection": getattr(self, "model_selection", None),
             "team": self.team_manager.export_state(),
             "ultraplan": self.ultraplan_manager.export_state(),

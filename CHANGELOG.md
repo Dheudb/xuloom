@@ -4,6 +4,14 @@
 
 ## [未发布]
 
+## [0.2.9] - 2026-11-17
+
+### 新增
+- 聊天及文本文件预览选区菜单：添加到当前草稿，或围绕原文打开独立侧聊；引用保留来源，不自动发送。
+- 侧聊沿用父会话模型及推理设置，独立历史、费用、停止与草稿恢复；主任务继续运行。默认 Solo、请求批准，不修改普通新会话偏好，不复制父任务的执行状态。
+- 本机与已更新的 SSH 端复用同一会话接口；未增加默认 Prompt、常驻模型请求或依赖。暂不包含网页、PDF、图片区域标注。
+
+
 ## [0.2.8] - 2026-11-17
 
 ### 修复
@@ -236,7 +244,8 @@
 - 引擎拆分为 `xuloom/core/engine_parts/` 下的多个 mixin，主循环拆成多个阶段方法。
 - 新增不可变的 `EngineConfig` 和顶层公开 API（`from xuloom import ...`）。
 
-[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.8...HEAD
+[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.9...HEAD
+[0.2.9]: https://github.com/Dheudb/xuloom/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/Dheudb/xuloom/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/Dheudb/xuloom/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/Dheudb/xuloom/compare/v0.2.5...v0.2.6

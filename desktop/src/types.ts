@@ -122,6 +122,7 @@ export type SessionCatalog = {
   view: { sort: "recent" | "oldest" | "name" | "created" };
 };
 export type InitialSession = {
+  sideChat?: { parentSessionId: string };
   steering?: boolean;
   pendingInputs?: { id: string; text: string }[];
   controlledExecution?: boolean;
