@@ -60,6 +60,8 @@ async function send(text) {
   const requestDeadline = Date.now() + 90000;
   while (started < 3 && Date.now() < requestDeadline) await new Promise(resolve => setTimeout(resolve, 50));
   assert.equal(started, 3); assert.equal(ended, 0);
+  // Three HTTP requests can arrive before the remaining durable queue records reach the UI.
+  await page.waitForFunction(() => new Set(window.queueEvents.map(w => w.agent_id)).size === 10);
   const states = await page.evaluate(() => { const map = new Map(); for (const w of window.queueEvents) map.set(w.agent_id, w.status); return [...map.values()]; });
   assert.equal(states.filter(s => s === "queued").length, 7);
   assert.equal(await page.locator(".send-button.stop").count(), 1, "Parent must wait for queued workers");
