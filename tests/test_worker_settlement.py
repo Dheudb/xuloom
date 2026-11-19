@@ -202,19 +202,19 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         for original in ['{"arbitrary":"unchanged JSON"}', 'not JSON']:
             self.assertEqual(extract_page(original, False), (original, ""))
 
-    async def test_fetch_respects_connection_route_even_when_ambient_proxy_exists(self):
+    async def test_fetch_respects_explicit_web_route_independently_of_model_proxy(self):
         import httpx
         from xuloom.tools.web_tool import WebFetchTool
         real_client = httpx.AsyncClient
         routes = []
         def client(**kwargs):
-            routes.append(kwargs.get("trust_env"))
-            return real_client(**kwargs, transport=httpx.MockTransport(lambda request:
+            routes.append(bool(kwargs.get("proxy")))
+            return real_client(transport=httpx.MockTransport(lambda request:
                 httpx.Response(200, text="<html><body>Verified</body></html>", headers={"content-type": "text/html"})))
         for mode, expected in [("direct", False), ("system", True)]:
             tool = WebFetchTool()
-            tool.context = {"native_search_options": lambda mode=mode: {"network_mode": mode, "profile": {"backend": "builtin"}}}
-            with patch("httpx.AsyncClient", side_effect=client):
+            tool.context = {"native_search_options": lambda mode=mode: {"network_mode": "direct", "web_network_mode": mode, "profile": {"backend": "builtin"}}}
+            with patch("xuloom.tools.web_network.getproxies", return_value={"https":"http://127.0.0.1:7897"}), patch("xuloom.tools.web_network.web_client", side_effect=client):
                 result = await tool.execute("https://example.invalid/doc")
             self.assertTrue(result["ok"], result)
             self.assertEqual(routes[-1], expected)

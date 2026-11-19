@@ -33,6 +33,7 @@ def normalize_api_base_url(provider: str, value: str) -> str:
 # Keys we persist — maps config key → environment variable name
 _PERSISTED_KEYS = {
     "network_mode": "XULOOM_NETWORK_MODE",
+    "web_network_mode": "XULOOM_WEB_NETWORK_MODE",
     "model_provider": "XULOOM_MODEL_PROVIDER",
     "anthropic_model": "ANTHROPIC_MODEL",
     "openai_model": "OPENAI_MODEL",

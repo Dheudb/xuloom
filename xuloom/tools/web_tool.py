@@ -2,28 +2,25 @@ import re
 import json
 import asyncio
 import httpx
+from urllib.parse import urljoin, urlsplit
 from bs4 import BeautifulSoup
 from ddgs import DDGS
 from pydantic import BaseModel, Field, model_validator
 from xuloom.tools.base import BaseAgenticTool
 from xuloom.context.tool_results import build_tool_result
 from xuloom.tools.web_network import (network_error, SearchTimeout, SearchRateLimit,  # noqa: F401 - re-exported for callers
-    search_network, run_ddgs, diagnostic_secrets)
+    search_network, run_ddgs, diagnostic_secrets, web_network_mode, fetch_page, safe_detail)
 
 MAX_SEARCH_RESULTS = 50
 MAX_FETCH_BYTES = 5_000_000
 SEARCH_TOTAL_TIMEOUT = 35
 SEARCH_MAX_ATTEMPTS = 2
 SEARCH_RETRY_DELAY = 0.75
+FETCH_TOTAL_TIMEOUT = 35
 
 
 async def builtin_search(factory, query, limit, options, abort=None):
-    mode, proxies, route = search_network(options.get("network_mode"))
-    if mode == "auto":
-        from xuloom.core.network_routes import preferred_route, route_file
-        from xuloom.core.request_flow import connection_id
-        identity = connection_id(options["base_url"], options.get("api_key", "")) if options.get("base_url") else None
-        _, proxies, route = search_network(preferred_route(route_file(identity)))
+    mode, proxies, route = search_network(web_network_mode(options))
     secrets = diagnostic_secrets(options, proxies)
     deadline = asyncio.get_running_loop().time() + SEARCH_TOTAL_TIMEOUT
     failures = []
@@ -97,6 +94,22 @@ def extract_page(text, html, url=""):
     title = soup.title.get_text(" ", strip=True)[:300] if soup.title else ""
     for element in soup(["script", "style", "nav", "footer", "meta", "noscript"]):
         element.decompose()
+    # Keep actual destinations rather than breadcrumb text that invites guessed URLs.
+    base = soup.find("base", href=True)
+    base_url = urljoin(url, str(base["href"])) if base else url
+    seen = set()
+    for anchor in soup.find_all("a", href=True):
+        href = str(anchor["href"]).strip()
+        if not href or href.startswith("#"): continue
+        destination = urljoin(base_url, href)
+        try:
+            parsed = urlsplit(destination)
+            if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password: continue
+        except ValueError: continue
+        if destination in seen or len(seen) >= 200 or len(destination) > 2048: continue
+        seen.add(destination)
+        label = anchor.get_text(" ", strip=True)
+        anchor.replace_with(f"{label} ({destination})" if label and label != destination else destination)
     return re.sub(r'\s+', ' ', soup.get_text(separator=' ', strip=True)), title
 
 class WebSearchInput(BaseModel):
@@ -196,40 +209,40 @@ Usage notes:
 - For GitHub URLs, prefer using the gh CLI via bash_tool instead (e.g., gh pr view, gh issue view, gh api)"""
 
     async def execute(self, url: str, prompt: str = "", **kwargs) -> dict:
+        info, secrets = {"url": safe_detail(url)}, []
         try:
             target = httpx.URL(url)
             if target.scheme not in {"http", "https"} or not target.host or target.username or target.password:
                 return build_tool_result(ok=False, is_error=True, content="Use an HTTP(S) URL without embedded credentials.", metadata={"code": "invalid_url", "retryable": False})
             options = self.context.get('native_search_options')
-            if callable(options) and options()['profile']['backend'] == 'deepseek':
+            settings = options() if callable(options) else {}
+            if settings.get('profile', {}).get('backend') == 'deepseek':
                 from xuloom.tools.native_search import execute
                 return await execute(self.context, prompt, 1, url=url)
-            settings = options() if callable(options) else {}
-            from xuloom.core.network import model_http_client, model_network_mode
-            mode = model_network_mode(settings.get("network_mode"))
-            async with model_http_client(network_mode=mode) as client:
-                async with client.stream("GET", url, follow_redirects=True, timeout=15.0) as resp:
-                    resp.raise_for_status()
-                    media_type = resp.headers.get("content-type", "text/html").split(";", 1)[0].lower()
-                    if not (media_type.startswith("text/") or media_type in {"application/xhtml+xml", "application/json", "application/xml"}):
-                        return build_tool_result(ok=False, is_error=True, content="This URL returns a binary document, not readable webpage text.", metadata={"code": "unsupported_media_type", "media_type": media_type, "retryable": False})
-                    body = bytearray()
-                    async for chunk in resp.aiter_bytes():
-                        if len(body) + len(chunk) > MAX_FETCH_BYTES:
-                            return build_tool_result(ok=False, is_error=True, content="Webpage exceeds the 5 MB response limit; no partial page was returned as complete.", metadata={"code": "response_too_large", "retryable": False})
-                        body.extend(chunk)
-                    source = bytes(body).decode(resp.encoding or "utf-8", errors="replace")
-            text, title = await asyncio.to_thread(extract_page, source, media_type in {"text/html", "application/xhtml+xml"}, str(resp.url))
-
-            result = f"Content from {resp.url}:\n\n{text}"
-            if prompt:
-                result += f"\n\n---\nExtraction prompt: {prompt}"
-            return build_tool_result(ok=True, content=result, metadata={"url": str(resp.url), "network_mode": mode, "source_bytes": len(body),
+            body, media_type, final_url, encoding = await asyncio.wait_for(fetch_page(url, settings, info, MAX_FETCH_BYTES, secrets), timeout=FETCH_TOTAL_TIMEOUT)
+            if body is None:
+                oversized = media_type == "too_large"
+                return build_tool_result(ok=False, is_error=True,
+                    content="Webpage exceeds the 5 MB response limit; no partial page was returned as complete." if oversized else "This URL returns a binary document, not readable webpage text.",
+                    metadata={**info, "code": "response_too_large" if oversized else "unsupported_media_type", "media_type": media_type, "retryable": False})
+            source = body.decode(encoding or "utf-8", errors="replace")
+            text, title = await asyncio.to_thread(extract_page, source, media_type in {"text/html", "application/xhtml+xml"}, final_url)
+            if not text.strip():
+                return build_tool_result(ok=False, is_error=True, content="Static fetch returned no readable text. The page may require JavaScript or login; browser_tool can inspect it with normal permissions.",
+                    metadata={**info, "code": "no_readable_content", "retryable": False})
+            result = f"Content from {final_url}:\n\n{text}"
+            if prompt: result += f"\n\n---\nExtraction prompt: {prompt}"
+            return build_tool_result(ok=True, content=result, metadata={**info, "url": final_url, "source_bytes": len(body),
                 "content_chars": len(text), "media_type": media_type, "truncated": False,
-                "sources_in_content": True, "sources": [{"url": str(resp.url), "title": title or str(resp.url), "kind": "page"}]})
-
-        except Exception as e:
-            metadata = network_error(e, {"url": url})
-            content = (f"Website refused access (HTTP {metadata['http_status']}); page content was not read. Use an accessible publisher abstract, repository or another source; repeating the same URL will not resolve an access denial."
-                if metadata["code"] == "access_denied" else f"Webpage request failed ({type(e).__name__}). Check the URL and network, or try another source.")
+                "sources_in_content": True, "sources": [{"url": final_url, "title": title or final_url, "kind": "page"}]})
+        except Exception as error:
+            metadata = network_error(error, info, secrets)
+            code = metadata["code"]
+            if code == "legal_restriction":
+                content = "Website returned HTTP 451 at the final URL; page content was not read. This status does not establish the resource's existence or any person's identity. Use another accessible source."
+            elif code == "access_denied":
+                content = f"Website refused access (HTTP {metadata['http_status']}); page content was not read. Login or site access restrictions may apply; repeating the same URL will not resolve an access denial."
+            elif code == "not_found": content = "Website returned HTTP 404 at the final URL. No page content was read; verify the actual source link instead of guessing a path."
+            elif code == "rate_limited": content = "Website rate limit reached (HTTP 429). Respect Retry-After and retry later; no alternate network route was used to repeat the refusal."
+            else: content = f"Webpage request failed ({type(error).__name__}); inspect the recorded routes and final URL, or try another source."
             return build_tool_result(ok=False, is_error=True, content=content, metadata=metadata)

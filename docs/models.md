@@ -136,3 +136,13 @@ OpenAI Chat 尚未接入原生文档输入；PDF 仍可本地提取文本。上�
 设置中的“从 API 获取模型”复用 GET /models，同时识别 context_window、context_length、max_model_len 等明确字段（也支持 limits、top_provider、architecture、text_config 下的这些字段）。多个有效声明冲突时取较小值；最大输出和仅输入上限不冒充总窗口。只补充空窗口，已有手动值保留，点击保存后才写入配置。不后台请求模型、不消耗生成 Token，不改变思考或 Chat/Responses 协议。
 
 2026-11-12 核对的发布规格包括：[OpenAI GPT-6.1 Sol](https://developers.openai.com/api/docs/models/gpt-6.1-sol) 等已配置 GPT-6 系列（1,050,000），[DeepSeek](https://api-docs.deepseek.com/quick_start/pricing/)（接口明确返回 1,048,576），[Qwen3.6-35B-A3B](https://huggingface.co/Qwen/Qwen3.6-35B-A3B)（262,144 原生），[Agents-A1](https://huggingface.co/InternScience/Agents-A1/blob/main/config.json)（262,144），[Intern-S2-Preview-397B](https://huggingface.co/internlm/Intern-S2-Preview-397B/blob/main/config.json)（262,144），[Intern-S1](https://huggingface.co/internlm/Intern-S1/blob/main/config.json)（65,536），[GLM-5.2](https://huggingface.co/zai-org/GLM-5.2) / [GLM-5.3](https://huggingface.co/zai-org/GLM-5.3)（1,048,576），[Kimi-K2.6](https://huggingface.co/moonshotai/Kimi-K2.6)（262,144），[MiniMax-M3](https://huggingface.co/MiniMaxAI/MiniMax-M3)（1,048,576）。发布规格是未声明服务端限制时的名义默认，服务端可能部署更短窗口；可随时按实际部署调整。私人微调模型只在用户自己的配置中填写基模对应窗口，不把私人别名加入公共代码。
+
+### 网页搜索与模型 API 的网络线路
+
+内置 DDGS 搜索和静态网页读取默认使用独立的 `auto` 线路，不继承模型 API 连接的“直连”选择。在真正执行工具的主机上读取系统代理及 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY`；有适用代理时先尝试代理，否则直连。SSH 节点使用远端自身的代理设置，不从本机转发网页流量。当前使用操作系统／Python 能识别的代理地址，不执行 PAC 脚本；SOCKS 代理需运行环境已有 HTTPX SOCKS 支持。
+
+每个网站（协议、主机、端口）的成功线路保存在数据根目录 `web-routes/` 中，文件名是站点哈希，内容只有线路名。下次先复用，连接失败或读取超时后尝试另一条可用线路并更新记录。此记录不包含 URL 路径、搜索词、API Key、代理地址或密码；不会修改系统代理或进程环境。`NO_PROXY` 和自动模式的本机回环地址始终直连。
+
+需要强制网页线路时，可设置 `XULOOM_WEB_NETWORK_MODE=direct` 或 `system`，也可在全局配置中设置 `web_network_mode`；默认值是 `auto`。此选项影响内置搜索及网页 GET，不改变模型调用、媒体生成或供应商原生搜索 API 的连接设置。
+
+换线只用于网络连接／读取故障及代理认证失败。网站返回 403、404、429、451 时报告真实结果，保留跳转后的地址，不靠轮换代理重复拒绝；429 的冷却时间保留在回执中。网络可达不能保证免费搜索源不限流，也不能替代网站登录。静态读取不执行 JavaScript；没有可读正文的页面明确提示使用已有浏览器工具。网页正文保留最多 200 个不同 HTTP(S) 链接的真实目标（单个地址最多 2048 字符），其余链接文字仍保留，模型不必从标题或面包屑猜地址。读取总时限为 35 秒，正文上限仍为 5 MB；取消会关闭连接且不返回部分正文作为完整结果。

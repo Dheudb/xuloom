@@ -21,7 +21,7 @@ ROWS = [{"href": "https://evidence.invalid/paper", "title": "Evidence", "body": 
 
 def tool(mode="direct", abort=None):
     value = WebSearchTool()
-    value.context = {"native_search_options": lambda: {"profile": {"backend": "builtin"}, "network_mode": mode,
+    value.context = {"native_search_options": lambda: {"profile": {"backend": "builtin"}, "network_mode": mode, "web_network_mode": mode,
         "api_key": "private-model-key"}, "abort_event": abort}
     return value
 

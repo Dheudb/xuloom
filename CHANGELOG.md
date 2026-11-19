@@ -4,6 +4,12 @@
 
 ## [未发布]
 
+## [0.2.11] - 2026-11-19
+
+### 修复
+- 内置搜索和网页读取独立于模型 API 线路，默认识别执行主机的系统／环境代理；按网站记住可用路线，在断连、超时或代理故障时有界换线，保留 NO_PROXY 和显式网页直连配置。
+- 网页读取保留原始链接目标、最终地址及跳转记录；区分 403、404、429 和 451，不通过反复换线重试网站拒绝，不据 451 确认页面或人物身份。取消、总时限、5 MB 大小上限和密钥隔离继续生效。
+
 ## [0.2.10] - 2026-11-17
 
 ### 修复
@@ -252,7 +258,8 @@
 - 引擎拆分为 `xuloom/core/engine_parts/` 下的多个 mixin，主循环拆成多个阶段方法。
 - 新增不可变的 `EngineConfig` 和顶层公开 API（`from xuloom import ...`）。
 
-[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.10...HEAD
+[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.11...HEAD
+[0.2.11]: https://github.com/Dheudb/xuloom/compare/v0.2.10...v0.2.11
 [0.2.10]: https://github.com/Dheudb/xuloom/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/Dheudb/xuloom/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/Dheudb/xuloom/compare/v0.2.7...v0.2.8
