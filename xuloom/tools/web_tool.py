@@ -238,7 +238,10 @@ Usage notes:
         except Exception as error:
             metadata = network_error(error, info, secrets)
             code = metadata["code"]
-            if code == "legal_restriction":
+            if metadata["http_status"] == 999:
+                metadata.update(page_read=False, next_action="accessible_source_or_user_export")
+                content = "Website returned non-standard HTTP 999; no profile content was read. The request is access-restricted, but the response does not establish the exact rule, account existence or identity. Do not automatically repeat the request or rotate proxies. Use an accessible public source or content exported/provided by the user."
+            elif code == "legal_restriction":
                 content = "Website returned HTTP 451 at the final URL; page content was not read. This status does not establish the resource's existence or any person's identity. Use another accessible source."
             elif code == "access_denied":
                 content = f"Website refused access (HTTP {metadata['http_status']}); page content was not read. Login or site access restrictions may apply; repeating the same URL will not resolve an access denial."

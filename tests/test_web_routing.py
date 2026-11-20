@@ -159,6 +159,35 @@ class WebRoutingTests(unittest.IsolatedAsyncioTestCase):
         path=policy.path('https://public.invalid');path.parent.mkdir(parents=True);path.write_text('{"route": []}')
         self.assertEqual(policy.routes('https://public.invalid'),['system','direct'])
 
+    def test_999_and_other_nonstandard_statuses_are_not_retryable_server_errors(self):
+        from xuloom.tools.web_network import network_error
+        for status,code,retryable in [(999,'access_denied',False),(600,'invalid_http_status',False),(599,'http_error',True),(503,'http_error',True)]:
+            response=httpx.Response(status,request=httpx.Request('GET','https://example.invalid'))
+            result=network_error(httpx.HTTPStatusError('status',request=response.request,response=response),{})
+            self.assertEqual((result['code'],result['retryable']),(code,retryable))
+
+    async def test_999_returns_an_actionable_denial_without_proxy_rotation_or_browser(self):
+        calls=[]
+        def client(**kwargs):
+            def handle(request):
+                calls.append(str(request.url));return httpx.Response(999)
+            return httpx.AsyncClient(transport=httpx.MockTransport(handle))
+        with patch('xuloom.tools.web_network.getproxies',return_value=PROXIES),patch('xuloom.tools.web_network.web_client',side_effect=client):
+            result=await self.fetch().execute('https://cn.linkedin.com/in/example')
+        self.assertEqual(len(calls),1);self.assertEqual(result['metadata']['code'],'access_denied')
+        self.assertFalse(result['metadata']['retryable']);self.assertFalse(result['metadata']['page_read'])
+        self.assertEqual(result['metadata']['next_action'],'accessible_source_or_user_export')
+        self.assertIn('identity',result['content'])
+
+    async def test_ddgs_999_is_not_retried_as_a_temporary_server_failure(self):
+        from xuloom.tools.web_tool import WebSearchTool
+        from xuloom.tools.web_network import SearchError
+        with patch('xuloom.tools.web_tool.DDGS') as factory:
+            factory.return_value.text.side_effect=SearchError('HTTP 999')
+            result=await WebSearchTool().execute('public evidence')
+        self.assertFalse(result['ok']);self.assertFalse(result['metadata']['retryable'])
+        self.assertEqual(factory.return_value.text.call_count,1)
+
     def test_static_extraction_keeps_real_relative_and_absolute_links(self):
         page='<html><title>Paper</title><nav><a href="/noise">nav</a></nav><p>Source <a href="../papers/a?q=1">Real paper</a><a href="https://other.invalid/b">Another</a><a href="javascript:bad()">unsafe</a></p></html>'
         text,title=extract_page(page,True,'https://example.invalid/research/index')

@@ -57,8 +57,10 @@ def network_error(error, metadata, secrets=()):
         code = "legal_restriction"
     elif status == 404:
         code = "not_found"
-    elif status in {401, 403}:
+    elif status in {401, 403, 999}:
         code = "access_denied"
+    elif status is not None and not 100 <= status < 600:
+        code = "invalid_http_status"
     elif status is not None:
         code = "http_error"
     elif re.search(r"certificate|cert_verify|unknown issuer|tls handshake|ssl verification", lower):
@@ -79,7 +81,7 @@ def network_error(error, metadata, secrets=()):
         code = "configuration_error"
     else:
         code = "provider_error"
-    retryable = (status in {408, 425, 429} or status is not None and status >= 500
+    retryable = (status in {408, 425, 429} or status is not None and 500 <= status < 600
                  or code in {"timeout", "dns_error", "proxy_error", "connection_error", "rate_limited"}
                  or code == "provider_error" and any(isinstance(e, SearchError) for e in chain))
     detail = safe_detail(" → ".join(type(e).__name__ + ": " + str(e) for e in chain), secrets)

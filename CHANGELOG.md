@@ -4,6 +4,11 @@
 
 ## [未发布]
 
+## [0.2.12] - 2026-11-20
+
+### 修复
+- HTTP 999 归为不可自动重试的访问受限，明确正文未读取及后续可访问来源／用户提供内容入口；不自动开启浏览器、换代理或据状态码推断人物身份。仅 500–599 归入可重试服务端状态，其他非标准状态不再误判。
+
 ## [0.2.11] - 2026-11-19
 
 ### 修复
@@ -258,7 +263,8 @@
 - 引擎拆分为 `xuloom/core/engine_parts/` 下的多个 mixin，主循环拆成多个阶段方法。
 - 新增不可变的 `EngineConfig` 和顶层公开 API（`from xuloom import ...`）。
 
-[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.11...HEAD
+[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.12...HEAD
+[0.2.12]: https://github.com/Dheudb/xuloom/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/Dheudb/xuloom/compare/v0.2.10...v0.2.11
 [0.2.10]: https://github.com/Dheudb/xuloom/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/Dheudb/xuloom/compare/v0.2.8...v0.2.9
