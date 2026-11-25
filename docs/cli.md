@@ -1,5 +1,7 @@
 # CLI
 
+Windows 桌面包可运行 `Install-CLI.cmd` 注册用户级 `xuloom` 命令，重开终端后生效；复用包内 Python，无需安装到 Conda。`Uninstall-CLI.cmd` 移除命令入口并保留个人数据；也可以直接运行包内 `xuloom.cmd`。详见[桌面包说明](desktop.md#在终端运行-xuloom)。
+
 正式非交互任务使用 `xuloom exec "任务" --json`；目标续跑与定时唤醒见 [目标与调度](goals-and-schedules.md)。
 
 读取当前仓库与分支：`xuloom git-status --cwd <目录> --json`；交互模式输入 `/git`。不调用模型，详情见 [Git 状态](git-status.md)。

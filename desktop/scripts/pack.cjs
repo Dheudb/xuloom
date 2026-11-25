@@ -70,6 +70,8 @@ fs.copyFileSync(
 );
 fs.writeFileSync(
   path.join(output, "START-HERE.txt"),
-  "Xuloom Desktop\r\n\r\nExtract the complete folder, then run Xuloom.exe.\r\nPython and MCP dependencies are included. No Python installation or interpreter selection is required.\r\nConfigure a model endpoint, then start a new session in the automatic per-user workspace.\r\nChange the default directory in Settings, or use Open Project for an existing folder.\r\nThird-party MCP programs may have their own runtime requirements.\r\nPython's license and dependency metadata are under resources/python.\r\n",
+  "Xuloom Desktop\r\n\r\nExtract the complete folder, then run Xuloom.exe.\r\nPython and MCP dependencies are included. No Python installation or interpreter selection is required.\r\nConfigure a model endpoint, then start a new session in the automatic per-user workspace.\r\nChange the default directory in Settings, or use Open Project for an existing folder.\r\nThird-party MCP programs may have their own runtime requirements.\r\nPython's license and dependency metadata are under resources/python.\r\n\r\nTerminal CLI: run Install-CLI.cmd once, then close and reopen your terminal and type xuloom.\r\nNo administrator access or extra Python installation is needed. Uninstall-CLI.cmd removes only the user command.\r\nYou can also run xuloom.cmd in this folder without changing PATH.\r\n",
 );
+for (const name of ["Install-CLI.cmd", "Uninstall-CLI.cmd", "xuloom.cmd", "cli_install.py"])
+  fs.copyFileSync(path.join(root, "cli", name), path.join(output, name));
 console.log("Self-contained desktop: " + path.join(output, "Xuloom.exe"));

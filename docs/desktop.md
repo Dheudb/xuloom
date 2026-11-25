@@ -15,6 +15,14 @@
 也不需要选择解释器。请保留 `resources/` 等随包文件；只复制一个 exe 不能运行。
 使用本地模型时，仍需自行启动对应的模型推理服务。
 
+### 在终端运行 xuloom
+
+完整 Windows 包内运行一次 `Install-CLI.cmd`，然后关闭并重新打开终端，即可在任意项目目录输入 `xuloom`。无需管理员权限、额外 Python 或往 Conda 安装依赖。
+
+安装器在 `%LOCALAPPDATA%\Xuloom\bin` 创建命令入口并加入当前用户 PATH，使用本包的 `resources\python\python.exe`；不会改变命令执行时的工作目录。桌面与 CLI 继续共用原有配置、凭据和历史。包内 `xuloom.cmd` 可直接运行，无需修改 PATH。
+
+`Uninstall-CLI.cmd` 只移除安装器拥有的入口和它添加的 PATH 项，保留应用、配置、Key 与会话。重复安装不会重复添加 PATH，已有同名或被修改的入口不会被覆盖。移动或删除应用目录后，应在新目录重新安装入口，或先卸载。已有 Windows Terminal / VS Code 等宿主可能仍保留旧 PATH，需要退出并重新打开宿主。
+
 源码开发方式见[开发说明](development.md)。
 
 ## 界面入口

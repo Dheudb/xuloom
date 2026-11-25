@@ -13,6 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DESKTOP = ROOT / "desktop"
+CLI_ASSETS = ("Install-CLI.cmd", "Uninstall-CLI.cmd", "xuloom.cmd", "cli_install.py")
 CONTENT = runpy.run_path(str(DESKTOP / 'scripts/package_content.py'))
 
 
@@ -150,7 +151,7 @@ def main():
         raise SystemExit("Unexpected bundled skills")
     # Only known application roots may be published. User state stays outside this package.
     allowed = {p.name for p in (DESKTOP / "node_modules/electron/dist").iterdir()} - {"electron.exe"}
-    allowed.update({"Xuloom.exe", "START-HERE.txt", "LICENSE-Xuloom.txt"})
+    allowed.update({"Xuloom.exe", "START-HERE.txt", "LICENSE-Xuloom.txt", *CLI_ASSETS})
     if any(p.name not in allowed for p in package.iterdir()):
         raise SystemExit("Unexpected file in portable installation")
     if {p.name for p in (package / "resources").iterdir()} != {"app", "python", "default_app.asar"}:
@@ -166,6 +167,8 @@ def main():
     files = []
     omitted = {}
     for relative, path in archive_files(package, replacements):
+        if relative.as_posix() in CLI_ASSETS:
+            continue  # Always package the public installer matching this source commit.
         if path.is_symlink() or getattr(path.lstat(), "st_file_attributes", 0) & 0x400:
             raise SystemExit("Refusing a linked package path")
         if not path.is_file():
@@ -185,6 +188,7 @@ def main():
         if any(part.lower() in forbidden for part in relative.parts):
             raise SystemExit("Refusing user/private data in archive")
         files.append((relative, path))
+    files.extend((Path(name), DESKTOP / 'cli' / name) for name in CLI_ASSETS)
     record['compression'] = 'zip-deflate'
     record['omittedBytesByReason'] = omitted
     write_archive(output, files, record, args.zip_program)

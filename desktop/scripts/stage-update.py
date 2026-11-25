@@ -17,8 +17,8 @@ DESKTOP = ROOT / "desktop"
 
 def source_hashes():
     files = set()
-    for name in ("xuloom", "tests", "scripts", "examples", "docs", "desktop/src", "desktop/electron", "desktop/tests", "desktop/scripts"):
-        files.update(p for p in (ROOT/name).rglob("*") if p.is_file() and p.suffix in {".py", ".md", ".tsx", ".ts", ".css", ".cjs", ".ps1"} and "__pycache__" not in p.parts)
+    for name in ("xuloom", "tests", "scripts", "examples", "docs", "desktop/src", "desktop/electron", "desktop/tests", "desktop/scripts", "desktop/cli"):
+        files.update(p for p in (ROOT/name).rglob("*") if p.is_file() and p.suffix in {".py", ".md", ".tsx", ".ts", ".css", ".cjs", ".ps1", ".cmd"} and "__pycache__" not in p.parts)
     files.update(ROOT/name for name in ("setup.py", "pyproject.toml", "README.md", "README.en.md", "desktop/package.json", "desktop/package-lock.json"))
     return {p.relative_to(ROOT).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(files)}
 
