@@ -4,7 +4,10 @@
 
 ## [未发布]
 
+## [0.2.14] - 2026-11-25
+
 ### 新增
+- CLI `/model` 默认显示已保存 API 和模型列表，复用地址、Key、网络和推理配置；与 `/model use` 共用切换逻辑，按连接区分同名模型并保存会话选择，保留手动配置入口，选择过程不调用模型。
 - Windows 桌面包附带 `Install-CLI.cmd` / `Uninstall-CLI.cmd`：可将内置 Python 注册为用户级 `xuloom` 命令，无管理员权限、额外依赖或 Conda 修改；保留调用目录、参数和退出码，支持重复安装与移除入口，配置和历史继续共用。
 
 ## [0.2.13] - 2026-11-25
@@ -272,7 +275,8 @@
 - 引擎拆分为 `xuloom/core/engine_parts/` 下的多个 mixin，主循环拆成多个阶段方法。
 - 新增不可变的 `EngineConfig` 和顶层公开 API（`from xuloom import ...`）。
 
-[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.13...HEAD
+[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.14...HEAD
+[0.2.14]: https://github.com/Dheudb/xuloom/compare/v0.2.13...v0.2.14
 [0.2.13]: https://github.com/Dheudb/xuloom/compare/v0.2.12...v0.2.13
 [0.2.12]: https://github.com/Dheudb/xuloom/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/Dheudb/xuloom/compare/v0.2.10...v0.2.11

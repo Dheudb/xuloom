@@ -21,7 +21,7 @@ python -m pip install -e ".[mcp]"
 xuloom --help
 ```
 
-进入要处理的项目目录后运行 `xuloom`。首次使用 `/model` 配置模型。
+进入要处理的项目目录后运行 `xuloom`。输入 `/model` 后先选已保存 API 连接，再选该连接下的模型，直接复用其地址、Key、网络线路和推理设置；支持返回和取消，不调用模型服务。未配置连接时进入手动向导；已有连接时也可选“Configure an API manually”添加或修改。桌面端导入的模型与 CLI 共用同一目录。运行中的子代理需要先停止或结束，才能切换。
 从源码安装的 CLI 需要本机 Python；Windows 桌面便携包的用户不需要配置 Python。
 
 Windows 便携包也可以直接启动 CLI。在目标工作目录打开 PowerShell，使用解压目录的实际路径：
@@ -45,7 +45,8 @@ xuloom --resume SESSION_ID      恢复指定会话
 
 | 命令 | 用途 |
 |---|---|
-| `/model`、`/model status` | 配置、查看模型连接 |
+| `/model`、`/model status` | 从已保存连接与模型列表选择、查看当前连接 |
+| `/model list`、`/model use <编号>` | 列出所有已保存模型、按编号直接切换 |
 | `/palette` | 命令面板 |
 | `/plan`、`/plan off` | 切换规划模式 |
 | `/coordinator` | 多代理协调模式 |

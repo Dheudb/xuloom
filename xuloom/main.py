@@ -381,8 +381,68 @@ PROVIDER_PRESETS = {
 }
 
 
+async def _use_saved_model(engine, connection_id, model):
+    """Use the same saved binding for the picker and /model use; no provider request."""
+    workers = engine.tool_context.get("subagent_tasks")
+    if engine.has_active_turn() or (workers and any(not task.done() for task in workers.tasks.values())):
+        console.print("[yellow]Wait for background agents or stop them before switching.[/yellow]")
+        return False
+    from xuloom.core.config import update_config
+    from xuloom.core.model_catalog import model_selection
+    import copy
+    try:
+        cfg = await asyncio.to_thread(update_config, lambda latest: select_model(latest, connection_id, model))
+        selected = active_connection(cfg)
+        apply_connection_env(selected)
+        previous_client, previous_compactor = engine.client, engine.compactor
+        engine.switch_model_runtime(provider=selected["provider"], model=model,
+            api_base_url=selected.get("base_url", ""), api_key=selected.get("api_key", ""),
+            network_mode=selected.get("network_mode", "direct"), persist=False)
+        engine.config = engine.config.replace(model_connection_id=selected["id"])
+        engine.model_selection = model_selection(cfg, getattr(engine, "model_selection", None))
+        engine.reasoning_profile = copy.deepcopy(selected.get("model_reasoning", {}).get(model))
+        engine._sync_model_runtime_context()
+        if not engine.persist_session_state():
+            raise OSError("Model selection checkpoint failed")
+        if previous_client is not None:
+            await previous_client.close()
+        if previous_compactor.client:
+            await previous_compactor.client.close()
+    except (ValueError, OSError, RuntimeError) as error:
+        console.print(f"[red]Model switch failed ({type(error).__name__}); check the saved connection and try again.[/red]")
+        return False
+    console.print("Model switched to " + model + ".", style="green", markup=False)
+    return True
+
+
 async def _interactive_model_switch(engine, tui):
-    """Interactive wizard to switch protocol, model, API base URL, and API key."""
+    """Pick a saved connection and model; retain the manual first-time wizard."""
+    from rich.markup import escape
+    catalog = [row for row in connections(load_config()) if row.get("models")]
+    if not catalog:
+        return await _manual_model_switch(engine, tui)
+    while True:
+        chosen = tui.choose_menu(title="Select Saved API", body_lines=[
+            "Current model: " + escape(engine.primary_model or "(empty)"),
+            "Select a saved connection; its address and API key will be reused."],
+            options=[{"value": "saved:" + row["id"], "label": escape(row.get("name") or row["id"])
+                      + " · " + escape(row["provider"]) + f" · {len(row['models'])} models"} for row in catalog]
+                    + [{"value": "configure", "label": "Configure an API manually"}, {"value": "", "label": "Cancel"}],
+            prompt_label="API", default_value="")
+        if not chosen:
+            return
+        if chosen == "configure":
+            return await _manual_model_switch(engine, tui)
+        connection = next(row for row in catalog if "saved:" + row["id"] == chosen)
+        model = tui.choose_menu(title="Select Model", body_lines=["API: " + escape(connection.get("name") or connection["id"])],
+            options=[{"value": name, "label": escape(name)} for name in connection["models"]]
+                    + [{"value": "", "label": "Back"}], prompt_label="Model", default_value="")
+        if model:
+            return await _use_saved_model(engine, connection["id"], model)
+
+
+async def _manual_model_switch(engine, tui):
+    """Manual wizard for adding or editing a model connection."""
 
     current_model = engine.primary_model or "(empty)"
     current_provider = engine.model_provider or "(empty)"
@@ -691,7 +751,7 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
                     "  /history [agent-id|-] [cursor]    Read a saved dialogue page without running it\n"
                     "  /link             Show this chat's local deep link\n\n"
                     "[bold white]Model & Provider[/bold white]\n"
-                    "  /model            Interactive model/provider switch\n"
+                    "  /model            Select a saved API and model\n"
                     "  /model status     Show current model runtime\n"
                     "  /model list       List saved API models\n"
                     "  /model use 2      Switch to a saved model\n"
@@ -953,28 +1013,14 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
                         for index, (connection, model) in enumerate(choices, 1):
                             table.add_row(str(index), connection.get("name", connection["id"]), model)
                         console.print(table)
-                        console.print("[dim]Use /model use <number> to switch; /model configures an API.[/dim]")
+                        console.print("[dim]Use /model use <number> to switch, or /model to choose from the saved catalog.[/dim]")
                     else:
                         number = raw.split(maxsplit=2)[2].strip()
                         if not number.isdigit() or not 1 <= int(number) <= len(choices):
                             console.print("[red]Choose a valid number from /model list.[/red]")
                             continue
-                        if any(not task.done() for task in engine.tool_context["subagent_tasks"].tasks.values()):
-                            console.print("[yellow]Wait for background agents or stop them before switching.[/yellow]")
-                            continue
                         connection, model = choices[int(number) - 1]
-                        from xuloom.core.config import update_config
-                        cfg = await asyncio.to_thread(update_config, lambda latest: select_model(latest, connection["id"], model))
-                        selected = active_connection(cfg)
-                        apply_connection_env(selected)
-                        previous_client, previous_compactor = engine.client, engine.compactor
-                        engine.switch_model_runtime(provider=selected["provider"], model=model,
-                            api_base_url=selected.get("base_url", ""), api_key=selected.get("api_key", ""), network_mode=selected.get("network_mode", "direct"))
-                        if previous_client is not None:
-                            await previous_client.close()
-                        if previous_compactor.client:
-                            await previous_compactor.client.close()
-                        console.print(f"[green]Model switched to {model}.[/green]")
+                        await _use_saved_model(engine, connection["id"], model)
                 else:
                     await _interactive_model_switch(engine, tui)
                 continue
