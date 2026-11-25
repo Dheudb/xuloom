@@ -80,12 +80,14 @@ class TurnRecorder:
             usage["inputTokens"] += int(event.get("input_tokens") or 0)
             usage["outputTokens"] += int(event.get("output_tokens") or 0)
             usage["requests"] += 1
-            if event.get("cost_usd") is None:
+            if event.get("cost_amount", event.get("cost_usd")) is None:
                 usage["unpricedRequests"] += 1
             if event.get("usage_source") not in (None, "api_usage"):
                 usage["estimated"] = True
             if event.get("task_cost_usd") is not None:
                 usage["costUsd"] = float(event["task_cost_usd"])
+            if isinstance(event.get("task_costs"), dict):
+                usage["costAmounts"] = dict(event["task_costs"])
             return True
         if kind == "stream_status":
             if event.get("agent_id"): return False

@@ -151,7 +151,8 @@ def status(engine):
         last=copy.deepcopy(getattr(engine, "last_compaction", None)),
         auxiliary=copy.deepcopy(getattr(engine, "auxiliary_usage", {})), estimator=engine.compactor._local_estimator_mode(),
         cost=dict(getattr(engine, "session_cost", None) or {"usd": 0.0, "unpriced_requests": 0},
-                  limitUsd=getattr(getattr(engine, "cost_meter", None), "limit_usd", None)))
+                  limitUsd=getattr(getattr(engine, "cost_meter", None), "limit_usd", None),
+                  limitCny=getattr(getattr(engine, "cost_meter", None), "limit_cny", None)))
 
 
 def output_limit(engine, kwargs):

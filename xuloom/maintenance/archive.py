@@ -258,7 +258,7 @@ def diagnostic(root, output):
 def import_settings(root):
     """Explicitly import metadata/prices after restore; existing secrets always stay with their original route."""
     from xuloom.core.config import load_config, save_config, CONFIG_FILE
-    from xuloom.observability.cost import pricing_path, save_pricing_settings, load_pricing_settings, ModelPrice
+    from xuloom.observability.cost import pricing_path, save_pricing_settings, load_pricing_settings, ModelPrice, load_cny_limit
     from xuloom.core.model_catalog import connections
     source = Path(root) / 'restored-settings.json'
     restored = json.loads(source.read_text(encoding='utf-8'))
@@ -309,7 +309,8 @@ def import_settings(root):
                 key = '@' + mapping.get(connection, connection) + '/' + model
             values.setdefault(key, value)
         save_config(cfg)
-        save_pricing_settings(values, cap)
+        cny_cap = load_cny_limit()
+        save_pricing_settings(values, cap, max_cost_cny=(cny_cap if cny_cap is not None else restored.get("pricing", {}).get("max_cost_cny")))
         os.replace(source, source.with_suffix('.imported.json'))
     except BaseException:
         from xuloom.core.storage import atomic_bytes

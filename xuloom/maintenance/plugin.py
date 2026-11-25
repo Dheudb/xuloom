@@ -35,11 +35,11 @@ def run(action, params):
     if action == 'diagnose':
         return diagnostic(data_directory(), Path(params['output']))
     from xuloom.core.config import load_config
-    from xuloom.observability.cost import load_pricing_settings
+    from xuloom.observability.cost import load_pricing_settings, load_cny_limit
     prices, cap = load_pricing_settings()
     from dataclasses import asdict
     return backup(data_directory(), params['output'], load_config(),
-                  {'models': {k: asdict(v) for k, v in prices.items()}, 'max_cost_usd': cap})
+                  {'models': {k: asdict(v) for k, v in prices.items()}, 'max_cost_usd': cap, 'max_cost_cny': load_cny_limit()})
 
 
 def handler(action):

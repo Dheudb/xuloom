@@ -82,7 +82,7 @@ export type TurnTrace = {
   elapsedBeforeResumeMs?: number;
   approximate?: boolean;
   /** Main-agent model usage of this turn; costUsd is the task total (subagents included) when priced. */
-  usage?: { inputTokens: number; outputTokens: number; requests: number; unpricedRequests: number; estimated: boolean; costUsd?: number };
+  usage?: { inputTokens: number; outputTokens: number; requests: number; unpricedRequests: number; estimated: boolean; costUsd?: number; costAmounts?: Record<string, number> };
   answer?: string;
   pendingText?: string;
   steps: ({ kind: "text"; text: string; provisional?: boolean; protocolError?: { retrying?: boolean; detail?: string; diagnostic?: string } } | { kind: "tool"; tool: ToolActivity } | { kind: "compaction"; compaction: CompactionNotice } | { kind: "notice"; notice: RetryNotice })[];

@@ -257,6 +257,7 @@ async def open_engine(args, emit, *, read_only=False):
 async def run_eval_command(args, emit):
     from xuloom.core.engine_config import EngineConfig
     from xuloom.testing import load_cases, run_eval
+    from xuloom.observability.cost import format_costs
     cases = load_cases(args.cases)
     if args.only:
         unknown = set(args.only) - {case.id for case in cases}
@@ -278,7 +279,7 @@ async def run_eval_command(args, emit):
     config = EngineConfig(approval_policy=ApprovalPolicy(args.permission), load_enabled_plugins=True)
     report = await run_eval(cases, config, workdir=args.workdir, permission_handler=reject, on_event=progress)
     lines = [f"{'PASS' if case.passed else 'FAIL'}  {case.id}  ({case.reason}, {case.seconds:.1f}s"
-             + (f", ${case.cost_usd:.4f}" if case.cost_usd is not None else "") + ")"
+             + (", " + format_costs(case.costs) if case.costs else f", ${case.cost_usd:.4f}" if case.cost_usd is not None else "") + ")"
              + "".join(f"\n      x {check['type']} {check.get('detail') or ''}".rstrip() for check in case.checks if not check["passed"])
              + (f"\n      error: {case.error}" if case.error else "") for case in report.cases]
     lines.append(f"{report.passed}/{len(report.cases)} passed")

@@ -412,7 +412,8 @@ class XuloomServer:
         return {"session_id": session.id, "cwd": str(session.cwd), "running": session.running,
                 "pending": list(session.pending.values()),
                 "usage": dict(engine.session_token_usage),
-                "cost_usd": round(float(engine.session_cost.get("usd", 0.0) or 0.0), 6)}
+                "cost_usd": round(float(engine.session_cost.get("usd", 0.0) or 0.0), 6),
+                "costs": dict(engine.session_cost.get("amounts", {"USD": engine.session_cost.get("usd", 0.0)}))}
 
     async def _close_session(self, session: _Session) -> None:
         self.sessions.pop(session.id, None)

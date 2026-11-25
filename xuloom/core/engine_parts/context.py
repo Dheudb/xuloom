@@ -233,8 +233,14 @@ class ContextManagementMixin(EngineState):
             if cost is None:
                 self.session_cost["unpriced_requests"] = int(self.session_cost.get("unpriced_requests", 0) or 0) + 1
             else:
-                counts["cost_usd"] = round(float(counts.get("cost_usd", 0.0) or 0.0) + cost, 8)
-                self.session_cost["usd"] = float(self.session_cost.get("usd", 0.0) or 0.0) + cost
+                from xuloom.observability.cost import add_cost
+                price = meter.price_for(usage.get("model"), connection=self.tool_context.get("pricing_connection_id"))
+                currency = price.currency if price else "USD"
+                amounts = counts.setdefault("amounts", {"USD": counts["cost_usd"]} if "cost_usd" in counts else {})
+                amounts[currency] = amounts.get(currency, 0) + cost
+                if currency == "USD":
+                    counts["cost_usd"] = round(amounts["USD"], 8)
+                add_cost(self.session_cost, cost, currency)
 
     def _auxiliary_before(self, model, purpose, messages):
         """Answer an auxiliary request from a recording, refuse it, or return ``None`` to send it."""

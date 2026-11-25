@@ -1,5 +1,6 @@
 """Human-readable runtime summaries for CLI and desktop."""
 from xuloom.core.engine_state import EngineState
+from xuloom.observability.cost import cost_totals, format_costs
 
 
 class StatusMixin(EngineState):
@@ -148,9 +149,10 @@ class StatusMixin(EngineState):
             f"Cache-aware compaction pressure: {cache_signal.get('cache_pressure_tokens', 0)}",
             f"Session input tokens: {self.session_token_usage.get('input_tokens', 0)}",
             f"Session output tokens: {self.session_token_usage.get('output_tokens', 0)}",
-            f"Session cost: ${float(self.session_cost.get('usd', 0.0) or 0.0):.4f}"
+            f"Session cost: {format_costs(cost_totals(self.session_cost))}"
             + (f" (+{self.session_cost.get('unpriced_requests')} unpriced requests)" if self.session_cost.get('unpriced_requests') else ""),
             f"Task cost limit: {'none' if self.cost_meter.limit_usd is None else f'${self.cost_meter.limit_usd:.4f}'}",
+            f"Task CNY cost limit: {self.cost_meter.limit_cny if self.cost_meter.limit_cny is not None else 'none'}",
             f"Remaining output budget: {'unlimited' if output_remaining is None else output_remaining}",
             f"In-progress tools: {len(self.in_progress_tools)}",
             f"Running shell tasks: {len(running_shell_tasks)}",

@@ -2210,3 +2210,5 @@ body.panel-resizing iframe { pointer-events: none; }
 .maintenance-confirm label { display: flex !important; align-items: center; gap: 10px; }
 .maintenance-confirm input[type="checkbox"] { flex: 0 0 auto; width: 16px; height: 16px; margin: 0; }
 .maintenance-actions { margin: 8px 0; }
+
+.cost-table select.cost-currency { min-width: 90px; width: 90px; }

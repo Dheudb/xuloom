@@ -198,16 +198,18 @@ class QueryEngine(
     def _init_observability(self, config: EngineConfig):
         """Tracer (config + environment exporters) and cost meter (prices + task cap)."""
         from xuloom.observability import CostMeter, Tracer, environment_exporters
-        from xuloom.observability.cost import load_pricing_settings
+        from xuloom.observability.cost import load_pricing_settings, load_cny_limit
         self.tracer = Tracer(tuple(config.trace_exporters) + tuple(environment_exporters()))
         try:
             prices, file_cap = load_pricing_settings()
+            cny_cap = load_cny_limit()
         except ValueError as error:
             _engine_logger.warning("Model prices were not loaded: %s", error)
-            prices, file_cap = {}, None
+            prices, file_cap, cny_cap = {}, None, None
         prices.update(config.model_prices or {})
         # EngineConfig / XULOOM_MAX_COST_USD win over the cap saved in pricing.json (desktop settings).
-        self.cost_meter = CostMeter(prices, limit_usd=config.max_cost_usd if config.max_cost_usd is not None else file_cap)
+        self.cost_meter = CostMeter(prices, limit_usd=config.max_cost_usd if config.max_cost_usd is not None else file_cap,
+                                    limit_cny=config.max_cost_cny if config.max_cost_cny is not None else cny_cap)
         if not isinstance(getattr(self, "session_cost", None), dict):
             self.session_cost = {"usd": 0.0, "unpriced_requests": 0}
         self._owns_observability = True

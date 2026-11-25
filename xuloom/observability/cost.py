@@ -1,6 +1,6 @@
 """Model prices, request cost and the per-task spending cap.
 
-Prices are USD per million tokens. Xuloom ships no price list (they change and
+Prices are per million tokens in USD (default) or CNY, without automatic FX conversion. Xuloom ships no price list (they change and
 differ between providers); set them for the models you use, either in
 ``~/.xuloom/pricing.json``::
 
@@ -44,21 +44,24 @@ class ModelPrice:
     output: float
     cache_write: Optional[float] = None
     cache_read: Optional[float] = None
+    currency: str = "USD"
 
     @classmethod
     def coerce(cls, value: Any) -> "ModelPrice":
         if isinstance(value, ModelPrice):
             price = value
         elif isinstance(value, Mapping):
-            unknown = set(value) - {"input", "output", "cache_write", "cache_read"}
+            unknown = set(value) - {"input", "output", "cache_write", "cache_read", "currency"}
             if unknown:
                 raise ValueError("Unknown price field(s): " + ", ".join(sorted(unknown)))
-            values = {key: (None if item is None else float(item)) for key, item in value.items()}
+            values = {key: (item if key == "currency" else None if item is None else float(item)) for key, item in value.items()}
             if values.get("input") is None or values.get("output") is None:
                 raise ValueError("A model price needs input and output prices")
             price = cls(**values)  # type: ignore[arg-type]
         else:
             raise TypeError("A model price is a ModelPrice or a mapping with input/output prices")
+        if price.currency not in ("USD", "CNY"):
+            raise ValueError("Price currency must be USD or CNY")
         for name in ("input", "output", "cache_write", "cache_read"):
             item = getattr(price, name)
             if item is not None and (not math.isfinite(item) or item < 0):
@@ -73,6 +76,35 @@ class ModelPrice:
         return (tokens("input_tokens") * self.input + tokens("output_tokens") * self.output
                 + tokens("cache_creation_input_tokens") * cache_write
                 + tokens("cache_read_input_tokens") * cache_read) / 1_000_000
+
+
+def price_dict(price: ModelPrice) -> Dict[str, Any]:
+    """Default USD remains compatible with existing settings and extensions."""
+    return {key: value for key, value in vars(price).items()
+            if value is not None and not (key == "currency" and value == "USD")}
+
+
+def cost_totals(record: Mapping[str, Any]) -> Dict[str, float]:
+    """Read native totals or pre-currency USD session metadata without counting it twice."""
+    totals = {str(key): float(value) for key, value in (record.get("amounts") or {}).items()}
+    if record.get("usd") or ("amounts" not in record):
+        totals.setdefault("USD", float(record.get("usd", 0) or 0))
+    return totals
+
+
+def add_cost(record: Dict[str, Any], amount: float, currency: str) -> None:
+    totals = cost_totals(record)
+    # A legacy zero is not a second currency in an otherwise CNY-only session.
+    if currency != "USD" and totals.get("USD") == 0 and "amounts" not in record:
+        totals.pop("USD")
+    totals[currency] = totals.get(currency, 0) + amount
+    record["amounts"] = totals
+    record["usd"] = totals.get("USD", 0.0)
+
+
+def format_costs(amounts: Mapping[str, float]) -> str:
+    return " + ".join(("¥" if key == "CNY" else "$") + f"{value:.4f}"
+                      for key, value in sorted((amounts or {"USD": 0.0}).items()))
 
 
 def pricing_path(home: Optional[Path] = None) -> Path:
@@ -96,10 +128,36 @@ def load_pricing_settings(path: Optional[Path] = None) -> Tuple[Dict[str, ModelP
     cap = raw.get("max_cost_usd") if isinstance(raw, dict) else None
     if cap is not None and (isinstance(cap, bool) or not isinstance(cap, (int, float)) or not math.isfinite(cap) or cap < 0):
         raise ValueError(f"{path}: max_cost_usd must be a non-negative number")
+    _validate_cap(raw.get("max_cost_cny") if isinstance(raw, dict) else None, "max_cost_cny")
     return _parse_models(path, raw), (None if cap is None else float(cap))
 
 
-def save_pricing_settings(models: Mapping[str, Any], max_cost_usd: Optional[float], path: Optional[Path] = None) -> Path:
+def _validate_cap(value: Any, name: str) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+        raise ValueError(f"{name} must be a non-negative number")
+    return float(value)
+
+
+def load_cny_limit(path: Optional[Path] = None) -> Optional[float]:
+    path = Path(path) if path is not None else pricing_path()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"Cannot read {path}: {error}") from error
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path} must contain a pricing object")
+    return _validate_cap(raw.get("max_cost_cny"), "max_cost_cny")
+
+
+_PRESERVE = object()
+
+
+def save_pricing_settings(models: Mapping[str, Any], max_cost_usd: Optional[float], path: Optional[Path] = None,
+                         *, max_cost_cny: Any = _PRESERVE) -> Path:
     """Validate and write ``pricing.json`` atomically (used by the desktop settings)."""
     path = Path(path) if path is not None else pricing_path()
     prices = {str(name).strip(): ModelPrice.coerce(value) for name, value in (models or {}).items()}
@@ -109,8 +167,10 @@ def save_pricing_settings(models: Mapping[str, Any], max_cost_usd: Optional[floa
         max_cost_usd = float(max_cost_usd)
         if not math.isfinite(max_cost_usd) or max_cost_usd < 0:
             raise ValueError("max_cost_usd must be a non-negative number")
-    payload: Dict[str, Any] = {"models": {name: {key: value for key, value in vars(price).items() if value is not None}
-                                          for name, price in prices.items()}}
+    cny_cap = load_cny_limit(path) if max_cost_cny is _PRESERVE else _validate_cap(max_cost_cny, "max_cost_cny")
+    payload: Dict[str, Any] = {"models": {name: price_dict(price) for name, price in prices.items()}}
+    if cny_cap is not None:
+        payload["max_cost_cny"] = cny_cap
     if max_cost_usd is not None:
         payload["max_cost_usd"] = max_cost_usd
     from xuloom.core.storage import atomic_json
@@ -157,13 +217,25 @@ def runtime_connection(engine):
 class CostMeter:
     """Prices requests and enforces the task cap. Subagents share their parent's meter."""
 
-    def __init__(self, prices: Optional[Mapping[str, Any]] = None, *, limit_usd: Optional[float] = None):
+    def __init__(self, prices: Optional[Mapping[str, Any]] = None, *, limit_usd: Optional[float] = None,
+                 limit_cny: Optional[float] = None):
         self.prices: Dict[str, ModelPrice] = {str(name): ModelPrice.coerce(value) for name, value in (prices or {}).items()}
         if limit_usd is not None and (not math.isfinite(float(limit_usd)) or float(limit_usd) < 0):
             raise ValueError("max_cost_usd must be a non-negative number")
         self.limit_usd = None if limit_usd is None else float(limit_usd)
-        self.task_usd = 0.0
+        self.limit_cny = _validate_cap(limit_cny, "max_cost_cny")
+        self.task_amounts: Dict[str, float] = {}
         self.task_unpriced = 0
+
+    @property
+    def task_usd(self) -> float:
+        """Legacy USD subtotal only; never contains CNY."""
+        return self.task_amounts.get("USD", 0.0)
+
+    @task_usd.setter
+    def task_usd(self, value: float) -> None:
+        if value or "USD" in self.task_amounts:
+            self.task_amounts["USD"] = value
 
     def price_for(self, model: Optional[str], *, connection: Optional[str] = None) -> Optional[ModelPrice]:
         name = str(model or "")
@@ -185,7 +257,7 @@ class CostMeter:
         return None
 
     def start_task(self) -> None:
-        self.task_usd = 0.0
+        self.task_amounts.clear()
         self.task_unpriced = 0
 
     def record(self, model: Optional[str], usage: Mapping[str, Any], *, connection: Optional[str] = None) -> Optional[float]:
@@ -195,14 +267,24 @@ class CostMeter:
             self.task_unpriced += 1
             return None
         cost = price.cost(usage)
-        self.task_usd += cost
+        self.task_amounts[price.currency] = self.task_amounts.get(price.currency, 0) + cost
         return cost
 
     def blocked_reason(self, model: Optional[str], *, connection: Optional[str] = None) -> Optional[str]:
         """Why the next request to ``model`` must not start, or ``None``."""
-        if self.limit_usd is None:
+        if self.limit_usd is None and self.limit_cny is None:
             return None
-        if self.task_usd >= self.limit_usd:
+        limits = {"USD": self.limit_usd, "CNY": self.limit_cny}
+        for currency, limit in limits.items():
+            spent = self.task_amounts.get(currency, 0)
+            if currency == "CNY" and limit is not None and spent >= limit:
+                return f"Task cost limit reached: CNY {spent:.4f} spent of CNY {limit:.4f}. Raise max_cost_cny or continue in a new task."
+        price = self.price_for(model, connection=connection)
+        required = set(self.task_amounts) | ({price.currency} if price is not None else set())
+        for currency in sorted(required):
+            if limits[currency] is None:
+                return f"A task cost limit is set but {currency} has no cap. Set max_cost_{currency.lower()}; currencies are not converted."
+        if self.limit_usd is not None and self.task_usd >= self.limit_usd:
             return (f"Task cost limit reached: ${self.task_usd:.4f} spent of ${self.limit_usd:.4f}. "
                     "Raise max_cost_usd (XULOOM_MAX_COST_USD) or continue in a new task.")
         if self.price_for(model, connection=connection) is None:

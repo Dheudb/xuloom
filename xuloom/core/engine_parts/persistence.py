@@ -273,7 +273,8 @@ class SessionPersistenceMixin(EngineState):
             if meter is not None and self.agent_depth == 0:
                 meter.start_task()
                 if isinstance(saved_task, dict):
-                    meter.task_usd = max(0.0, float(saved_task.get("usd", 0.0) or 0.0))
+                    from xuloom.observability.cost import cost_totals
+                    meter.task_amounts = cost_totals(saved_task)
                     meter.task_unpriced = max(0, int(saved_task.get("unpriced_requests", 0) or 0))
             self.session_memory_manager.bind_session(self.session_id, metadata.get("session_memory", {}))
             self.memory_extractor.load_state(metadata.get("memory_extractor", {}))
@@ -339,7 +340,8 @@ class SessionPersistenceMixin(EngineState):
             "post_sampling_history": self.post_sampling_history,
             "session_token_usage": self.session_token_usage,
             "session_cost": getattr(self, "session_cost", {"usd": 0.0, "unpriced_requests": 0}),
-            "task_cost": ({"usd": self.cost_meter.task_usd, "unpriced_requests": self.cost_meter.task_unpriced}
+            "task_cost": ({"usd": self.cost_meter.task_usd, "amounts": dict(self.cost_meter.task_amounts),
+                           "unpriced_requests": self.cost_meter.task_unpriced}
                           if getattr(self, "cost_meter", None) is not None else None),
             "message_statistics": self._build_message_statistics(),
             "session_memory": self.session_memory_manager.export_state(),

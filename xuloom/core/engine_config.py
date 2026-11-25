@@ -153,9 +153,11 @@ class EngineConfig:
     trace_exporters: Tuple[Any, ...] = ()
     """Objects with ``export(span)`` receiving run/model/tool spans. Env adds ``XULOOM_TRACE_FILE`` / ``XULOOM_TRACE_OTLP``."""
     model_prices: Optional[Mapping[str, Any]] = None
-    """USD per million tokens by model ID or pattern; overrides ``~/.xuloom/pricing.json``."""
+    """Prices per million tokens (USD by default, or currency="CNY") by model ID or pattern; overrides ``~/.xuloom/pricing.json``."""
     max_cost_usd: Optional[float] = None
     """Per-task spending cap, subagents included. Env: ``XULOOM_MAX_COST_USD``."""
+    max_cost_cny: Optional[float] = None
+    """Independent per-task CNY cap. Env: ``XULOOM_MAX_COST_CNY``; no FX conversion."""
     record_responses: Optional[str] = None
     """Append every live model response of the top-level engine to this JSONL cassette
     (replay it with :class:`xuloom.testing.ReplayModel`). Env: ``XULOOM_RECORD_RESPONSES``."""
@@ -170,11 +172,12 @@ class EngineConfig:
         object.__setattr__(self, "plugins", tuple(self.plugins or ()))
         object.__setattr__(self, "disabled_plugins", frozenset(self.disabled_plugins or ()))
         object.__setattr__(self, "trace_exporters", tuple(self.trace_exporters or ()))
-        if self.max_cost_usd is not None:
-            value = float(self.max_cost_usd)
-            if value != value or value < 0 or value == float("inf"):
-                raise ValueError("max_cost_usd must be a non-negative number")
-            object.__setattr__(self, "max_cost_usd", value)
+        for name in ("max_cost_usd", "max_cost_cny"):
+            if getattr(self, name) is not None:
+                value = float(getattr(self, name))
+                if value != value or value < 0 or value == float("inf"):
+                    raise ValueError(f"{name} must be a non-negative number")
+                object.__setattr__(self, name, value)
 
     @classmethod
     def field_names(cls) -> FrozenSet[str]:
@@ -198,9 +201,16 @@ class EngineConfig:
                 max_cost = float(env["XULOOM_MAX_COST_USD"])
             except ValueError as error:
                 raise ValueError("XULOOM_MAX_COST_USD must be a number") from error
+        cny_cost = self.max_cost_cny
+        if cny_cost is None and str(env.get("XULOOM_MAX_COST_CNY", "") or "").strip():
+            try:
+                cny_cost = float(env["XULOOM_MAX_COST_CNY"])
+            except ValueError as error:
+                raise ValueError("XULOOM_MAX_COST_CNY must be a number") from error
         return dataclasses.replace(
             self,
             max_cost_usd=max_cost,
+            max_cost_cny=cny_cost,
             record_responses=(self.record_responses if self.record_responses is not None
                               else (env.get("XULOOM_RECORD_RESPONSES", "") or None)),
             cwd=os.path.abspath(self.cwd or os.getcwd()),

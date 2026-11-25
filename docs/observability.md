@@ -44,17 +44,19 @@ export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic <base64(public_key:secret
 
 ## 价格
 
-Xuloom 不内置价格表（价格经常变化，不同服务商也不一样），需要按自己使用的模型配置，单位是每百万 token 的美元价格：
+Xuloom 不内置价格表（价格经常变化，不同服务商也不一样），需要按自己使用的模型配置，单位为每百万 token 的原币价格，默认美元；人民币价格加 `"currency": "CNY"`：
 
 ```json
 // ~/.xuloom/pricing.json
 {"models": {
   "claude-sonnet-*": {"input": 3, "output": 15, "cache_write": 3.75, "cache_read": 0.3},
-  "gpt-4.1": {"input": 2, "output": 8}
+  "gpt-4.1": {"input": 2, "output": 8},
+  "@example-connection/example-model": {"input": 28.4, "output": 142, "currency": "CNY"}
 }}
 ```
 
 - `EngineConfig(model_prices={...})` 的同名条目优先于文件。
+- 人民币与美元分别累计，不自动换汇。`token_usage.cost_amount` / `cost_currency` 表示本次请求费用，`task_costs` / `session_costs` 与 `engine.session_cost["amounts"]` 保存各币种小计。旧 `*_usd` 字段只表示美元部分；人民币请求的 `cost_usd` 为 `None`，不代表未计价。CLI 状态、桌面每轮费用和上下文栏均显示原币。
 - 文件还可以写 `"max_cost_usd": 0.5`，作为没有通过 `EngineConfig` 或 `XULOOM_MAX_COST_USD` 设置时的任务上限。桌面端 **设置 → 费用** 编辑的就是这个文件。
 - 键可以是精确模型 ID，也可以是 `fnmatch` 通配符；精确 ID 优先。
 - `input_tokens` 不含缓存读写，缓存读写按 `cache_read` / `cache_write` 单独计价。这两项缺省时按 `input` 价格计算，只会高估，不会低估。
@@ -75,11 +77,13 @@ Xuloom 不内置价格表（价格经常变化，不同服务商也不一样）�
 上限是**停止条件，不是账单保证**：达到上限后不再发出新的请求，但无法让最终账单绝不超过设定值。
 
 ```python
-EngineConfig(max_cost_usd=0.50)   # 或环境变量 XULOOM_MAX_COST_USD=0.50
+EngineConfig(max_cost_usd=0.50, max_cost_cny=5)  # 或 XULOOM_MAX_COST_USD / XULOOM_MAX_COST_CNY
 ```
 
 - 上限按“任务”计算：顶层引擎每开始一个新任务就清零。当前任务的花费随会话保存，程序重启后恢复（resume）同一任务时继续累计，不会清零。
 - 子代理共享父任务的计数器和上限。
+- 人民币上限为 `max_cost_cny`（配置文件同名），和美元独立检查；设置任一预算时，所有使用的币种必须有对应预算，否则拒绝新请求，不进行隐式汇率换算。旧配置仍默认 USD。
+- 评测报告新增 `costs` 原币小计；`max_cost_usd` 检查遇到人民币消费时不判为通过，避免把人民币费用当成零美元。
 - 每次模型请求之前检查。已达到上限、即将调用的模型没有价格，或本任务已有未计价的请求时，任务以 `cost_limit` 结束（CLI 退出码 8），不会发出这次请求。设了上限却无法计价时一律拒绝，避免花费不受控制。
 - 压缩和记忆提取在发出每个请求前也做同样的检查；任务在压缩前就已达到上限时，直接以 `cost_limit` 结束，不再压缩。
 - 已经发出的请求不会被中断。最后一次请求、并行子代理同时在途的请求，都会完成并计费，所以最终花费可能超过上限；并行越多，可能超出越多。

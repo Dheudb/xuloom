@@ -500,14 +500,17 @@ class DesktopBridge:
 
     def pricing(self, method, params):
         """Model prices and the task cost cap kept in ~/.xuloom/pricing.json (shared with the CLI)."""
-        from xuloom.observability.cost import load_pricing_settings, pricing_path, save_pricing_settings
+        from xuloom.observability.cost import load_pricing_settings, pricing_path, save_pricing_settings, load_cny_limit, price_dict
         if method == "pricing.save":
             models = params.get("models") or {}
             if not isinstance(models, dict):
                 raise ValueError("models must be an object of model -> prices")
             cap = params.get("maxCostUsd")
-            save_pricing_settings(models, None if cap in (None, "") else float(cap))
+            cny = params.get("maxCostCny", load_cny_limit())
+            save_pricing_settings(models, None if cap in (None, "") else float(cap),
+                                  max_cost_cny=None if cny in (None, "") else float(cny))
         prices, cap = load_pricing_settings()
+        cny_cap = load_cny_limit()
         engine = self.engine
         if method in {"pricing.save", "pricing.reload"} and engine is not None:
             # The open conversation uses the new prices and cap from its next request
@@ -518,10 +521,12 @@ class DesktopBridge:
             engine.cost_meter.prices = merged
             if engine.config.max_cost_usd is None:
                 engine.cost_meter.limit_usd = cap
-        return {"models": {name: {key: value for key, value in vars(price).items() if value is not None}
-                           for name, price in prices.items()},
-                "maxCostUsd": cap, "path": str(pricing_path()),
-                "capFromEnvironment": bool(os.environ.get("XULOOM_MAX_COST_USD"))}
+            if getattr(engine.config, "max_cost_cny", None) is None:
+                engine.cost_meter.limit_cny = cny_cap
+        return {"models": {name: price_dict(price) for name, price in prices.items()},
+                "maxCostUsd": cap, "maxCostCny": cny_cap, "path": str(pricing_path()),
+                "capFromEnvironment": bool(os.environ.get("XULOOM_MAX_COST_USD")),
+                "cnyCapFromEnvironment": bool(os.environ.get("XULOOM_MAX_COST_CNY"))}
 
     async def dispatch(self, method, params):
         if method in {"computerUse.get", "computerUse.set"}:

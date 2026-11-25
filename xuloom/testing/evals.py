@@ -80,6 +80,7 @@ class CaseResult:
     cost_usd: Optional[float]
     tools: List[str]
     error: Optional[str] = None
+    costs: Optional[Dict[str, float]] = None
 
 
 @dataclass
@@ -186,6 +187,7 @@ async def run_case(case: EvalCase, config, *, workspace: Path, permission_handle
     started = time.monotonic()
     events: List[dict] = []
     error = None
+    costs: Dict[str, float] = {}
     usage = {"input": 0, "output": 0, "requests": 0}
     try:
         async with QueryEngine(case_config, permission_handler=permission_handler) as engine:
@@ -197,7 +199,9 @@ async def run_case(case: EvalCase, config, *, workspace: Path, permission_handle
                     usage["input"] += int(event.get("input_tokens") or 0)
                     usage["output"] += int(event.get("output_tokens") or 0)
                     usage["requests"] += 1
-            cost = None if engine.cost_meter.task_unpriced else round(engine.cost_meter.task_usd, 6)
+            costs = dict(engine.cost_meter.task_amounts)
+            # A USD-only assertion cannot certify non-USD expenditure without an exchange rate.
+            cost = None if engine.cost_meter.task_unpriced or any(k != "USD" for k in costs) else round(engine.cost_meter.task_usd, 6)
     except Exception as error_:  # a crashing case is a failed case, not a failed eval run
         error, cost = f"{type(error_).__name__}: {error_}", None
     finally:
@@ -213,7 +217,7 @@ async def run_case(case: EvalCase, config, *, workspace: Path, permission_handle
     passed = error is None and all(check["passed"] for check in checks)
     return CaseResult(id=case.id, passed=passed, reason=str(result.get("reason", "")), text=text[:4000], checks=checks,
                       seconds=seconds, requests=usage["requests"], input_tokens=usage["input"],
-                      output_tokens=usage["output"], cost_usd=cost, tools=tools, error=error)
+                      output_tokens=usage["output"], cost_usd=cost, tools=tools, error=error, costs=costs)
 
 
 async def run_eval(cases: Iterable[EvalCase], config, *, workdir=None, permission_handler=None,

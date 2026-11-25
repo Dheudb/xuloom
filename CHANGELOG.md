@@ -4,6 +4,12 @@
 
 ## [未发布]
 
+## [0.2.13] - 2026-11-25
+
+### 新增
+- 原生人民币计价：每个模型可选 USD / CNY，CLI、桌面回复和上下文面板分别显示原币小计；美元字段保留兼容，不混算币种、不自动换汇。
+- 人民币任务预算 `max_cost_cny` / `XULOOM_MAX_COST_CNY`，与美元预算独立检查；压缩、子代理、会话恢复和设置备份沿用同一费用记录，无新增依赖、默认 Prompt 或模型请求。
+
 ## [0.2.12] - 2026-11-20
 
 ### 修复
@@ -263,7 +269,8 @@
 - 引擎拆分为 `xuloom/core/engine_parts/` 下的多个 mixin，主循环拆成多个阶段方法。
 - 新增不可变的 `EngineConfig` 和顶层公开 API（`from xuloom import ...`）。
 
-[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.12...HEAD
+[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.13...HEAD
+[0.2.13]: https://github.com/Dheudb/xuloom/compare/v0.2.12...v0.2.13
 [0.2.12]: https://github.com/Dheudb/xuloom/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/Dheudb/xuloom/compare/v0.2.10...v0.2.11
 [0.2.10]: https://github.com/Dheudb/xuloom/compare/v0.2.9...v0.2.10

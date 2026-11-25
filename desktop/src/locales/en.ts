@@ -2,6 +2,16 @@
 // placeholder filled with a value that is never translated. English may use plural forms:
 // "{count, plural, one {# file} other {# files}}". `npm run i18n:check` lists messages without an entry.
 export const english: Record<string, string> = {
+  "按每百万 tokens 的原币价格填写，可选择美元或人民币。费用分别累计，不自动换汇；未填写价格的模型标为“未计价”。": "Enter original-currency prices per million tokens in USD or CNY. Currencies are totaled separately without conversion; models without prices are marked unpriced.",
+  "本地模型或免费额度填 0，按所选币种计为零。模型名支持通配符，例如": "For local or free models, enter 0 in the chosen currency. Model names support patterns, e.g.",
+  "币种": "Currency",
+  "价格币种": "Price currency",
+  "每个任务的花费上限（人民币）": "Per-task spending cap (CNY)",
+  "人民币任务花费上限": "CNY task spending cap",
+  "设置预算后，每个使用的币种都需要对应上限；美元和人民币分别检查，不自动换算。": "When a budget is set, each currency used needs its own cap. USD and CNY are checked separately without conversion.",
+  "提示：环境变量 XULOOM_MAX_COST_CNY 已设置，它优先于这里的人民币上限。": "XULOOM_MAX_COST_CNY is set and overrides the CNY cap here.",
+  "本会话费用：{amount}{value}{value2}": "Session cost: {amount}{value}{value2}",
+  " · 每个任务上限 ¥{limitCny}": " · Per-task cap ¥{limitCny}",
   "选中文字过长，请缩小选区后重试。": "The selection is too long. Select a shorter passage.",
   "选中文字操作": "Selected text actions",
   "添加到对话": "Add to chat",

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { LoaderCircle, ChevronRight } from "lucide-react";
 import type { ModelConfig } from "./types";
 import { getLanguage, t, tServer, tx } from "./i18n";
+import { formatCosts } from "./usage-cost";
 type Snapshot = { estimatedTokens: number; window: number; reserve: number; source: string; estimator: string;
   components: { system: number; tools: number; conversation: number; memoryCharacters: number };
   breakdown?: { messages: number; tools: number; mcp: number; system: number; memory: number;
@@ -9,7 +10,7 @@ type Snapshot = { estimatedTokens: number; window: number; reserve: number; sour
     memoryFiles: { path: string; truncated: boolean }[] };
   last?: { before: number; after: number; elapsedSeconds: number; backend: string };
   auxiliary: Record<string, { calls: number; input_tokens: number; output_tokens: number; cost_usd?: number }>;
-  cost?: { usd: number; unpriced_requests: number; limitUsd: number | null } };
+  cost?: { usd: number; amounts?: Record<string, number>; unpriced_requests: number; limitUsd: number | null; limitCny?: number | null } };
 function ContextUsage({ snapshot }: { snapshot: Snapshot }) {
   const { estimatedTokens, window, reserve, breakdown, components } = snapshot;
   const locale = getLanguage() === "en" ? "en" : "zh-CN";
@@ -102,7 +103,7 @@ export default function ContextPanel({ invoke, busy, working, model, compactErro
       {snapshot ? <>
         <ContextUsage snapshot={snapshot} />
         <p className="fine-print">{tx("{value}实际用量以供应商回执为准。", { value: snapshot.source === "conservative_default" ? t("模型窗口未声明，当前采用保守值；可在模型的更多设置中填写。") : t("按当前模型配置估算。") })}</p>
-        {snapshot.cost && <p className="fine-print context-cost">{tx("本会话费用：${usd}{value}{value2}", { usd: snapshot.cost.usd.toFixed(snapshot.cost.usd > 0 && snapshot.cost.usd < 0.01 ? 4 : 2), value: snapshot.cost.unpriced_requests ? t("（另有 {unpriced_requests} 次请求未计价）", { unpriced_requests: snapshot.cost.unpriced_requests }) : "", value2: snapshot.cost.limitUsd !== null ? t(" · 每个任务上限 ${limitUsd}", { limitUsd: snapshot.cost.limitUsd }) : "" })}</p>}
+        {snapshot.cost && <p className="fine-print context-cost">{tx("本会话费用：{amount}{value}{value2}", { amount: formatCosts(snapshot.cost.amounts ?? { USD: snapshot.cost.usd }), value: snapshot.cost.unpriced_requests ? t("（另有 {unpriced_requests} 次请求未计价）", { unpriced_requests: snapshot.cost.unpriced_requests }) : "", value2: (snapshot.cost.limitUsd != null ? t(" · 每个任务上限 ${limitUsd}", { limitUsd: snapshot.cost.limitUsd }) : "") + (snapshot.cost.limitCny != null ? t(" · 每个任务上限 ¥{limitCny}", { limitCny: snapshot.cost.limitCny }) : "") })}</p>}
         {snapshot.last && <p className="fine-print">{tx("上次压缩：{before} → {after} tokens · {elapsedSeconds} 秒", { before: snapshot.last.before.toLocaleString(), after: snapshot.last.after.toLocaleString(), elapsedSeconds: snapshot.last.elapsedSeconds })}</p>}
         {Object.entries(snapshot.auxiliary).map(([name, value]) => <p className="fine-print" key={name}>{tx("{value}：{calls} 次 · 输入 {input_tokens} / 输出 {output_tokens} tokens", { value: ({ compaction: t("压缩"), native_compaction: t("原生压缩"), session_memory: t("会话摘要"), long_term_memory: t("长期记忆") } as Record<string, string>)[name] || name, calls: value.calls, input_tokens: value.input_tokens.toLocaleString(), output_tokens: value.output_tokens.toLocaleString() })}</p>)}
       </> : !error && <p>{t("正在读取…")}</p>}
