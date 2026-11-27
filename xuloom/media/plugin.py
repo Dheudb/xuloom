@@ -74,6 +74,27 @@ async def run_control(engine, action, identity, wait_ms=0):
     return receipt, public(load(engine.tool_context, identity))
 
 
+async def run_submit(engine, values):
+    """Explicit user submission; use the ordinary tool gate and durable media job."""
+    import re
+    from xuloom.media.jobs import load, public
+    from xuloom.media.tool import MediaInput
+    from xuloom.terminal_actions import require_idle
+    require_idle(engine)
+    values = MediaInput(**{**values, "action": "submit"}).model_dump()
+    engine.require_writer()
+    if not engine.persist_session_state():
+        raise OSError("Session could not be saved; generation was not submitted")
+    if "media_tool" not in engine.activate_tools(["media_tool"]):
+        raise ValueError("Media plugin is disabled or unavailable in this isolation mode")
+    engine.abort_event.clear()
+    receipt = await engine._execute_tool_wrapper({"id": "media-submit-" + uuid.uuid4().hex,
+        "name": "media_tool", "input": values}, lambda _: None)
+    match = re.search(r"(?m)^- job_id: (media-[a-f0-9]{32})$", receipt.get("content", ""))
+    record = public(load(engine.tool_context, match.group(1))) if match else None
+    return receipt, record
+
+
 async def _control(engine, context, action, identity):
     context.emit({"type": "operation_started", "operation": "media", "jobId": identity})
     try:

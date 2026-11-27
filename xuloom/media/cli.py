@@ -30,16 +30,52 @@ def configure(parent):
             item.add_argument("--wait-ms", type=int, default=0)
     actions.add_parser("models", help="List configured generation models without keys or API calls").add_argument("--json", action="store_true")
     model = actions.add_parser("add", help="Configure a generation model without writing JSON")
-    model.add_argument("--kind", choices=("image", "video", "speech", "sound", "music"), required=True)
+    model.add_argument("--kind", choices=("image", "image-edit", "video", "speech", "sound", "music"), required=True)
     model.add_argument("--api-url", required=True)
     model.add_argument("--model", required=True)
     model.add_argument("--api-key-env", help="Environment variable containing your key; otherwise ask privately on an interactive terminal")
     model.add_argument("--connection", help="Existing internal connection for editing a listed model")
     model.add_argument("--id", help="Existing internal model ID for editing; otherwise add a new model")
     model.add_argument("--json", action="store_true")
+    remove = actions.add_parser("remove-model", help="Remove one model; existing provider jobs are kept")
+    remove.add_argument("--connection", required=True)
+    remove.add_argument("--model", required=True, help="Internal model entry ID from media models")
+    remove.add_argument("--yes", action="store_true")
+    remove.add_argument("--json", action="store_true")
+    generate = actions.add_parser("generate", help="Generate directly through the media tool; no chat model call")
+    generate.add_argument("--connection", required=True)
+    generate.add_argument("--model", required=True, help="Internal model entry ID from media models")
+    generate.add_argument("--prompt", required=True, help="Generation prompt; - reads UTF-8 stdin")
+    generate.add_argument("--inputs", default="{}", help="JSON object of standard generation controls")
+    generate.add_argument("--image", action="append", default=[], help="Reference image path (repeatable)")
+    generate.add_argument("--output-dir")
+    generate.add_argument("--wait-ms", type=int, default=30000)
+    generate.add_argument("--cwd", default=os.getcwd())
+    generate.add_argument("--session")
+    generate.add_argument("--permission", choices=("ask", "full"), default="ask")
+    generate.add_argument("--json", action="store_true")
 
 
 async def dispatch(args, emit):
+    if args.action == "remove-model":
+        if not args.yes:
+            raise ValueError("Use --yes to remove this model; existing provider jobs will not be cancelled")
+        return {"models": config.remove_model(args.connection, args.model)}
+    if args.action == "generate":
+        from xuloom.cli import open_engine
+        from xuloom.media.plugin import run_submit
+        from xuloom.media.tool import MediaInput
+        values = MediaInput(action="submit", connection=args.connection, model=args.model,
+            prompt=sys.stdin.read() if args.prompt == "-" else args.prompt, inputs=json.loads(args.inputs),
+            image_paths=args.image, output_dir=args.output_dir, wait_ms=args.wait_ms).model_dump()
+        engine = await open_engine(args, emit)
+        try:
+            receipt, record = await run_submit(engine, values)
+            needed = bool(getattr(engine, "_noninteractive_approval_required", False))
+            return {"ok": not receipt["is_error"], "reason": "approval_required" if needed else "failed" if receipt["is_error"] else "completed",
+                    "session_id": engine.session_id, "receipt": receipt, "job": record, "generation_completed": bool(record and record["phase"] == "downloaded")}
+        finally:
+            await engine.aclose()
     if args.action == "models":
         return {"models": config.public_models()}
     if args.action == "add":

@@ -113,6 +113,7 @@ def parser():
             item.add_argument("prompt", nargs="?", help="Task text, or - to read UTF-8 stdin")
             item.add_argument("--input-stream", action="store_true", help='Read UTF-8 JSONL input/stop/withdraw commands from piped stdin during execution')
             item.add_argument("--resume", action="store_true", help='Continue the saved stopped task without replacing its instructions')
+            item.add_argument("--attach", action="append", default=[], help="Local file/image to attach (repeatable; session-owned copy)")
         else:
             item.add_argument("action", choices=("start", "run", "pause", "resume", "cancel", "accept", "status") if name == "goal" else ("add", "watch", "list", "pause", "resume", "cancel", "serve"))
             item.add_argument("prompt", nargs="?", help="Goal objective or scheduled message")
@@ -167,9 +168,9 @@ def parser():
 
 
 
-async def stream(engine, prompt, skills, emit, *, resume=False):
+async def stream(engine, prompt, skills, emit, *, resume=False, **turn_options):
     final = None
-    async for event in engine.submit_message(prompt, selected_skills=skills, sys_print_callback=lambda _: None, resume=resume):
+    async for event in engine.submit_message(prompt, selected_skills=skills, sys_print_callback=lambda _: None, resume=resume, **turn_options):
         if event["type"] == "final": final = event["result"]
         else: await emit(event)
     final = final or {"ok": False, "reason": "missing_result"}
@@ -177,7 +178,7 @@ async def stream(engine, prompt, skills, emit, *, resume=False):
     return {**final, "ok": False, "execution_reason": final["reason"], "reason": needed} if needed else final
 
 
-async def streamed_input(engine, prompt, skills, emit, *, resume=False):
+async def streamed_input(engine, prompt, skills, emit, *, resume=False, **turn_options):
     from xuloom.terminal_input import PipeInput
     reader = PipeInput(sys.stdin)
     async def incoming():
@@ -203,7 +204,7 @@ async def streamed_input(engine, prompt, skills, emit, *, resume=False):
             except (ValueError, OSError) as error:
                 await emit({'type':'input_error','message':str(error)})
     task=asyncio.create_task(incoming())
-    try: return await stream(engine,prompt,skills,emit,resume=resume)
+    try: return await stream(engine,prompt,skills,emit,resume=resume,**turn_options)
     finally:
         task.cancel();await asyncio.gather(task,return_exceptions=True)
 
@@ -561,13 +562,19 @@ async def dispatch(args, emit):
             complete = receipt["ok"] and receipt["data"]["runs"][0]["status"] == "completed"
             result = {"ok": bool(complete), "reason": "completed" if complete else "blocked", "receipt": receipt}
         elif args.command == "exec":
-            if args.resume and (args.prompt or args.skill or not args.session):
-                raise ValueError('--resume requires --session and cannot replace the prompt or Skills')
+            if args.resume and (args.prompt or args.skill or args.attach or not args.session):
+                raise ValueError('--resume requires --session and cannot replace the prompt, Skills or attachments')
             if args.input_stream and (sys.stdin.isatty() or args.prompt=='-' or not args.prompt and not args.resume):
                 raise ValueError('--input-stream requires piped JSONL stdin and an explicit prompt or --resume')
             prompt = '' if args.resume else sys.stdin.read() if args.prompt == "-" or args.prompt is None and not sys.stdin.isatty() else args.prompt
             if not args.resume and (not prompt or not prompt.strip()): raise ValueError("Task text is required")
-            result = await (streamed_input if args.input_stream else stream)(engine, prompt, args.skill, emit, resume=args.resume)
+            options = {}
+            if args.attach:
+                from xuloom.terminal_actions import AttachmentDraft
+                draft = AttachmentDraft()
+                draft.add(engine, args.attach)
+                options = draft.options(engine, prompt)
+            result = await (streamed_input if args.input_stream else stream)(engine, prompt, args.skill, emit, resume=args.resume, **options)
         elif args.command == "goal":
             if args.action == "start":
                 goals.create(engine, args.prompt, args.criterion, checks=json.loads(args.checks), rounds=args.rounds,

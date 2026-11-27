@@ -4,6 +4,14 @@
 
 ## [未发布]
 
+## [0.2.15] - 2026-11-27
+
+### CLI 日常入口对齐
+- 新增 `/media` 分类选择、模型增删改、直接生成及已有任务控制；脚本支持 `media generate` 和 `remove-model`。复用媒体插件的审批、下载校验和持久回执，不调用聊天模型，未知提交不自动重试。
+- 新增 `/attach` 添加、查看和移除下一条消息附件，以及本地 `exec --attach`；复用桌面附件副本、大小校验、视觉输入和历史格式，恢复任务不能替换附件。
+- `/mode`、`/permissions`、`/sandbox` 支持交互选择和直接切换；权限使用桌面共用会话索引，回到 ask 清除记忆授权；活动任务阻止切换，隔离不可用时拒绝，设置保存失败回退。
+- 保持默认提示词与无附件请求路径不变，不新增依赖或默认模型请求，未接入 pVisor。验收仅使用本地模拟服务。
+
 ## [0.2.14] - 2026-11-25
 
 ### 新增
@@ -275,7 +283,8 @@
 - 引擎拆分为 `xuloom/core/engine_parts/` 下的多个 mixin，主循环拆成多个阶段方法。
 - 新增不可变的 `EngineConfig` 和顶层公开 API（`from xuloom import ...`）。
 
-[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.14...HEAD
+[未发布]: https://github.com/Dheudb/xuloom/compare/v0.2.15...HEAD
+[0.2.15]: https://github.com/Dheudb/xuloom/compare/v0.2.14...v0.2.15
 [0.2.14]: https://github.com/Dheudb/xuloom/compare/v0.2.13...v0.2.14
 [0.2.13]: https://github.com/Dheudb/xuloom/compare/v0.2.12...v0.2.13
 [0.2.12]: https://github.com/Dheudb/xuloom/compare/v0.2.11...v0.2.12

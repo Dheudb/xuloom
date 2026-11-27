@@ -1,5 +1,21 @@
 # 生成模型
 
+## CLI 模型选择与直接生成
+
+交互终端输入 `/media`，按用途选择已有模型、添加／编辑／移除配置、生成，以及查询或取消本会话已有任务。配置与桌面共用，选择菜单不访问模型或生成服务。图片可填写尺寸和比例、附参考图，视频可填写时长和比例，语音可选择音色和速度；参数支持范围由现有供应商适配器校验。
+
+脚本生成不经过聊天模型，使用 `xuloom media models --json` 返回的 `connectionId` 和内部模型 `id`：
+
+```powershell
+xuloom media generate --connection CONNECTION_ID --model MODEL_ENTRY_ID --prompt "生成内容" --permission full --json
+xuloom media generate --connection CONNECTION_ID --model MODEL_ENTRY_ID --prompt "修改参考图" --image "C:\data\reference.png" --inputs '{"size":"1024x1024"}' --permission full --json
+xuloom media remove-model --connection CONNECTION_ID --model MODEL_ENTRY_ID --yes --json
+```
+
+非交互默认 `--permission ask`，需要审批时返回 `approval_required`，不会偷偷提交；`full` 也不能绕过 Plan、角色或系统隔离。新任务返回 `session_id` 和持久任务回执；有 `job.id` 时后续使用 `media status/cancel JOB_ID --session SESSION_ID`，不重复生成。`generation_completed` 只有文件已下载并校验成功才为 true。更改配置不修改已有任务冻结的目标；删除配置不会取消供应商任务。未配置对应供应商或账户权限时不会因为出现菜单就获得生成能力。
+
+## 桌面与共享配置
+
 媒体生成由内置插件 `media` 提供（`xuloom/media/plugin.py`），默认开启。不需要时运行 `xuloom plugins disable media`：之后新会话不再提供 `media_tool`，`xuloom media` 命令与桌面端的生成模型设置接口也会停用；已保存的连接与任务记录保留，重新启用即可恢复。
 
 在 **设置 → 生成模型**，分别为图片、视频、语音、音效、音乐添加模型。每个模型只填写 **API 地址、API Key、模型名**。所有输入初始留空，不预填供应商，不需要创建“媒体服务”、填写连接 ID、选择协议、设置输入字段或编写参数 JSON。

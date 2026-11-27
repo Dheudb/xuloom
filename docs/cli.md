@@ -12,7 +12,7 @@ Windows 桌面包可运行 `Install-CLI.cmd` 注册用户级 `xuloom` 命令，�
 
 ## 安装与启动
 
-基础 CLI 需要 Python 3.9+。建议使用 Python 3.12 的虚拟环境，便于同时使用 MCP。
+基础 CLI 需要 Python 3.10+。建议使用 Python 3.12 的虚拟环境，便于同时使用 MCP。
 
 ```bash
 python -m venv .venv
@@ -47,6 +47,12 @@ xuloom --resume SESSION_ID      恢复指定会话
 |---|---|
 | `/model`、`/model status` | 从已保存连接与模型列表选择、查看当前连接 |
 | `/model list`、`/model use <编号>` | 列出所有已保存模型、按编号直接切换 |
+| `/media` | 分类选择媒体模型、生成、配置及查看任务；不调用聊天模型 |
+| `/attach "路径" ["路径"]` | 为下一条普通消息添加本地文件或图片 |
+| `/attach list`、`/attach remove <编号或ID>`、`/attach clear` | 查看、移除待发送附件；不删除已保存的附件文件 |
+| `/mode [solo\|auto\|ultra\|status]` | 菜单或直接切换协作档位，独立于推理强度 |
+| `/permissions [ask\|full\|status]` | 切换审批策略；回到 ask 会清除会话记忆授权 |
+| `/sandbox [host\|workspace\|status]` | 切换系统执行隔离；不可用时拒绝，不降级为宿主执行 |
 | `/palette` | 命令面板 |
 | `/plan`、`/plan off` | 切换规划模式 |
 | `/coordinator` | 多代理协调模式 |
@@ -58,6 +64,16 @@ xuloom --resume SESSION_ID      恢复指定会话
 | `/continue` | 继续当前会话中被停止的原任务 |
 | `/pending`、`/withdraw <ID>` | 查看、撤回尚未送达的补充要求 |
 | `/quit` | 退出 |
+
+模式、权限和隔离设置仅作用于当前会话；新会话沿用当前交互会话的设置。恢复会话时权限读取与桌面共用的会话索引；非交互 `exec` 的 `--permission` 仍明确优先，默认 ask。有运行中的任务、子代理或后台命令时不能切换设置。
+
+附件在选择时保存为会话拥有的副本，最多 10 个，图片单个 20 MiB、其他文件单个 64 MiB。图片作为视觉输入，其他文件提供可读取的路径，不预先把所有文件内容塞进上下文。不带附件的请求保持原样。消息保存成功后清空待发送列表；尚未保存的选择保留。切换会话前先发送或 `/attach clear`，`/continue` 不替换原任务的附件。
+
+```powershell
+xuloom exec "分析这张图和文档" --attach "C:\data\图.png" --attach "C:\data\资料.pdf" --json
+```
+
+媒体使用 `/media` 菜单，或 `/media generate|list|add|edit|remove|jobs|status|cancel`。Key 隐藏输入，保存和选择不发生成请求。提交需要明确确认并通过现有权限检查；结果未知时不会自动重复提交。脚本命令和示例见[媒体生成](media.md)。
 
 `/review` 不带参数时审查当前未提交的改动（已暂存、未暂存和未跟踪文件）；也可以指定一个提交（`/review HEAD`）或范围（`/review HEAD~3..HEAD`、`/review main...HEAD`）。范围在发送前用 Git 校验，并固定为完整提交哈希；没有改动或范围无效时直接提示，不发起模型请求。`--` 之后的文字作为审查重点交给模型，例如 `/review main...HEAD -- 重点看并发和错误处理`。审查回合只开放文件读取、搜索和固定范围的 Git 查看工具。会话 Hook 暂停，只保留 `BeforeToolUse` 的拒绝决定，例如禁止读取密钥文件的规则仍然生效；这些 Hook 在审查中改写的参数和附加的文字会被忽略。即使会话处于完全访问或 Ultra，审查也不会调用任意命令、修改文件或派发子代理。Git 查看工具在宿主机上以只读方式运行 Git（禁用过滤器、分页器和远程拉取），开启系统工作区隔离时也是如此。两点范围 `A..B` 与 `git diff A B` 相同，直接比较两个提交的快照；三点范围比较共同祖先与 B，需要共同祖先。非交互场景可手动用 `xuloom exec --skill code-review "审查 main...HEAD 的改动"`，该用法沿用普通执行权限。
 

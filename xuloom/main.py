@@ -339,6 +339,10 @@ def run_command_palette(tui: InteractiveTerminalTUI) -> str:
             {"value": "/team", "label": "View team status"},
             {"value": "/model", "label": "Switch model/provider"},
             {"value": "/model status", "label": "Show current model runtime"},
+            {"value": "/media", "label": "Media models and generation / 媒体模型与生成"},
+            {"value": "/attach", "label": "List next-message attachments / 查看待发送附件"},
+            {"value": "/permissions", "label": "Change permissions / 切换权限"},
+            {"value": "/sandbox", "label": "Change execution isolation / 切换执行隔离"},
             {"value": "/thinking", "label": "Show model Thinking and effort settings"},
             {"value": "/sessions", "label": "List session history"},
             {"value": "/resume", "label": "Open a saved session"},
@@ -528,6 +532,8 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
     engine = None
     tui = InteractiveTerminalTUI(console, lambda: engine)
     live = None
+    from xuloom.terminal_actions import AttachmentDraft, settings_command
+    attachment_draft = AttachmentDraft()
 
     @asynccontextmanager
     async def terminal_dialog():
@@ -538,7 +544,7 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
             yield
 
     async def permission_prompt(request):
-        if auto_approve and not request.classifier_input.get("forced_prompt_reasons"):
+        if engine.permission_manager.approval_policy.mode == "full" and not request.classifier_input.get("forced_prompt_reasons"):
             console.print(f"[dim]Auto-approved: {request.tool_name}[/dim]")
             return "y"
         async with terminal_dialog():
@@ -617,6 +623,8 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
     engine.tool_context["ask_user_callback"] = ask_user
 
     def require_idle_session():
+        if attachment_draft.items:
+            raise ValueError("Send or remove pending attachments with /attach clear before switching sessions")
         if (any(not task.done() for task in engine.tool_context["subagent_tasks"].tasks.values())
             or any(row.get("status") == "running" for row in engine.tool_context["command_sessions"].records.values())
             or any(row.get("status") == "running" for row in engine.shell_task_manager.list_tasks())):
@@ -658,6 +666,9 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
                 resume_session_id = None
         if resume_session_id and resume_session_id != "__latest__":
             if engine.load_session(resume_session_id):
+                if not auto_approve:
+                    from xuloom.terminal_actions import restore_permissions
+                    restore_permissions(engine)
                 console.print(
                     Panel(
                         engine.get_resume_summary(),
@@ -710,6 +721,21 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
             normalized_input = user_input.strip().lower()
             turn_options = {}
 
+            command_name = normalized_input.split(maxsplit=1)[0]
+            if command_name in {"/mode", "/permissions", "/sandbox", "/attach", "/media"}:
+                try:
+                    with tui.suspend_streaming():
+                        if command_name == "/attach":
+                            attachment_draft.command(engine, user_input, console)
+                        elif command_name == "/media":
+                            from xuloom.media.terminal import command as media_command
+                            await media_command(engine, user_input, tui, console)
+                        else:
+                            await settings_command(engine, user_input, tui, console)
+                except (ValueError, OSError) as error:
+                    console.print(str(error), style="red", markup=False)
+                continue
+
             if normalized_input in {"/quit", "/q", "/exit"}:
                 console.print("[dim]Session terminated.[/dim]")
                 break
@@ -740,11 +766,15 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
                     "  /coordinator      Toggle coordinator mode\n"
                     "  /coordinator off  Disable coordinator mode\n\n"
                     "[bold white]Inspect[/bold white]\n"
-                    "  /mode             View current mode\n"
+                    "  /mode [solo|auto|ultra|status]  Select collaboration mode\n"
+                    "  /permissions [ask|full|status] Select permissions\n"
+                    "  /media            Media models, generation and jobs\n"
+                    "  /attach <paths>   Attach files (quote paths with spaces)\n"
+                    "  /attach list|remove <number>|clear  Manage next-message files\n"
                     "  /todos            View structured todos\n"
                     "  /tools            View tool activity\n"
                     "  /agents           View subagent registry\n"
-                    "  /sandbox          View sandbox status\n"
+                    "  /sandbox [host|workspace|status] Select execution isolation\n"
                     "  /status           View runtime status\n"
                     "  /git              View repository and branch\n\n"
                     "  /summary [all]    View saved outputs, sources and tool counts\n"
@@ -796,10 +826,13 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
                     console.print("[dim]Cancelled.[/dim]")
                 continue
             elif normalized_input.startswith("/resume "):
+                require_idle_session()
                 items = user_input.split(" ")
                 if len(items) > 1:
                     sid = items[1]
                     if engine.load_session(sid):
+                        from xuloom.terminal_actions import restore_permissions
+                        restore_permissions(engine)
                         console.print(
                             Panel(
                                 engine.get_resume_summary(),
@@ -868,14 +901,8 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
                 else:
                     console.print("[red]Unknown /plan argument.[/red] Use: /plan, /plan off, /plan show, /plan clear")
                 continue
-            elif normalized_input == "/mode":
-                console.print(Panel(engine.get_mode_summary(), title="Session Mode", border_style="cyan", expand=False))
-                continue
             elif normalized_input == "/todos":
                 console.print(Panel(engine.get_todo_summary(), title="Structured Todos", border_style="cyan", expand=False))
-                continue
-            elif normalized_input == "/sandbox":
-                console.print(Panel(engine.get_sandbox_summary(), title="Sandbox Status", border_style="cyan", expand=False))
                 continue
             elif normalized_input == "/agents":
                 console.print(Panel(engine.get_agents_summary(), title="Subagent Registry", border_style="cyan", expand=False))
@@ -1034,6 +1061,10 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
                     continue
                 turn_options["display_text"], user_input = user_input.strip(), review_input
 
+            if attachment_draft.items and not turn_options.get("resume"):
+                if turn_options:
+                    raise ValueError("Send pending attachments in a normal message before using a special command")
+                turn_options.update(attachment_draft.options(engine, user_input))
             final_answer = ""
             receipt = {}
             turn_was_aborted = False
@@ -1065,6 +1096,7 @@ async def interactive_loop(resume_session_id: str = None, initial_prompt: str = 
                 turn_was_aborted = True
             finally:
                 tui.stop_streaming()
+                attachment_draft.consume_saved(engine)
 
             # Show whatever content was received (partial on abort, full on completion)
             display_text = final_answer or tui.current_turn_text.strip()
