@@ -260,6 +260,14 @@ class TerminalProcessTests(unittest.TestCase):
     tearDown = cli_fixture.CliTests.tearDown
     cli = cli_fixture.CliTests.cli
 
+    def test_help_displays_control_values_instead_of_treating_them_as_rich_styles(self):
+        process = subprocess.run([sys.executable, "-m", "xuloom"], input="/help\n/quit\n", text=True, encoding="utf-8",
+            cwd=self.root, env=self.env, capture_output=True, timeout=40)
+        self.assertEqual(process.returncode, 0, process.stderr)
+        for values in ("solo|auto|ultra|status", "ask|full|status", "host|workspace|status"):
+            self.assertIn(values, process.stdout)
+        self.assertEqual(self.requests, [])
+
     def test_exec_attachment_reaches_model_and_desktop_history_and_resume_cannot_replace_it(self):
         file = self.root / "附件 sample.txt"; file.write_text("source", encoding="utf-8")
         process, _, result = self.cli("exec", "inspect source", "--attach", str(file))
